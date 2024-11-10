@@ -23,6 +23,18 @@
      the patience to solve any about permission issues**
 > 6. ❌❌❌ **Due to permission reasons, there may be problems with installation on hackintosh**
 
+## 🚀 Install
+
+### Manually Install
+
+Download the latest version from [Releases](https://github.com/X1a0He/Adobe-Downloader/releases)
+
+### Homebrew
+
+```shell
+brew tap zach677/star && brew install adobedownloader
+```
+
 ## 📔Latest Log
 
 - For historical update logs, please go to [Update Log](update-log.md)
