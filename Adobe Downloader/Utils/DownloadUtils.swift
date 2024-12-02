@@ -1172,7 +1172,7 @@ class DownloadUtils {
             }
             
             guard !packagesToDownload.isEmpty else {
-                throw NetworkError.invalidData("没有找到可下载的包")
+                throw NetworkError.invalidData(String(localized: "没有找到可下载的包"))
             }
 
             let totalCount = packagesToDownload.count
@@ -1183,7 +1183,7 @@ class DownloadUtils {
                 }
                 
                 await MainActor.run {
-                    progressHandler(Double(index) / Double(totalCount), "正在下载 \(package.name)...")
+                    progressHandler(Double(index) / Double(totalCount), String(localized: "正在下载") + " \(package.name)...")
                 }
 
                 let destinationURL = tempDirectory.appendingPathComponent("\(package.name).zip")
@@ -1202,7 +1202,7 @@ class DownloadUtils {
             }
 
             await MainActor.run {
-                progressHandler(0.9, shouldProcess ? "正在安装组件..." : "正在完成下载...")
+                progressHandler(0.9, shouldProcess ? String(localized: "正在安装组件...") : String(localized: "正在完成下载..."))
             }
             
             let targetDirectory = "/Library/Application\\ Support/Adobe/Adobe\\ Desktop\\ Common"
@@ -1233,25 +1233,25 @@ class DownloadUtils {
                 let mkdirResult = await executePrivilegedCommand("/bin/mkdir -p \(packageDir)")
                 if mkdirResult.starts(with: "Error:") {
                     try? FileManager.default.removeItem(at: tempDirectory)
-                    throw NetworkError.installError("创建 \(package.name) 目录失败")
+                    throw NetworkError.installError(String(localized: "创建 \(package.name) 目录失败"))
                 }
 
                 let unzipResult = await executePrivilegedCommand("cd \(packageDir) && /usr/bin/unzip -o '\(tempDirectory.path)/\(package.name).zip'")
                 if unzipResult.starts(with: "Error:") {
                     try? FileManager.default.removeItem(at: tempDirectory)
-                    throw NetworkError.installError("解压 \(package.name) 失败: \(unzipResult)")
+                    throw NetworkError.installError(String(localized: "解压 \(package.name) 失败: \(unzipResult)"))
                 }
 
                 let chmodResult = await executePrivilegedCommand("/bin/chmod -R 755 \(packageDir)")
                 if chmodResult.starts(with: "Error:") {
                     try? FileManager.default.removeItem(at: tempDirectory)
-                    throw NetworkError.installError("设置 \(package.name) 权限失败: \(chmodResult)")
+                    throw NetworkError.installError(String(localized: "设置 \(package.name) 权限失败: \(chmodResult)"))
                 }
 
                 let chownResult = await executePrivilegedCommand("/usr/sbin/chown -R root:wheel \(packageDir)")
                 if chownResult.starts(with: "Error:") {
                     try? FileManager.default.removeItem(at: tempDirectory)
-                    throw NetworkError.installError("设置 \(package.name) 所有者失败: \(chownResult)")
+                    throw NetworkError.installError(String(localized: "设置 \(package.name) 所有者失败: \(chownResult)"))
                 }
             }
 
@@ -1273,7 +1273,7 @@ class DownloadUtils {
             try? FileManager.default.removeItem(at: tempDirectory)
             
             await MainActor.run {
-                progressHandler(1.0, shouldProcess ? "安装完成" : "下载完成")
+                progressHandler(1.0, shouldProcess ? String(localized: "安装完成") : String(localized: "下载完成"))
             }
         } catch {
             print("发生错误: \(error.localizedDescription)")
