@@ -297,7 +297,7 @@ struct GeneralSettingsView: View {
                         viewModel.alertMessage = "Setup 组件安装成功"
                     } catch NetworkError.cancelled {
                         viewModel.isSuccess = false
-                        viewModel.alertMessage = "下载已取消"
+                        viewModel.alertMessage = String(localized: "下载已取消")
                     } catch {
                         viewModel.isSuccess = false
                         viewModel.alertMessage = error.localizedDescription
@@ -325,10 +325,10 @@ struct GeneralSettingsView: View {
                         )
                         viewModel.setupVersion = ModifySetup.checkComponentVersion()
                         viewModel.isSuccess = true
-                        viewModel.alertMessage = "Setup 组件安装成功"
+                        viewModel.alertMessage = String(localized: "Setup 组件安装成功")
                     } catch NetworkError.cancelled {
                         viewModel.isSuccess = false
-                        viewModel.alertMessage = "下载已取消"
+                        viewModel.alertMessage = String(localized: "下载已取消")
                     } catch {
                         viewModel.isSuccess = false
                         viewModel.alertMessage = error.localizedDescription

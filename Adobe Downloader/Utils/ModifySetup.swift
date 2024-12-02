@@ -127,7 +127,7 @@ class ModifySetup {
         DispatchQueue.global(qos: .userInitiated).async {
             if !isSetupExists() {
                 DispatchQueue.main.async {
-                    completion(false, "未找到 Setup 组件")
+                    completion(false, String(localized: "未找到 Setup 组件"))
                 }
                 return
             }
@@ -135,7 +135,7 @@ class ModifySetup {
             backupSetupFile { backupSuccess in
                 if !backupSuccess {
                     DispatchQueue.main.async {
-                        completion(false, "备份 Setup 组件失败")
+                        completion(false, String(localized: "备份 Setup 组件失败"))
                     }
                     return
                 }
@@ -143,9 +143,9 @@ class ModifySetup {
                 modifySetupFile { modifySuccess in
                     DispatchQueue.main.async {
                         if modifySuccess {
-                            completion(true, "所有操作已成功完成")
+                            completion(true, String(localized: "所有操作已成功完成"))
                         } else {
-                            completion(false, "修改 Setup 组件失败")
+                            completion(false, String(localized: "修改 Setup 组件失败"))
                         }
                     }
                 }

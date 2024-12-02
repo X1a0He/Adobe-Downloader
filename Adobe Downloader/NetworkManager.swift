@@ -131,7 +131,7 @@ class NetworkManager: ObservableObject {
            if let task = downloadTasks.first(where: { $0.id == taskId }) {
                if task.status.isActive {
                    task.setStatus(.failed(DownloadStatus.FailureInfo(
-                       message: "下载已取消",
+                       message: String(localized: "下载已取消"),
                        error: NetworkError.downloadCancelled,
                        timestamp: Date(),
                        recoverable: false

@@ -115,7 +115,7 @@ actor InstallManager {
                                     let errorMessage: String
                                     switch exitCode {
                                     case 107:
-                                        errorMessage = String(localized: "安装失败: 架构或本不一致 (退出代码: \(exitCode))")
+                                        errorMessage = String(localized: "安装失败: 架构不一致 (退出代码: \(exitCode))")
                                     case 103:
                                         errorMessage = String(localized: "安装失败: 权限问题 (退出代码: \(exitCode))")
                                     case 182:

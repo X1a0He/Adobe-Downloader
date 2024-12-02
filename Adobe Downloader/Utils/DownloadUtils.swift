@@ -185,7 +185,7 @@ class DownloadUtils {
                 }
 
                 task.setStatus(.failed(DownloadStatus.FailureInfo(
-                    message: "下载已取消",
+                    message: String(localized: "下载已取消"),
                     error: NetworkError.downloadCancelled,
                     timestamp: Date(),
                     recoverable: false
@@ -1143,7 +1143,7 @@ class DownloadUtils {
             }
             
             guard !packagesToDownload.isEmpty else {
-                throw NetworkError.invalidData("没有找到可下载的包")
+                throw NetworkError.invalidData(String(localized: "没有找到可下载的包"))
             }
 
             let totalCount = packagesToDownload.count
@@ -1154,7 +1154,7 @@ class DownloadUtils {
                 }
                 
                 await MainActor.run {
-                    progressHandler(Double(index) / Double(totalCount), "正在下载 \(package.name)...")
+                    progressHandler(Double(index) / Double(totalCount), String(localized: "正在下载") + " \(package.name)...")
                 }
 
                 let destinationURL = tempDirectory.appendingPathComponent("\(package.name).zip")
@@ -1172,7 +1172,7 @@ class DownloadUtils {
             }
 
             await MainActor.run {
-                progressHandler(0.9, "正在安装组件...")
+                progressHandler(0.9, String(localized: "正在安装组件..."))
             }
             
             let targetDirectory = "/Library/Application Support/Adobe/Adobe Desktop Common"
@@ -1235,7 +1235,7 @@ class DownloadUtils {
             try? FileManager.default.removeItem(at: tempDirectory)
             
             await MainActor.run {
-                progressHandler(1.0, "安装完成")
+                progressHandler(1.0, String(localized: "安装完成"))
             }
         } catch {
             print("发生错误: \(error.localizedDescription)")

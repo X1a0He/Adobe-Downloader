@@ -602,7 +602,7 @@ struct PackageRow: View {
     }
 }
 
-#Preview("下载中") {
+#Preview("下载中/In Progress") {
     DownloadProgressView(
         task: NewDownloadTask(
             sapCode: "AUDT",
@@ -640,7 +640,7 @@ struct PackageRow: View {
     .environmentObject(NetworkManager())
 }
 
-#Preview("已完成") {
+#Preview("已完成/Completed") {
     DownloadProgressView(
         task: NewDownloadTask(
             sapCode: "AUDT",
@@ -676,7 +676,7 @@ struct PackageRow: View {
     .environmentObject(NetworkManager())
 }
 
-#Preview("暂停") {
+#Preview("暂停/Paused") {
     DownloadProgressView(
         task: NewDownloadTask(
             sapCode: "AUDT",
@@ -696,6 +696,43 @@ struct PackageRow: View {
                 reason: .userRequested,
                 timestamp: Date(),
                 resumable: true
+            )),
+            totalProgress: 0.52,
+            totalDownloadedSize: 457424883,
+            totalSize: 878454797,
+            totalSpeed: 0,
+            platform: ""
+        ),
+        onCancel: {},
+        onPause: {},
+        onResume: {},
+        onRetry: {},
+        onRemove: {}
+    )
+    .environmentObject(NetworkManager())
+}
+
+#Preview("取消/Cancelled") {
+    DownloadProgressView(
+        task: NewDownloadTask(
+            sapCode: "AUDT",
+            version: "25.0",
+            language: "zh_CN",
+            displayName: "Adobe Audition",
+            directory: URL(fileURLWithPath: "Adobe Downloader Audition_25.0-zh_CN-macuniversal"),
+            productsToDownload: [
+                ProductsToDownload(
+                    sapCode: "AUDT",
+                    version: "25.0",
+                    buildGuid: "123"
+                )
+            ],
+            createAt: Date(),
+            totalStatus: .failed(DownloadStatus.FailureInfo(
+                message: String(localized: "下载已取消"),
+                error: CancellationError(),
+                timestamp: Date(),
+                recoverable: false
             )),
             totalProgress: 0.52,
             totalDownloadedSize: 457424883,
