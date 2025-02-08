@@ -888,7 +888,7 @@ struct SetupComponentRow: View {
                                 .frame(maxWidth: .infinity, alignment: .leading)
                         }
                     } label: {
-                        Text("X1a0He CC")
+                        Text("X1a0He CC 选项")
                             .frame(width: 100)
                     }
                     .menuStyle(.borderlessButton)
