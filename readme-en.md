@@ -68,11 +68,13 @@ when prompted.
 
 - For historical update logs, please go to [Update Log](update-log.md)
 
-- 2025-08-17 Update Log
+- 2025-11-22 Update Log
 
 ```markdown
-1. Back to SMJobBless Helper.
-2. Fixed an issue where Helper permissions were insufficient during installation.
+1. Fixed an issue where the cleanup tool would not clean up all files.
+2. Added a sh script and entry for repairing Helper.
+3. Selected SuperCafModels package by default.
+4. Upgraded Sparkle to 2.8.1.
 ```
 
 ### Language friendly

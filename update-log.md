@@ -1,5 +1,22 @@
 # Change Log
 
+## 2025-11-22 更新日志
+
+[//]: # (2.1.4)
+```markdown
+1. 修复了清理工具执行清理时出现清理不全面的问题
+2. 新增修复 Helper 的 sh 脚本和入口
+3. 默认选中 SuperCafModels 包
+4. 升级 Sparkle 到 2.8.1
+
+====================
+
+1. Fixed an issue where the cleanup tool would not clean up all files.
+2. Added a sh script and entry for repairing Helper.
+3. Selected SuperCafModels package by default.
+4. Upgraded Sparkle to 2.8.1.
+```
+
 ## 2025-08-17 更新日志
 
 [//]: # (2.1.3)

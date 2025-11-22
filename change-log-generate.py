@@ -56,27 +56,17 @@ def parse_input(text):
 
 
 def main():
-    txt = """1. 修复部分情况下，Helper 无法重新连接的情况
-2. 修复部分情况下，重新安装程序以及重新安装 Helper 的无法连接的情况
-3. 调整 X1a0He CC 部分，1.5.0 版本可以选择 "下载并处理" 和 "仅下载"
-4. 调整了部分 Setup 组件的内容翻译
-5. 程序设置页中添加 「清理工具」 和 「常见问题」功能
-6. 程序设置页中，添加当前版本显示
-
-PS: 当前版本添加的 「清理工具」功能为实验性功能，如有清理不全，请及时反馈
-PS: ⚠️ 1.5.0 版本将会是最后一个开源版本，请知晓
+    txt = """1. 修复了清理工具执行清理时出现清理不全面的问题
+2. 新增修复 Helper 的 sh 脚本和入口
+3. 默认选中 SuperCafModels 包
+4. 升级 Sparkle 到 2.8.1
 
 ====================
 
-1. Fixed the issue of Helper not being able to reconnect in some cases
-2. Fixed the issue of not being able to reconnect after reinstalling the program and reinstalling Helper
-3. Adjusted the content translation of X1a0He CC, version 1.5.0 can choose "Download and Process" and "Only Download"
-4. Adjusted the translation of some Setup component content
-5. Added "Cleanup Tool" and "Common Issues" functions in the program settings page
-6. Added the current version display in the program settings page
-
-PS: The "Cleanup Tool" function in the current version is an experimental feature. If some files are not cleaned up, please feedback in time
-PS: ⚠️ 1.5.0 version will be the last open source version, please be aware"""
+1. Fixed an issue where the cleanup tool would not clean up all files.
+2. Added a sh script and entry for repairing Helper.
+3. Selected SuperCafModels package by default.
+4. Upgraded Sparkle to 2.8.1."""
 
     changelog_cn, changelog_en, ps_cn, ps_en = parse_input(txt)
     xml_output = generate_xml(changelog_cn, changelog_en, ps_cn, ps_en)

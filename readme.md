@@ -58,11 +58,13 @@
 
 - 更多关于 App 的更新日志，请查看 [Update Log](update-log.md)
 
-- 2025-08-17 更新日志
+- 2025-11-22 更新日志
 
 ```markdown
-1. 垃圾 SMAppService 赶紧滚，回退 SMJobBless Helper
-2. 修复了安装时 Helper 权限不足导致 103 错误的问题
+1. 修复了清理工具执行清理时出现清理不全面的问题
+2. 新增修复 Helper 的 sh 脚本和入口
+3. 默认选中 SuperCafModels 包
+4. 升级 Sparkle 到 2.8.1
 ```
 
 ### 语言支持
