@@ -17,6 +17,7 @@
 
     },
     "(可能导致处理失败)" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -27,6 +28,7 @@
       }
     },
     "(无法使用安装功能)" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -145,6 +147,12 @@
       }
     },
     "•" : {
+
+    },
+    "✅" : {
+
+    },
+    "❌" : {
 
     },
     "1-10" : {
@@ -293,7 +301,6 @@
 
     },
     "Debug 模式" : {
-      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -396,6 +403,7 @@
       }
     },
     "Helper 未连接" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -437,7 +445,14 @@
       }
     },
     "Helper 重新安装成功，但权限不是root: %@" : {
-
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Helper reinstalled successfully, but the permission is not root: %@"
+          }
+        }
+      }
     },
     "Helper 重新连接成功" : {
       "localizations" : {
@@ -450,7 +465,14 @@
       }
     },
     "Helper 重新连接成功，但权限不是root: %@" : {
-
+      "localizations": {
+        "en": {
+          "stringUnit": {
+            "state": "translated",
+            "value": "Helper reconnected successfully, but the permission is not root: %@"
+          }
+        }
+      }
     },
     "Helper服务需要批准" : {
       "extractionState" : "stale",
@@ -480,7 +502,13 @@
     "macOS %@" : {
 
     },
+    "Match:" : {
+
+    },
     "OK" : {
+
+    },
+    "Reason:" : {
 
     },
     "Setup 组件是 Adobe 官方的安装程序组件，我们需要对其进行修改以实现绕过验证的功能。如果没有下载并处理 Setup 组件，将无法使用安装功能。" : {
@@ -504,6 +532,7 @@
       }
     },
     "Setup 组件未处理，无法安装" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -522,6 +551,9 @@
           }
         }
       }
+    },
+    "Target:" : {
+
     },
     "v%@" : {
 
@@ -907,6 +939,26 @@
         }
       }
     },
+    "修复 Helper" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Fix helper"
+          }
+        }
+      }
+    },
+    "修复 Helper 失败: %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Fix helper failed: %@"
+          }
+        }
+      }
+    },
     "修改 Setup 组件失败" : {
       "localizations" : {
         "en" : {
@@ -1212,7 +1264,6 @@
       }
     },
     "可选模块" : {
-      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -1618,7 +1669,6 @@
       }
     },
     "展开全部" : {
-      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -1659,6 +1709,7 @@
       }
     },
     "已处理" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -1669,6 +1720,7 @@
       }
     },
     "已备份" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -1987,7 +2039,6 @@
       }
     },
     "折叠全部" : {
-      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -1998,7 +2049,6 @@
       }
     },
     "持久化文件" : {
-      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -2372,6 +2422,7 @@
       }
     },
     "未处理" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -2382,6 +2433,7 @@
       }
     },
     "未备份" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -2402,7 +2454,6 @@
       }
     },
     "未对 Setup 组件进行处理或者 Setup 组件不存在，无法使用安装功能\n你可以通过设置页面再次对 Setup 组件进行处理" : {
-      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -2413,6 +2464,7 @@
       }
     },
     "未对 Setup 组件进行处理或者 Setup 组件不存在，无法使用安装功能\n你可以通过设置页面对 Setup 组件进行处理" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -2511,7 +2563,6 @@
       }
     },
     "条件: %@" : {
-      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {

@@ -33,11 +33,17 @@ struct CleanConfigView: View {
                 Text("重置程序")
             }) {
                 VStack(alignment: .leading, spacing: 8) {
-                    HStack {
+                    HStack(spacing: 8) {
                         Button("重置程序") {
                             showConfirmation = true
                         }
                         .buttonStyle(BeautifulButtonStyle(baseColor: .red.opacity(0.8)))
+                        .foregroundColor(.white)
+
+                        Button("修复 Helper") {
+                            runFixHelperScript()
+                        }
+                        .buttonStyle(BeautifulButtonStyle(baseColor: .blue.opacity(0.8)))
                         .foregroundColor(.white)
                     }
                     .fixedSize(horizontal: false, vertical: true)
@@ -139,6 +145,41 @@ struct CleanConfigView: View {
 
         } catch {
             alertMessage = String(localized: "清空配置失败: \(error.localizedDescription)")
+            showAlert = true
+        }
+    }
+
+    private func runFixHelperScript() {
+        do {
+            let downloadsURL = try FileManager.default.url(for: .downloadsDirectory,
+                                                           in: .userDomainMask,
+                                                           appropriateFor: nil,
+                                                           create: false)
+            let scriptURL = downloadsURL.appendingPathComponent("fix-helper.sh")
+
+            guard let scriptPath = Bundle.main.path(forResource: "fix-helper", ofType: "sh"),
+                  let scriptContent = try? String(contentsOfFile: scriptPath, encoding: .utf8) else {
+                throw NSError(domain: "ScriptError",
+                              code: 1,
+                              userInfo: [NSLocalizedDescriptionKey: "无法读取修复脚本文件"])
+            }
+
+            try scriptContent.write(to: scriptURL, atomically: true, encoding: .utf8)
+            try FileManager.default.setAttributes([.posixPermissions: 0o755],
+                                                  ofItemAtPath: scriptURL.path)
+
+            let terminalURL = URL(fileURLWithPath: "/System/Applications/Utilities/Terminal.app")
+            NSWorkspace.shared.open([scriptURL],
+                                    withApplicationAt: terminalURL,
+                                    configuration: NSWorkspace.OpenConfiguration()) { _, error in
+                if let error = error {
+                    alertMessage = "打开终端失败: \(error.localizedDescription)"
+                    showAlert = true
+                    return
+                }
+            }
+        } catch {
+            alertMessage = String(localized: "修复 Helper 失败: \(error.localizedDescription)")
             showAlert = true
         }
     }
