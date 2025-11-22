@@ -233,6 +233,11 @@ struct NavigationCustomDownloadView: View {
                                         (condition.contains("[OSVersion]") && checkOSVersionCondition(condition)) ||
                                         condition.contains(installLanguage) || language == "ALL"
                 }
+
+                // Photoshop 的 SuperCafModels 包默认选中
+                if fullPackageName.contains("SuperCafModels") {
+                    shouldDefaultSelect = true
+                }
                 
                 let packageObj = Package(
                     type: packageType,

@@ -683,8 +683,8 @@ enum CleanupOption: String, CaseIterable, Identifiable {
             ]
         case .adobeHosts:
             return [
-                "sudo sh -c 'grep -v \"adobe\" /etc/hosts > /etc/hosts.temp && mv /etc/hosts.temp /etc/hosts'"
-            ]
+                "sudo sh -c 'grep -v \"adobe\" /etc/hosts | grep -v \"hstatic.io\" > /etc/hosts.temp && mv /etc/hosts.temp /etc/hosts'"
+          ]
         }
     }
 
