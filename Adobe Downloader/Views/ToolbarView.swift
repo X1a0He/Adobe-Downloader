@@ -96,12 +96,9 @@ struct ToolbarView: View {
     
     var body: some View {
         HStack(spacing: 16) {
-            Toggle(isOn: $downloadAppleSilicon) { 
-                Text("下载 Apple Silicon")
-                    .font(.system(size: 14, weight: .medium))
-            }
-            .toggleStyle(FlatToggleStyle(onColor: .green, offColor: .gray.opacity(0.25)))
+            Toggle("下载 Apple Silicon", isOn: $downloadAppleSilicon)
             .disabled(isRefreshing)
+            .toggleStyle(SwitchToggleStyle(tint: Color.green))
             
             HStack(spacing: 10) {
                 Text("API:")
