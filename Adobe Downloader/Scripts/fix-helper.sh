@@ -11,6 +11,8 @@ LABEL="com.x1a0he.macOS.Adobe-Downloader.helper"
 PLIST="/Library/LaunchDaemons/${LABEL}.plist"
 HELPER="/Library/PrivilegedHelperTools/${LABEL}"
 
+trap 'echo; echo "按回车键关闭此窗口..."; read -r _' EXIT
+
 echo "=== Adobe Downloader Helper 修复工具 ==="
 echo
 
