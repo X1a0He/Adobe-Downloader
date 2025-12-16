@@ -3,6 +3,32 @@
     <channel>
         <title>Adobe Downloader</title>
         <item>
+            <title>2.1.5</title>
+            <pubDate>Tue, 16 Dec 2025 10:57:59 +0800</pubDate>
+            <sparkle:version>215</sparkle:version>
+            <sparkle:shortVersionString>2.1.5</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
+            <enclosure url="https://github.com/X1a0He/Adobe-Downloader/releases/download/2.1.5/Adobe.Downloader.dmg" length="4211712" type="application/octet-stream" sparkle:edSignature="6BBAALHygNEHL7ZBJkfm6CZ2w/eZVCacKg1RgVvCeiM0XDuho2rE40Yx6l2L8LaIMESGjUvHTSXBeJy3+gFVBA=="/>
+            <description>
+                <![CDATA[
+                    <style>ul{margin-top: 0;margin-bottom: 7;padding-left: 18;}</style>
+                    <h4>Adobe Downloader 更新日志: </h4>
+                    <ul>
+                        <li>1. 修正部分语言包拼写错误的问题，并修正 Setup 修改逻辑和检测逻辑</li>
+                        <li>2. 增加了更加完善的 fix-helper.sh 执行逻辑</li>
+                        <li>3. 新增尝试加入 255 错误后自动下载CC并重新处理</li>
+                    </ul>
+                    <hr>
+                    <h4>Adobe Downloader Changes: </h4>
+                    <ul>
+                        <li>1. Fixed spelling errors in language packages and modified the Setup modification logic and detection logic.</li>
+                        <li>2. Added a more complete fix-helper.sh execution logic.</li>
+                        <li>3. Added automatic download of CC and reprocessing after error code 255.</li>
+                    </ul>
+                ]]>
+            </description>
+        </item>
+        <item>
             <title>2.1.4</title>
             <pubDate>Sat, 22 Nov 2025 21:44:04 +0800</pubDate>
             <sparkle:version>214</sparkle:version>

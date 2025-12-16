@@ -1,5 +1,20 @@
 # Change Log
 
+## 2025-12-16 更新日志
+
+[//]: # (2.1.5)
+```markdown
+1. 修正部分语言包拼写错误的问题，并修正 Setup 修改逻辑和检测逻辑
+2. 增加了更加完善的 fix-helper.sh 执行逻辑
+3. 新增尝试加入 255 错误后自动下载CC并重新处理
+
+====================
+
+1. Fixed spelling errors in language packages and modified the Setup modification logic and detection logic.
+2. Added a more complete fix-helper.sh execution logic.
+3. Added automatic download of CC and reprocessing after error code 255.
+```
+
 ## 2025-11-22 更新日志
 
 [//]: # (2.1.4)

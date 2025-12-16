@@ -110,6 +110,16 @@
         }
       }
     },
+    "%@；已尝试重新下载并处理 X1a0He CC" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@; Attempted to re-download and process X1a0He CC"
+          }
+        }
+      }
+    },
     "%02d:%02d:%02d" : {
       "comment" : "Download time format (HH:mm:ss)",
       "localizations" : {
@@ -561,6 +571,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "X1a0He CC downloaded successfully"
+          }
+        }
+      }
+    },
+    "X1a0He CC 处理完成，正在重新尝试安装..." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "X1a0He CC processing complete, retrying installation..."
           }
         }
       }
@@ -2591,6 +2611,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "It is detected that the Setup file has not been backed up. If you need to install the program, the Setup must be processed. After clicking Confirm, you need to enter the password. Adobe Downloader will automatically process and back up the Setup.original."
+          }
+        }
+      }
+    },
+    "检测到安装错误代码(255)，正在重新下载并处理 X1a0He CC..." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Installation error code (255) detected, re-downloading and processing X1a0He CC..."
           }
         }
       }
