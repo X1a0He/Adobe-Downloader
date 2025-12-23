@@ -51,6 +51,12 @@ struct AboutView: View {
                     Label("通用", systemImage: "gear")
                 }
                 .tag("general_settings")
+            
+            HelperView(updater: updater)
+                .tabItem {
+                    Label("Helper 设置", systemImage: "lock.shield")
+                }
+                .tag("helper_view")
 
             CleanupView()
                 .tabItem {
@@ -74,6 +80,33 @@ struct AboutView: View {
         .frame(width: 600)
         .onAppear {
             selectedTab = "general_settings"
+        }
+    }
+}
+
+struct HelperView: View {
+    @State private var showHelperAlert = false
+    @State private var helperAlertMessage = ""
+    @State private var helperAlertSuccess = false
+
+    init(updater: SPUUpdater) {
+        _ = updater
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HelperPlaygroundView(
+                showHelperAlert: $showHelperAlert,
+                helperAlertMessage: $helperAlertMessage,
+                helperAlertSuccess: $helperAlertSuccess
+            )
+        }
+        .padding()
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .alert(helperAlertSuccess ? "操作成功" : "操作失败", isPresented: $showHelperAlert) {
+            Button("确定") { }
+        } message: {
+            Text(helperAlertMessage)
         }
     }
 }
@@ -360,11 +393,6 @@ private struct GeneralSettingsContent: View {
     var body: some View {
         Form {
             DownloadSettingsView(viewModel: viewModel)
-                .padding(.bottom, 8)
-            HelperSettingsView(viewModel: viewModel,
-                            showHelperAlert: $showHelperAlert,
-                            helperAlertMessage: $helperAlertMessage,
-                            helperAlertSuccess: $helperAlertSuccess)
                 .padding(.bottom, 8)
             CCSettingsView(viewModel: viewModel)
                 .padding(.bottom, 8)
@@ -1445,4 +1473,3 @@ struct DeleteCompletedTasksRow: View {
         }
     }
 }
-

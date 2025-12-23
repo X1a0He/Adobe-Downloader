@@ -38,6 +38,17 @@ struct CustomSettingsView: View {
                             }
                             
                             SquareTabButton(
+                                imageName: "lock.shield",
+                                title: String(localized: "Helper 设置"),
+                                isSelected: selectedTab == "helper_view"
+                            ) {
+                                withAnimation(.easeInOut(duration: 0.15)) {
+                                    selectedTab = "helper_view"
+                                }
+                            }
+                            .accessibilityLabel("Helper 设置")
+                            
+                            SquareTabButton(
                                 imageName: "trash",
                                 title: String(localized: "清理工具"),
                                 isSelected: selectedTab == "cleanup_view"
@@ -98,6 +109,10 @@ struct CustomSettingsView: View {
                                 AboutAppView()
                                     .transition(contentTransition)
                                     .id("about_app")
+                            } else if selectedTab == "helper_view" {
+                                HelperView(updater: updater)
+                                    .transition(contentTransition)
+                                    .id("helper_view")
                             }
                         }
                         .frame(maxWidth: .infinity)

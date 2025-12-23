@@ -17,7 +17,7 @@ class PrivilegedHelperAdapter: NSObject, ObservableObject {
     
     @Published var connectionState: ConnectionState = .disconnected
 
-    private let smJobBlessManager: SMJobBlessHelperManager
+    private let daemonManager: SMAppServiceDaemonHelperManager
     var connectionSuccessBlock: (() -> Void)?
 
     enum HelperStatus {
@@ -44,17 +44,17 @@ class PrivilegedHelperAdapter: NSObject, ObservableObject {
     }
 
     override init() {
-        self.smJobBlessManager = SMJobBlessHelperManager.shared
+        self.daemonManager = SMAppServiceDaemonHelperManager.shared
         super.init()
 
-        smJobBlessManager.$connectionState
+        daemonManager.$connectionState
             .receive(on: DispatchQueue.main)
-            .sink { [weak self] smJobBlessState in
-                self?.connectionState = self?.convertConnectionState(smJobBlessState) ?? .disconnected
+            .sink { [weak self] daemonState in
+                self?.connectionState = self?.convertConnectionState(daemonState) ?? .disconnected
             }
             .store(in: &cancellables)
 
-        smJobBlessManager.connectionSuccessBlock = { [weak self] in
+        daemonManager.connectionSuccessBlock = { [weak self] in
             self?.connectionSuccessBlock?()
         }
     }
@@ -62,60 +62,59 @@ class PrivilegedHelperAdapter: NSObject, ObservableObject {
     private var cancellables = Set<AnyCancellable>()
 
     func checkInstall() {
-        smJobBlessManager.checkInstall()
+        daemonManager.checkInstall()
     }
     
     func getHelperStatus(callback: @escaping ((HelperStatus) -> Void)) {
-        smJobBlessManager.getHelperStatus { status in
-            let legacyStatus = self.convertHelperStatus(status)
-            callback(legacyStatus)
+        daemonManager.getHelperStatus { status in
+            callback(self.convertHelperStatus(status))
         }
     }
     
     static var getHelperStatus: Bool {
-        return SMJobBlessHelperManager.getHelperStatus
+        return SMAppServiceDaemonHelperManager.getHelperStatus
     }
 
     func executeCommand(_ command: String, completion: @escaping (String) -> Void) {
-        smJobBlessManager.executeCommand(command, completion: completion)
+        daemonManager.executeCommand(command, completion: completion)
     }
     
     func executeInstallation(_ command: String, progress: @escaping (String) -> Void) async throws {
-        try await smJobBlessManager.executeInstallation(command, progress: progress)
+        try await daemonManager.executeInstallation(command, progress: progress)
     }
     
     func reconnectHelper(completion: @escaping (Bool, String) -> Void) {
-        smJobBlessManager.reconnectHelper(completion: completion)
+        daemonManager.reconnectHelper(completion: completion)
     }
     
     func reinstallHelper(completion: @escaping (Bool, String) -> Void) {
-        smJobBlessManager.reinstallHelper(completion: completion)
+        daemonManager.reinstallHelper(completion: completion)
     }
     
     func removeInstallHelper(completion: ((Bool) -> Void)? = nil) {
-        smJobBlessManager.removeInstallHelper(completion: completion)
+        daemonManager.removeInstallHelper(completion: completion)
     }
     
     func forceReinstallHelper() {
-        smJobBlessManager.forceCleanAndReinstallHelper { success, message in
+        daemonManager.forceCleanAndReinstallHelper { success, message in
             print("Helper重新安装结果: \(success ? "成功" : "失败") - \(message)")
         }
     }
     
     func disconnectHelper() {
-        smJobBlessManager.disconnectHelper()
+        daemonManager.disconnectHelper()
     }
     
     func uninstallHelperViaTerminal(completion: @escaping (Bool, String) -> Void) {
-        smJobBlessManager.uninstallHelperViaTerminal(completion: completion)
+        daemonManager.uninstallHelperViaTerminal(completion: completion)
     }
     
     public func getHelperProxy() throws -> HelperToolProtocol {
-        return try smJobBlessManager.getHelperProxy()
+        return try daemonManager.getHelperProxy()
     }
     
-    private func convertConnectionState(_ smJobBlessState: SMJobBlessHelperManager.ConnectionState) -> ConnectionState {
-        switch smJobBlessState {
+    private func convertConnectionState(_ daemonState: SMAppServiceDaemonHelperManager.ConnectionState) -> ConnectionState {
+        switch daemonState {
         case .connected:
             return .connected
         case .disconnected:
@@ -125,8 +124,8 @@ class PrivilegedHelperAdapter: NSObject, ObservableObject {
         }
     }
     
-    private func convertHelperStatus(_ smJobBlessStatus: SMJobBlessHelperManager.HelperStatus) -> HelperStatus {
-        switch smJobBlessStatus {
+    private func convertHelperStatus(_ daemonStatus: SMAppServiceDaemonHelperManager.HelperStatus) -> HelperStatus {
+        switch daemonStatus {
         case .installed:
             return .installed
         case .noFound:
