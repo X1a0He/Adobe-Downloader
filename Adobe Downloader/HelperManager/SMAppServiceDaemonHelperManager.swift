@@ -36,7 +36,7 @@ final class SMAppServiceDaemonHelperManager: NSObject, ObservableObject {
     private let connectionQueue = DispatchQueue(label: "com.x1a0he.helper.connection")
 
     @Published private(set) var isHelperToolInstalled: Bool = false
-    @Published private(set) var message: String = String(localized: "Checking...")
+    @Published private(set) var message: String = String(localized: "检测中...")
     @Published private(set) var isInitialCheckComplete: Bool = false
 
     @Published private(set) var connectionState: ConnectionState = .disconnected {

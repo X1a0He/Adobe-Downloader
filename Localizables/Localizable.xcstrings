@@ -17,6 +17,7 @@
 
     },
     "(可能导致处理失败)" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -27,11 +28,32 @@
       }
     },
     "(无法使用安装功能)" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "(The installation function cannot be used)"
+          }
+        }
+      }
+    },
+    "（暂无日志）" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "(No logs available)"
+          }
+        }
+      }
+    },
+    "[%@] %@ $ %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "[%1$@] %2$@ $ %3$@"
           }
         }
       }
@@ -155,6 +177,12 @@
       }
     },
     "•" : {
+
+    },
+    "✅" : {
+
+    },
+    "❌" : {
 
     },
     "1-10" : {
@@ -303,7 +331,6 @@
 
     },
     "Debug 模式" : {
-      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -319,6 +346,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Released under GPLv3."
+          }
+        }
+      }
+    },
+    "Helper 启用成功" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Helper enabled successfully"
           }
         }
       }
@@ -349,6 +386,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Helper has been completely uninstalled"
+          }
+        }
+      }
+    },
+    "Helper 执行日志" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Helper Execution Log"
           }
         }
       }
@@ -385,7 +432,28 @@
         }
       }
     },
+    "Helper 未启用将导致无法执行需要管理员权限的操作" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Helper not enabled will prevent execution of operations requiring administrator privileges"
+          }
+        }
+      }
+    },
+    "Helper 未启用或未连接，请先在设置中启用并连接 Helper" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Helper not enabled or connected, please enable and connect Helper in Settings first"
+          }
+        }
+      }
+    },
     "Helper 未安装将导致无法执行需要管理员权限的操作" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -396,6 +464,7 @@
       }
     },
     "Helper 未安装或未连接，请先在设置中安装并连接 Helper" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -406,6 +475,7 @@
       }
     },
     "Helper 未连接" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -422,6 +492,26 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Helper registration failed"
+          }
+        }
+      }
+    },
+    "Helper 游乐场" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Helper Playground"
+          }
+        }
+      }
+    },
+    "Helper 状态异常，可能无法执行需要管理员权限的操作" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Helper status is abnormal, operations requiring administrator privileges may not be executable"
           }
         }
       }
@@ -504,7 +594,13 @@
     "macOS %@" : {
 
     },
+    "Match:" : {
+
+    },
     "OK" : {
+
+    },
+    "Reason:" : {
 
     },
     "Setup 组件是 Adobe 官方的安装程序组件，我们需要对其进行修改以实现绕过验证的功能。如果没有下载并处理 Setup 组件，将无法使用安装功能。" : {
@@ -528,6 +624,7 @@
       }
     },
     "Setup 组件未处理，无法安装" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -546,6 +643,9 @@
           }
         }
       }
+    },
+    "Target:" : {
+
     },
     "v%@" : {
 
@@ -942,6 +1042,7 @@
       }
     },
     "修复 Helper" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -952,6 +1053,7 @@
       }
     },
     "修复 Helper 失败: %@" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -977,6 +1079,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Stop and delete Adobe related services"
+          }
+        }
+      }
+    },
+    "允许自定义命令（仅 Debug，高风险）" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Allow custom commands (Debug only, high risk)"
           }
         }
       }
@@ -1050,6 +1162,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Preparing: %@"
+          }
+        }
+      }
+    },
+    "准备卸载旧版 Helper 脚本失败: %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Failed to prepare uninstall old version Helper script: %@"
           }
         }
       }
@@ -1215,6 +1337,16 @@
         }
       }
     },
+    "卸载旧版 Helper 失败: %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Failed to uninstall old version Helper: %@"
+          }
+        }
+      }
+    },
     "取消" : {
       "localizations" : {
         "en" : {
@@ -1266,12 +1398,81 @@
       }
     },
     "可选模块" : {
-      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "Modules"
+          }
+        }
+      }
+    },
+    "后台服务尚未注册，你可以选择现在注册。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The background service is not registered. You can choose to register it now."
+          }
+        }
+      }
+    },
+    "后台服务已关闭" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Background service is off"
+          }
+        }
+      }
+    },
+    "后台服务已启用。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Background service is enabled."
+          }
+        }
+      }
+    },
+    "后台服务已启用并可用。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Background service is enabled and available."
+          }
+        }
+      }
+    },
+    "后台服务已注册，但需要在「系统设置 → 登录项」中允许后台运行。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The background service is registered, but you need to allow background operation in 'System Settings → Login Items'."
+          }
+        }
+      }
+    },
+    "后台服务未安装。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Background service is not installed."
+          }
+        }
+      }
+    },
+    "启用状态: " : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Enable status: "
           }
         }
       }
@@ -1426,6 +1627,26 @@
         }
       }
     },
+    "复制日志" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Copy logs"
+          }
+        }
+      }
+    },
+    "复制输出" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Copy output"
+          }
+        }
+      }
+    },
     "多次尝试连接失败" : {
       "localizations" : {
         "en" : {
@@ -1468,7 +1689,18 @@
         }
       }
     },
+    "如果安装失败，您可以尝试以下步骤：\n1. 确保已正确启用并连接 Helper\n2. 确保已下载并处理 Setup 组件\n3. 检查磁盘剩余空间是否充足\n4. 尝试重新下载并安装\n如果问题仍然存在，可以尝试重新启用 Helper 和重新处理 Setup 组件。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "If the installation fails, you can try the following steps:\n1. Ensure that the Helper is correctly enabled and connected\n2. Ensure that the Setup component has been downloaded and processed\n3. Check if there is enough disk space\n4. Try to re-download and install\nIf the problem persists, you can try re-enabling the Helper and re-processing the Setup component."
+          }
+        }
+      }
+    },
     "如果安装失败，您可以尝试以下步骤：\n1. 确保已正确安装并连接 Helper\n2. 确保已下载并处理 Setup 组件\n3. 检查磁盘剩余空间是否充足\n4. 尝试重新下载并安装\n如果问题仍然存在，可以尝试重新安装 Helper 和重新处理 Setup 组件。" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -1560,6 +1792,7 @@
       }
     },
     "安装状态: " : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -1591,6 +1824,7 @@
       }
     },
     "完全卸载并重新安装 Helper" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -1651,7 +1885,18 @@
         }
       }
     },
+    "尝试重新创建连接到已启用的 Helper" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Try recreating the connection to the enabled Helper"
+          }
+        }
+      }
+    },
     "尝试重新连接到已安装的 Helper" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -1672,7 +1917,6 @@
       }
     },
     "展开全部" : {
-      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -1713,6 +1957,7 @@
       }
     },
     "已处理" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -1723,6 +1968,7 @@
       }
     },
     "已备份" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -1763,6 +2009,7 @@
       }
     },
     "已安装 (build %@)" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -1811,6 +2058,26 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Paused: %@"
+          }
+        }
+      }
+    },
+    "已检测到旧版 Helper，已完成卸载" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Old version Helper detected, uninstallation completed"
+          }
+        }
+      }
+    },
+    "已注册，但需要在「系统设置 → 登录项」中允许后台运行。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Registered, but you need to allow background operation in 'System Settings → Login Items'."
           }
         }
       }
@@ -1957,6 +2224,16 @@
         }
       }
     },
+    "打开登录项" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Open Login Items"
+          }
+        }
+      }
+    },
     "打开系统设置" : {
       "extractionState" : "stale",
       "localizations" : {
@@ -2041,7 +2318,6 @@
       }
     },
     "折叠全部" : {
-      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -2052,7 +2328,6 @@
       }
     },
     "持久化文件" : {
-      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -2118,6 +2393,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Operation failed"
+          }
+        }
+      }
+    },
+    "操作失败: %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Operation failed: %@"
           }
         }
       }
@@ -2262,6 +2547,16 @@
         }
       }
     },
+    "无法创建连接" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Unable to create connection"
+          }
+        }
+      }
+    },
     "无法将响应数据转换为json字符串" : {
       "localizations" : {
         "en" : {
@@ -2319,6 +2614,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Server unreachable: %@"
+          }
+        }
+      }
+    },
+    "日志：%lld 条" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Logs: %lld items"
           }
         }
       }
@@ -2425,7 +2730,28 @@
         }
       }
     },
+    "服务状态异常（已启用但无法使用），正在尝试修复…" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Service status abnormal (enabled but unavailable), trying to fix…"
+          }
+        }
+      }
+    },
+    "未启用" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Not enabled"
+          }
+        }
+      }
+    },
     "未处理" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -2436,6 +2762,7 @@
       }
     },
     "未备份" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -2446,6 +2773,7 @@
       }
     },
     "未安装" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -2456,7 +2784,6 @@
       }
     },
     "未对 Setup 组件进行处理或者 Setup 组件不存在，无法使用安装功能\n你可以通过设置页面再次对 Setup 组件进行处理" : {
-      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -2467,6 +2794,7 @@
       }
     },
     "未对 Setup 组件进行处理或者 Setup 组件不存在，无法使用安装功能\n你可以通过设置页面对 Setup 组件进行处理" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -2516,6 +2844,16 @@
         }
       }
     },
+    "未知服务状态（%lld）。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Unknown service status (%lld)."
+          }
+        }
+      }
+    },
     "未设置" : {
       "comment" : "Default directory not set",
       "localizations" : {
@@ -2543,6 +2881,16 @@
         }
       }
     },
+    "权限不足。请在「系统设置 → 登录项」中允许后台运行。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Insufficient permissions. Please allow background operation in 'System Settings → Login Items'."
+          }
+        }
+      }
+    },
     "权限被拒绝" : {
       "localizations" : {
         "en" : {
@@ -2565,7 +2913,6 @@
       }
     },
     "条件: %@" : {
-      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -2605,6 +2952,16 @@
         }
       }
     },
+    "检测中..." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Checking..."
+          }
+        }
+      }
+    },
     "检测到Setup文件尚未备份，如果你需要安装程序，则Setup必须被处理，点击确定后你需要输入密码，Adobe Downloader将自动处理并备份为Setup.original" : {
       "localizations" : {
         "en" : {
@@ -2621,6 +2978,16 @@
           "stringUnit" : {
             "state" : "new",
             "value" : "Installation error code (255) detected, re-downloading and processing X1a0He CC..."
+          }
+        }
+      }
+    },
+    "检测到旧版 Helper，但卸载失败: %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Old version Helper detected, but uninstallation failed: %@"
           }
         }
       }
@@ -2643,6 +3010,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "It has been detected that the old version of Helper is installed."
+          }
+        }
+      }
+    },
+    "检测到版本更新，正在更新后台服务…" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Version update detected, updating background service…"
           }
         }
       }
@@ -2948,12 +3325,32 @@
         }
       }
     },
+    "注册后台服务失败: %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Failed to register background service: %@"
+          }
+        }
+      }
+    },
     "注意：清理过程不会影响 Adobe Downloader 的文件和下载数据" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "Note: The cleanup process will not affect any Adobe Downloader files or downloaded data"
+          }
+        }
+      }
+    },
+    "注销并重新注册后台服务（修复不同步/更新）" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Unregister and re-register background service (fix sync/update issues)"
           }
         }
       }
@@ -3029,6 +3426,26 @@
         }
       }
     },
+    "清空日志" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Clear logs"
+          }
+        }
+      }
+    },
+    "清空输出" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Clear output"
+          }
+        }
+      }
+    },
     "清空配置失败: %@" : {
       "localizations" : {
         "en" : {
@@ -3076,6 +3493,26 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Version Info:"
+          }
+        }
+      }
+    },
+    "状态异常（建议修复）" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Status abnormal (recommended to fix)"
+          }
+        }
+      }
+    },
+    "用于快速验证 Helper 是否正常、是否为 root，以及查看命令输出。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Used to quickly verify if Helper is working properly, if it's running as root, and to view command output."
           }
         }
       }
@@ -3581,6 +4018,16 @@
         }
       }
     },
+    "输入命令，例如：whoami" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Enter command, e.g.: whoami"
+          }
+        }
+      }
+    },
     "迁移完成，但需要在系统设置中批准新的 Helper 服务" : {
       "extractionState" : "stale",
       "localizations" : {
@@ -3588,6 +4035,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Migration completed, but approval of the new Helper service is required in the system settings"
+          }
+        }
+      }
+    },
+    "运行" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Run"
           }
         }
       }
@@ -3632,12 +4089,32 @@
         }
       }
     },
+    "连接：%@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Connection: %@"
+          }
+        }
+      }
+    },
     "连接出现错误: %@" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "Error connecting: %@"
+          }
+        }
+      }
+    },
+    "连接已重新创建" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Connection re-established"
           }
         }
       }
@@ -3783,6 +4260,36 @@
         }
       }
     },
+    "重新创建到 Helper 的 XPC 连接" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Recreate XPC connection to Helper"
+          }
+        }
+      }
+    },
+    "重新创建连接" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Recreate connection"
+          }
+        }
+      }
+    },
+    "重新启用" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Re-enable"
+          }
+        }
+      }
+    },
     "重新处理" : {
       "localizations" : {
         "en" : {
@@ -3794,6 +4301,7 @@
       }
     },
     "重新安装" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -3826,6 +4334,7 @@
       }
     },
     "重新连接" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -3946,6 +4455,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Need to approve"
+          }
+        }
+      }
+    },
+    "预置命令" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Preset commands"
           }
         }
       }
