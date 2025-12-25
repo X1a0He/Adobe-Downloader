@@ -9,6 +9,8 @@ import Sparkle
 
 struct CustomSettingsView: View {
     @State private var selectedTab = "general_settings"
+    @StateObject private var cleanupViewModel = CleanupViewModel()
+    @StateObject private var helperPlaygroundViewModel = HelperPlaygroundViewModel()
     @Environment(\.presentationMode) var presentationMode
     @Environment(\.colorScheme) var colorScheme
     
@@ -98,7 +100,7 @@ struct CustomSettingsView: View {
                                     .transition(contentTransition)
                                     .id("general_settings")
                             } else if selectedTab == "cleanup_view" {
-                                CleanupView()
+                                CleanupView(viewModel: cleanupViewModel)
                                     .transition(contentTransition)
                                     .id("cleanup_view")
                             } else if selectedTab == "qa_view" {
@@ -110,7 +112,7 @@ struct CustomSettingsView: View {
                                     .transition(contentTransition)
                                     .id("about_app")
                             } else if selectedTab == "helper_view" {
-                                HelperView(updater: updater)
+                                HelperView(updater: updater, playgroundViewModel: helperPlaygroundViewModel)
                                     .transition(contentTransition)
                                     .id("helper_view")
                             }

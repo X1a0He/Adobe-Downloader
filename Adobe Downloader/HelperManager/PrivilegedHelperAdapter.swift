@@ -97,7 +97,7 @@ class PrivilegedHelperAdapter: NSObject, ObservableObject {
     
     func forceReinstallHelper() {
         daemonManager.forceCleanAndReinstallHelper { success, message in
-            print("Helper重新安装结果: \(success ? "成功" : "失败") - \(message)")
+            print("Helper重新启用结果: \(success ? "成功" : "失败") - \(message)")
         }
     }
     

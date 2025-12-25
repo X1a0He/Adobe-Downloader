@@ -49,21 +49,134 @@ private enum HelperPlaygroundPreset: String, CaseIterable, Identifiable {
     }
 }
 
-struct HelperPlaygroundView: View {
-    @Binding var showHelperAlert: Bool
-    @Binding var helperAlertMessage: String
-    @Binding var helperAlertSuccess: Bool
+final class HelperPlaygroundViewModel: ObservableObject {
+    @Published fileprivate var selectedPreset: HelperPlaygroundPreset = .whoami
+    @Published var isRunning = false
+    @Published var isReinstallingHelper = false
+    @Published var output = ""
+    @Published var helperStatus: PrivilegedHelperAdapter.HelperStatus = .noFound
 
-    @ObservedObject private var helperAdapter = PrivilegedHelperAdapter.shared
-    @State private var selectedPreset: HelperPlaygroundPreset = .whoami
-    @State private var isRunning = false
-    @State private var isReinstallingHelper = false
-    @State private var output = ""
-    @State private var helperStatus: PrivilegedHelperAdapter.HelperStatus = .noFound
-    @State private var statusRefreshTask: Task<Void, Never>?
+#if DEBUG
+    @Published var allowCustomCommand = false
+    @Published var customCommand = ""
+#endif
+
+    @Published var showHelperAlert = false
+    @Published var helperAlertMessage = ""
+    @Published var helperAlertSuccess = false
+
+    private let helperAdapter = PrivilegedHelperAdapter.shared
+    private var statusRefreshTask: Task<Void, Never>?
 
     private let maxOutputLength = 24_000
+
+    deinit {
+        statusRefreshTask?.cancel()
+    }
+
+    var isBusy: Bool {
+        isRunning || isReinstallingHelper
+    }
+
+    func reinstallHelper() {
+        guard !isBusy else { return }
+        isReinstallingHelper = true
+
+        helperAdapter.reinstallHelper { [weak self] success, message in
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.helperAlertSuccess = success
+                self.helperAlertMessage = message
+                self.showHelperAlert = true
+                self.isReinstallingHelper = false
+                if success {
+                    self.helperStatus = .installed
+                }
+                self.refreshHelperStatusEventually()
+            }
+        }
+    }
+
+    func recreateConnection() {
+        guard !isBusy else { return }
+
+        helperAdapter.reconnectHelper { [weak self] success, message in
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.helperAlertSuccess = success
+                self.helperAlertMessage = message
+                self.showHelperAlert = true
+                if success {
+                    self.helperStatus = .installed
+                }
+                self.refreshHelperStatusEventually()
+            }
+        }
+    }
+
+    func runCommand(_ command: String) {
+        let trimmed = command.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        guard !isBusy else { return }
+        isRunning = true
+
+        appendOutput("$ \(trimmed)\n")
+
+        helperAdapter.executeCommand(trimmed) { [weak self] result in
+            DispatchQueue.main.async {
+                guard let self else { return }
+                self.appendOutput("\(result)\n\n")
+                self.isRunning = false
+                self.refreshHelperStatusEventually()
+            }
+        }
+    }
+
+    func refreshHelperStatusEventually(maxAttempts: Int = 8, delayNanoseconds: UInt64 = 250_000_000) {
+        statusRefreshTask?.cancel()
+        statusRefreshTask = Task { @MainActor [weak self] in
+            guard let self else { return }
+
+            for _ in 0..<maxAttempts {
+                if Task.isCancelled { return }
+
+                let status = await withCheckedContinuation { continuation in
+                    PrivilegedHelperAdapter.shared.getHelperStatus { value in
+                        continuation.resume(returning: value)
+                    }
+                }
+
+                if PrivilegedHelperAdapter.shared.connectionState == .connected {
+                    self.helperStatus = .installed
+                    return
+                }
+
+                self.helperStatus = status
+                if status == .installed { return }
+                try? await Task.sleep(nanoseconds: delayNanoseconds)
+            }
+        }
+    }
+
+    func clearOutput() {
+        output = ""
+    }
+
+    private func appendOutput(_ text: String) {
+        output.append(text)
+        if output.count > maxOutputLength {
+            output = String(output.suffix(maxOutputLength))
+        }
+    }
+}
+
+struct HelperPlaygroundView: View {
+    @ObservedObject var viewModel: HelperPlaygroundViewModel
+
+    @ObservedObject private var helperAdapter = PrivilegedHelperAdapter.shared
+    @ObservedObject private var logStore = HelperExecutionLogStore.shared
     private let outputHeight: CGFloat = 220
+    private let logHeight: CGFloat = 240
 
     var body: some View {
         BeautifulGroupBox(label: {
@@ -77,7 +190,7 @@ struct HelperPlaygroundView: View {
                     .foregroundColor(.secondary)
 
                 HStack(spacing: 10) {
-                    Picker("预置命令", selection: $selectedPreset) {
+                    Picker("预置命令", selection: $viewModel.selectedPreset) {
                         ForEach(HelperPlaygroundPreset.allCases) { preset in
                             Text(preset.title).tag(preset)
                         }
@@ -86,7 +199,7 @@ struct HelperPlaygroundView: View {
                     .frame(maxWidth: 340, alignment: .leading)
 
                     Button {
-                        runCommand(selectedPreset.command)
+                        viewModel.runCommand(viewModel.selectedPreset.command)
                     } label: {
                         HStack(spacing: 4) {
                             Image(systemName: "play.fill")
@@ -98,7 +211,7 @@ struct HelperPlaygroundView: View {
                     }
                     .buttonStyle(BeautifulButtonStyle(baseColor: Color.blue.opacity(0.8)))
                     .foregroundColor(.white)
-                    .disabled(isBusy)
+                    .disabled(viewModel.isBusy)
 
                     Spacer()
 
@@ -115,18 +228,23 @@ struct HelperPlaygroundView: View {
                     }
                     .buttonStyle(BeautifulButtonStyle(baseColor: Color.gray.opacity(0.35)))
                     .foregroundColor(.primary)
-                    .disabled(isBusy)
+                    .disabled(viewModel.isBusy)
                 }
 
 #if DEBUG
-                DebugCustomCommandSection(isRunning: isBusy, onRun: runCommand)
+                DebugCustomCommandSection(
+                    isRunning: viewModel.isBusy,
+                    onRun: viewModel.runCommand,
+                    allowCustomCommand: $viewModel.allowCustomCommand,
+                    customCommand: $viewModel.customCommand
+                )
 #endif
 
                 ZStack(alignment: .topTrailing) {
                     ScrollView {
-                        Text(output.isEmpty ? "（输出会显示在这里）" : output)
+                        Text(viewModel.output.isEmpty ? "（输出会显示在这里）" : viewModel.output)
                             .font(.system(.caption, design: .monospaced))
-                            .foregroundColor(output.isEmpty ? .secondary : .primary)
+                            .foregroundColor(viewModel.output.isEmpty ? .secondary : .primary)
                             .frame(maxWidth: .infinity, alignment: .leading)
                             .textSelection(.enabled)
                             .padding(8)
@@ -141,7 +259,7 @@ struct HelperPlaygroundView: View {
                             )
                     )
 
-                    if isBusy {
+                    if viewModel.isBusy {
                         ProgressView()
                             .scaleEffect(0.8)
                             .padding(8)
@@ -150,57 +268,123 @@ struct HelperPlaygroundView: View {
 
                 HStack {
                     Button("清空输出") {
-                        output = ""
+                        viewModel.clearOutput()
                     }
                     .buttonStyle(BeautifulButtonStyle(baseColor: Color.gray.opacity(0.35)))
                     .foregroundColor(.primary)
-                    .disabled(isBusy || output.isEmpty)
+                    .disabled(viewModel.isBusy || viewModel.output.isEmpty)
 
                     Button("复制输出") {
                         NSPasteboard.general.clearContents()
-                        NSPasteboard.general.setString(output, forType: .string)
+                        NSPasteboard.general.setString(viewModel.output, forType: .string)
                     }
                     .buttonStyle(BeautifulButtonStyle(baseColor: Color.gray.opacity(0.35)))
                     .foregroundColor(.primary)
-                    .disabled(isBusy || output.isEmpty)
+                    .disabled(viewModel.isBusy || viewModel.output.isEmpty)
+                }
 
-                    Spacer()
+                Divider()
+                    .opacity(0.6)
 
-                    Text("连接：\(helperAdapter.connectionState.description)")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
+                VStack(alignment: .leading, spacing: 10) {
+                    HStack {
+                        Text("Helper 执行日志")
+                            .font(.system(size: 14, weight: .medium))
+
+                        Spacer()
+
+                        Button("清空日志") {
+                            logStore.clear()
+                        }
+                        .buttonStyle(BeautifulButtonStyle(baseColor: Color.gray.opacity(0.35)))
+                        .foregroundColor(.primary)
+                        .disabled(logStore.entries.isEmpty)
+
+                        Button("复制日志") {
+                            let text = logStore.exportText()
+                            NSPasteboard.general.clearContents()
+                            NSPasteboard.general.setString(text, forType: .string)
+                        }
+                        .buttonStyle(BeautifulButtonStyle(baseColor: Color.gray.opacity(0.35)))
+                        .foregroundColor(.primary)
+                        .disabled(logStore.entries.isEmpty)
+                    }
+
+                    ScrollViewReader { proxy in
+                        ScrollView {
+                            if logStore.entries.isEmpty {
+                                Text("（暂无日志）")
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .padding(8)
+                            } else {
+                                LazyVStack(alignment: .leading, spacing: 10) {
+                                    ForEach(logStore.entries) { entry in
+                                        LogEntryRow(entry: entry)
+                                            .id(entry.id)
+                                    }
+                                }
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(8)
+                            }
+                        }
+                        .onChange(of: logStore.entries.count) { _ in
+                            guard let last = logStore.entries.last else { return }
+                            withAnimation(.easeOut(duration: 0.15)) {
+                                proxy.scrollTo(last.id, anchor: .bottom)
+                            }
+                        }
+                    }
+                    .frame(height: logHeight)
+                    .background(
+                        RoundedRectangle(cornerRadius: 8)
+                            .fill(Color(NSColor.textBackgroundColor).opacity(0.6))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 8)
+                                    .stroke(Color.secondary.opacity(0.15), lineWidth: 1)
+                            )
+                    )
+
+                    HStack {
+                        Text("日志：\(logStore.entries.count) 条")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+
+                        Spacer()
+
+                        Text("连接：\(helperAdapter.connectionState.description)")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)
         }
         .task {
-            refreshHelperStatusEventually()
+            viewModel.refreshHelperStatusEventually()
         }
         .onChange(of: helperAdapter.connectionState) { newValue in
             if newValue == .connected {
-                helperStatus = .installed
+                viewModel.helperStatus = .installed
             }
         }
-    }
-
-    private var isBusy: Bool {
-        isRunning || isReinstallingHelper
     }
 
     private var helperStatusSection: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 10) {
-                Text("安装状态: ")
+                Text("启用状态: ")
                     .font(.system(size: 14, weight: .medium))
 
                 Group {
-                    switch helperStatus {
+                    switch viewModel.helperStatus {
                     case .installed:
                         HStack(spacing: 5) {
                             Image(systemName: "checkmark.circle.fill")
                                 .foregroundColor(.green)
                                 .font(.system(size: 14))
-                            Text("已安装 (build \(UserDefaults.standard.string(forKey: "InstalledHelperBuild") ?? "0"))")
+                            Text("已启用")
                                 .font(.system(size: 14))
                         }
                         .padding(.vertical, 4)
@@ -225,7 +409,7 @@ struct HelperPlaygroundView: View {
                             Image(systemName: "xmark.circle.fill")
                                 .foregroundColor(.red)
                                 .font(.system(size: 14))
-                            Text("未安装")
+                            Text("未启用")
                                 .foregroundColor(.red)
                                 .font(.system(size: 14))
                         }
@@ -238,52 +422,30 @@ struct HelperPlaygroundView: View {
 
                 Spacer()
 
-                if isReinstallingHelper {
+                if viewModel.isReinstallingHelper {
                     ProgressView()
                         .scaleEffect(0.8)
                         .padding(.trailing, 5)
                 }
 
                 Button(action: {
-                    isReinstallingHelper = true
-                    PrivilegedHelperAdapter.shared.reinstallHelper { success, message in
-                        DispatchQueue.main.async {
-                            helperAlertSuccess = success
-                            helperAlertMessage = message
-                            showHelperAlert = true
-                            isReinstallingHelper = false
-                            if success {
-                                helperStatus = .installed
-                            }
-                            refreshHelperStatusEventually()
-                        }
-                    }
+                    viewModel.reinstallHelper()
                 }) {
                     HStack(spacing: 4) {
                         Image(systemName: "arrow.clockwise")
                             .font(.system(size: 12))
-                        Text("重新安装")
+                        Text("重新启用")
                             .font(.system(size: 13))
                     }
                     .frame(minWidth: 90)
                 }
                 .buttonStyle(BeautifulButtonStyle(baseColor: Color.blue.opacity(0.8)))
                 .foregroundColor(.white)
-                .disabled(isBusy)
-                .help("完全卸载并重新安装 Helper")
+                .disabled(viewModel.isBusy)
+                .help("注销并重新注册后台服务（修复不同步/更新）")
 
                 Button(action: {
-                    PrivilegedHelperAdapter.shared.reconnectHelper { success, message in
-                        DispatchQueue.main.async {
-                            helperAlertSuccess = success
-                            helperAlertMessage = message
-                            showHelperAlert = true
-                            if success {
-                                helperStatus = .installed
-                            }
-                            refreshHelperStatusEventually()
-                        }
-                    }
+                    viewModel.recreateConnection()
                 }) {
                     HStack(spacing: 4) {
                         Image(systemName: "network")
@@ -295,67 +457,47 @@ struct HelperPlaygroundView: View {
                 }
                 .buttonStyle(BeautifulButtonStyle(baseColor: Color.gray.opacity(0.35)))
                 .foregroundColor(.primary)
-                .disabled(isBusy)
+                .disabled(viewModel.isBusy)
                 .help("重新创建到 Helper 的 XPC 连接")
             }
 
-            if helperStatus != .installed {
-                Text(helperStatus == .needUpdate ? "Helper 状态异常，可能无法执行需要管理员权限的操作" : "Helper 未安装将导致无法执行需要管理员权限的操作")
+            if viewModel.helperStatus != .installed {
+                Text(viewModel.helperStatus == .needUpdate ? "Helper 状态异常，可能无法执行需要管理员权限的操作" : "Helper 未启用将导致无法执行需要管理员权限的操作")
                     .font(.caption)
-                    .foregroundColor(helperStatus == .needUpdate ? .orange : .red)
+                    .foregroundColor(viewModel.helperStatus == .needUpdate ? .orange : .red)
             }
 
             Divider()
                 .opacity(0.6)
         }
     }
+}
 
-    private func runCommand(_ command: String) {
-        let trimmed = command.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else { return }
-        guard !isBusy else { return }
-        isRunning = true
+private struct LogEntryRow: View {
+    let entry: HelperExecutionLogStore.Entry
 
-        appendOutput("$ \(trimmed)\n")
+    private static let formatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "HH:mm:ss"
+        return formatter
+    }()
 
-        PrivilegedHelperAdapter.shared.executeCommand(trimmed) { result in
-            DispatchQueue.main.async {
-                self.appendOutput("\(result)\n\n")
-                self.isRunning = false
-                self.refreshHelperStatusEventually()
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            let time = Self.formatter.string(from: entry.date)
+            Text("[\(time)] \(entry.kind.label) $ \(entry.command)")
+                .font(.system(.caption, design: .monospaced))
+                .foregroundColor(entry.isError ? .red : .secondary)
+                .textSelection(.enabled)
+
+            if !entry.result.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                Text(entry.result)
+                    .font(.system(.caption, design: .monospaced))
+                    .foregroundColor(entry.isError ? .red : .primary)
+                    .textSelection(.enabled)
             }
         }
-    }
-
-    private func refreshHelperStatusEventually(maxAttempts: Int = 8, delayNanoseconds: UInt64 = 250_000_000) {
-        statusRefreshTask?.cancel()
-        statusRefreshTask = Task { @MainActor in
-            for _ in 0..<maxAttempts {
-                if Task.isCancelled { return }
-
-                let status = await withCheckedContinuation { continuation in
-                    PrivilegedHelperAdapter.shared.getHelperStatus { value in
-                        continuation.resume(returning: value)
-                    }
-                }
-
-                if helperAdapter.connectionState == .connected {
-                    helperStatus = .installed
-                    return
-                }
-
-                helperStatus = status
-                if status == .installed { return }
-                try? await Task.sleep(nanoseconds: delayNanoseconds)
-            }
-        }
-    }
-
-    private func appendOutput(_ text: String) {
-        output.append(text)
-        if output.count > maxOutputLength {
-            output = String(output.suffix(maxOutputLength))
-        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 
@@ -364,8 +506,8 @@ private struct DebugCustomCommandSection: View {
     let isRunning: Bool
     let onRun: (String) -> Void
 
-    @State private var allowCustomCommand = false
-    @State private var customCommand = ""
+    @Binding var allowCustomCommand: Bool
+    @Binding var customCommand: String
 
     var body: some View {
         Toggle("允许自定义命令（仅 Debug，高风险）", isOn: $allowCustomCommand)

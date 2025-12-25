@@ -150,7 +150,7 @@ struct DownloadProgressView: View {
                                 Text("未对 Setup 组件进行处理或者 Setup 组件不存在，无法使用安装功能\n你可以通过设置页面再次对 Setup 组件进行处理")
                                     .font(.system(size: 18))
                             } else {
-                                Text("Helper 未安装或未连接，请先在设置中安装并连接 Helper")
+                                Text("Helper 未启用或未连接，请先在设置中启用并连接 Helper")
                                     .font(.system(size: 18))
                             }
                         }
@@ -176,7 +176,7 @@ struct DownloadProgressView: View {
                             .alert("Helper 未连接", isPresented: $showSetupProcessAlert) {
                                 Button("确定") { }
                             } message: {
-                                Text("Helper 未安装或未连接，请先在设置中安装并连接 Helper")
+                                Text("Helper 未启用或未连接，请先在设置中启用并连接 Helper")
                                     .font(.system(size: 18))
                             }
                         } 

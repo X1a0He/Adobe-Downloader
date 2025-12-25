@@ -213,11 +213,7 @@ final class SMAppServiceDaemonHelperManager: NSObject, ObservableObject {
                     occurredError = nsError
                     if isOperationNotPermittedError(nsError) {
                         updateOnMain {
-                            if !self.isRunningFromInstalledAppLocation() {
-                                self.message = String(localized: "权限不足。请将 App 放到 /Applications 或 ~/Applications 后重试，并在「系统设置 → 登录项」中允许后台运行。")
-                            } else {
-                                self.message = String(localized: "权限不足。请在「系统设置 → 登录项」中允许后台运行。")
-                            }
+                            self.message = String(localized: "权限不足。请在「系统设置 → 登录项」中允许后台运行。")
                         }
                         SMAppService.openSystemSettingsLoginItems()
                     } else {
@@ -608,6 +604,7 @@ final class SMAppServiceDaemonHelperManager: NSObject, ObservableObject {
     }
 
     func executeCommand(_ command: String, completion: @escaping (String) -> Void) {
+        HelperExecutionLogStore.shared.append(kind: .command, command: command, result: "")
         do {
             let helper = try getHelperProxy()
 
@@ -619,6 +616,12 @@ final class SMAppServiceDaemonHelperManager: NSObject, ObservableObject {
                         } else {
                             self?.connectionState = .connected
                         }
+                        HelperExecutionLogStore.shared.append(
+                            kind: .output,
+                            command: command,
+                            result: result,
+                            isError: result.starts(with: "Error:")
+                        )
                         completion(result)
                     }
                 }
@@ -633,12 +636,20 @@ final class SMAppServiceDaemonHelperManager: NSObject, ObservableObject {
                     } else {
                         self?.connectionState = .connected
                     }
+                    HelperExecutionLogStore.shared.append(
+                        kind: .output,
+                        command: command,
+                        result: result,
+                        isError: result.starts(with: "Error:")
+                    )
                     completion(result)
                 }
             }
         } catch {
             connectionState = .disconnected
-            completion("Error: \(error.localizedDescription)")
+            let result = "Error: \(error.localizedDescription)"
+            HelperExecutionLogStore.shared.append(kind: .output, command: command, result: result, isError: true)
+            completion(result)
         }
     }
 
@@ -668,6 +679,10 @@ final class SMAppServiceDaemonHelperManager: NSObject, ObservableObject {
     }
 
     func executeInstallation(_ command: String, progress: @escaping (String) -> Void) async throws {
+        HelperExecutionLogStore.shared.append(kind: .command, command: command, result: "")
+        var logBuffer = ""
+
+        do {
         let helper: HelperToolProtocol = try connectionQueue.sync {
             if let existingConnection = connection,
                let proxy = existingConnection.remoteObjectProxy as? HelperToolProtocol {
@@ -708,16 +723,38 @@ final class SMAppServiceDaemonHelperManager: NSObject, ObservableObject {
 
             if !output.isEmpty {
                 progress(output)
+                logBuffer.append(output)
+                if !output.hasSuffix("\n") { logBuffer.append("\n") }
             }
 
             if output.contains("Exit Code:") || output.range(of: "Progress: \\d+/\\d+", options: .regularExpression) != nil {
                 if output.range(of: "Progress: \\d+/\\d+", options: .regularExpression) != nil {
                     progress("Exit Code: 0")
+                    logBuffer.append("Exit Code: 0\n")
                 }
                 break
             }
 
             try await Task.sleep(nanoseconds: 100_000_000)
+        }
+
+        let normalized = logBuffer.trimmingCharacters(in: .whitespacesAndNewlines)
+        HelperExecutionLogStore.shared.append(
+            kind: .output,
+            command: command,
+            result: normalized.isEmpty ? "Success" : normalized,
+            isError: false
+        )
+        } catch {
+            let message: String
+            let normalized = logBuffer.trimmingCharacters(in: .whitespacesAndNewlines)
+            if normalized.isEmpty {
+                message = "Error: \(error.localizedDescription)"
+            } else {
+                message = "\(normalized)\nError: \(error.localizedDescription)"
+            }
+            HelperExecutionLogStore.shared.append(kind: .output, command: command, result: message, isError: true)
+            throw error
         }
     }
 }

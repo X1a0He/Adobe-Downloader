@@ -28,7 +28,7 @@ struct QAView: View {
 
                     QAItem(
                         question: String(localized: "如何修复安装失败的问题？"),
-                        answer: String(localized: "如果安装失败，您可以尝试以下步骤：\n1. 确保已正确安装并连接 Helper\n2. 确保已下载并处理 Setup 组件\n3. 检查磁盘剩余空间是否充足\n4. 尝试重新下载并安装\n如果问题仍然存在，可以尝试重新安装 Helper 和重新处理 Setup 组件。")
+                        answer: String(localized: "如果安装失败，您可以尝试以下步骤：\n1. 确保已正确启用并连接 Helper\n2. 确保已下载并处理 Setup 组件\n3. 检查磁盘剩余空间是否充足\n4. 尝试重新下载并安装\n如果问题仍然存在，可以尝试重新启用 Helper 和重新处理 Setup 组件。")
                     )
                 }
             }
