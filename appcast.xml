@@ -3,6 +3,36 @@
     <channel>
         <title>Adobe Downloader</title>
         <item>
+            <title>2.2.0</title>
+            <pubDate>Thu, 25 Dec 2025 13:01:04 +0800</pubDate>
+            <sparkle:version>220</sparkle:version>
+            <sparkle:shortVersionString>2.2.0</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
+            <enclosure url="https://github.com/X1a0He/Adobe-Downloader/releases/download/2.2.0/Adobe.Downloader.dmg" length="4403712" type="application/octet-stream" sparkle:edSignature="W9qDecmbUr/rp0xWmaLi1EbaSCh7JDwRd3+rOwqsARPE1X6X9pHxdsHDnv49oz040CDqIzIqmC3gwNkas8rHAg=="/>
+            <description>
+                <![CDATA[
+                    <style>ul{margin-top: 0;margin-bottom: 7;padding-left: 18;}</style>
+                    <h4>Adobe Downloader 更新日志: </h4>
+                    <ul>
+                        <li>1. 引入 SMAppService Daemon 的方式重做 Helper</li>
+                        <li>2. 加入 Helper 执行日志</li>
+                        <li>3. 修复了清理工具在切换 Tab 下丢失选中状态和清理进度的问题</li>
+                        <li>4. 移除设置页面的 Helper 状态</li>
+                        <li>5. 新增 Helper 设置 和 Helper 游乐场以观察 Helper 执行结果和实际权限</li>
+                    </ul>
+                    <hr>
+                    <h4>Adobe Downloader Changes: </h4>
+                    <ul>
+                        <li>1.	Reworked the Helper by introducing it via SMAppService Daemon</li>
+                        <li>2.	Introduced execution logs for the Helper</li>
+                        <li>3.	Fixed an issue where the cleanup tool lost its selected state and cleanup progress when switching tabs</li>
+                        <li>4.	Removed the Helper status from the Settings page</li>
+                        <li>5.	Introduced Helper Settings and a Helper Playground to observe Helper execution results and actual granted privileges</li>
+                    </ul>
+                ]]>
+            </description>
+        </item>
+        <item>
             <title>2.1.5</title>
             <pubDate>Tue, 16 Dec 2025 10:57:59 +0800</pubDate>
             <sparkle:version>215</sparkle:version>

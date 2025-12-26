@@ -1,5 +1,24 @@
 # Change Log
 
+## 2025-12-25 更新日志
+
+[//]: # (2.2.0)
+```markdown
+1. 引入 SMAppService Daemon 的方式重做 Helper
+2. 加入 Helper 执行日志
+3. 修复了清理工具在切换 Tab 下丢失选中状态和清理进度的问题
+4. 移除设置页面的 Helper 状态
+5. 新增 Helper 设置 和 Helper 游乐场以观察 Helper 执行结果和实际权限
+
+====================
+
+1.	Reworked the Helper by introducing it via SMAppService Daemon
+2.	Introduced execution logs for the Helper
+3.	Fixed an issue where the cleanup tool lost its selected state and cleanup progress when switching tabs
+4.	Removed the Helper status from the Settings page
+5.	Introduced Helper Settings and a Helper Playground to observe Helper execution results and actual granted privileges
+```
+
 ## 2025-12-16 更新日志
 
 [//]: # (2.1.5)

@@ -68,12 +68,14 @@ when prompted.
 
 - For historical update logs, please go to [Update Log](update-log.md)
 
-- 2025-12-16 Update Log
+- 2025-12-25 Update Log
 
 ```markdown
-1. Fixed spelling errors in language packages and modified the Setup modification logic and detection logic.
-2. Added a more complete fix-helper.sh execution logic.
-3. Added automatic download of CC and reprocessing after error code 255.
+1.	Reworked the Helper by introducing it via SMAppService Daemon
+2.	Introduced execution logs for the Helper
+3.	Fixed an issue where the cleanup tool lost its selected state and cleanup progress when switching tabs
+4.	Removed the Helper status from the Settings page
+5.	Introduced Helper Settings and a Helper Playground to observe Helper execution results and actual granted privileges
 ```
 
 ### Language friendly

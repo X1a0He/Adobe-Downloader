@@ -58,12 +58,14 @@
 
 - 更多关于 App 的更新日志，请查看 [Update Log](update-log.md)
 
-- 2025-12-16 更新日志
+- 2025-12-25 更新日志
 
 ```markdown
-1. 修正部分语言包拼写错误的问题，并修正 Setup 修改逻辑和检测逻辑
-2. 增加了更加完善的 fix-helper.sh 执行逻辑
-3. 新增尝试加入 255 错误后自动下载CC并重新处理
+1. 引入 SMAppService Daemon 的方式重做 Helper
+2. 加入 Helper 执行日志
+3. 修复了清理工具在切换 Tab 下丢失选中状态和清理进度的问题
+4. 移除设置页面的 Helper 状态
+5. 新增 Helper 设置 和 Helper 游乐场以观察 Helper 执行结果和实际权限
 ```
 
 ### 语言支持
