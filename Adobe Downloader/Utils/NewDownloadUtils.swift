@@ -1424,6 +1424,7 @@ class NewDownloadUtils {
                 }
 
                 let manifestFullUrl = cdnBase + manifestUrl
+                print(manifestFullUrl)
 
                 var manifestRequest = URLRequest(url: URL(string: manifestFullUrl)!)
                 NetworkConstants.downloadHeaders.forEach { manifestRequest.setValue($0.value, forHTTPHeaderField: $0.key) }

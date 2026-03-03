@@ -23,6 +23,7 @@ class NewNetworkService {
         guard let url = components?.url else {
             throw NetworkError.invalidURL(NetworkConstants.productsJSONURL)
         }
+        print(url)
         return url
     }
 
