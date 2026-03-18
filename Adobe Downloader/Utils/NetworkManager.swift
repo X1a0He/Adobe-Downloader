@@ -12,6 +12,7 @@ class NetworkManager: ObservableObject {
     @Published var downloadTasks: [NewDownloadTask] = []
     @Published var installationState: InstallationState = .idle
     @Published var installCommand: String = ""
+    @Published var installLogs: [String] = []
     internal var progressObservers: [UUID: NSKeyValueObservation] = [:]
     internal var activeDownloadTaskId: UUID?
     internal var monitor = NWPathMonitor()
@@ -191,18 +192,24 @@ class NetworkManager: ObservableObject {
     func installProduct(at path: URL) async {
         await MainActor.run {
             installationState = .installing(progress: 0, status: "准备安装...")
+            installLogs = []
         }
-        
+
         do {
             try await installManager.install(
                 at: path,
                 progressHandler: { progress, status in
                     Task { @MainActor in
-                        if status.contains("完成") || status.contains("成功") {
+                        if status == "安装完成" {
                             self.installationState = .completed
                         } else {
                             self.installationState = .installing(progress: progress, status: status)
                         }
+                    }
+                },
+                logHandler: { message in
+                    Task { @MainActor in
+                        self.installLogs.append(message)
                     }
                 }
             )
@@ -252,7 +259,7 @@ class NetworkManager: ObservableObject {
                 at: path,
                 progressHandler: { progress, status in
                     Task { @MainActor in
-                        if status.contains("完成") || status.contains("成功") {
+                        if status == "安装完成" {
                             self.installationState = .completed
                         } else {
                             self.installationState = .installing(progress: progress, status: status)

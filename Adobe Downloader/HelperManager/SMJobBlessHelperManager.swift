@@ -23,6 +23,11 @@ import ServiceManagement
     func getInstallationOutput(withReply reply: @escaping (String) -> Void)
 }
 
+enum HelperSpecialCommand {
+    static let hdpimInstallPrefix = "__HDPIM_INSTALL__:"
+    static let hdpimCancel = "__HDPIM_CANCEL__"
+}
+
 @objcMembers
 class SMJobBlessHelperManager: NSObject, ObservableObject {
 

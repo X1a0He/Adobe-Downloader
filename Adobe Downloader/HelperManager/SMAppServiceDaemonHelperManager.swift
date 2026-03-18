@@ -681,6 +681,7 @@ final class SMAppServiceDaemonHelperManager: NSObject, ObservableObject {
     func executeInstallation(_ command: String, progress: @escaping (String) -> Void) async throws {
         HelperExecutionLogStore.shared.append(kind: .command, command: command, result: "")
         var logBuffer = ""
+        var finalExitCode = 0
 
         do {
         let helper: HelperToolProtocol = try connectionQueue.sync {
@@ -728,6 +729,9 @@ final class SMAppServiceDaemonHelperManager: NSObject, ObservableObject {
             }
 
             if output.contains("Exit Code:") || output.range(of: "Progress: \\d+/\\d+", options: .regularExpression) != nil {
+                if let exitCode = extractExitCode(from: output) {
+                    finalExitCode = exitCode
+                }
                 if output.range(of: "Progress: \\d+/\\d+", options: .regularExpression) != nil {
                     progress("Exit Code: 0")
                     logBuffer.append("Exit Code: 0\n")
@@ -739,6 +743,16 @@ final class SMAppServiceDaemonHelperManager: NSObject, ObservableObject {
         }
 
         let normalized = logBuffer.trimmingCharacters(in: .whitespacesAndNewlines)
+        if finalExitCode != 0 {
+            let result = normalized.isEmpty ? "Exit Code: \(finalExitCode)" : normalized
+            HelperExecutionLogStore.shared.append(
+                kind: .output,
+                command: command,
+                result: result,
+                isError: true
+            )
+            throw HelperError.installationFailed(result)
+        }
         HelperExecutionLogStore.shared.append(
             kind: .output,
             command: command,
@@ -756,5 +770,21 @@ final class SMAppServiceDaemonHelperManager: NSObject, ObservableObject {
             HelperExecutionLogStore.shared.append(kind: .output, command: command, result: message, isError: true)
             throw error
         }
+    }
+
+    private func extractExitCode(from output: String) -> Int? {
+        guard let range = output.range(of: "Exit Code:") else {
+            return nil
+        }
+
+        let suffix = output[range.upperBound...]
+        let digits = suffix
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .split(separator: "\n")
+            .first?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+
+        guard let digits else { return nil }
+        return Int(digits)
     }
 }

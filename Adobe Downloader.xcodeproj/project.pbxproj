@@ -9,6 +9,8 @@
 /* Begin PBXBuildFile section */
 		3C60E1C32CE3AA1B00600C07 /* com.x1a0he.macOS.Adobe-Downloader.helper in CopyFiles */ = {isa = PBXBuildFile; fileRef = 3C60E16D2CE3A6CB00600C07 /* com.x1a0he.macOS.Adobe-Downloader.helper */; settings = {ATTRIBUTES = (CodeSignOnCopy, ); }; };
 		3CB9FF092CDBAEF200D7A58B /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = 3CB9FF082CDBAEF200D7A58B /* Sparkle */; };
+		3CDCE5C92F690FA80056E259 /* cminizip in Frameworks */ = {isa = PBXBuildFile; productRef = 3CDCE5C82F690FA80056E259 /* cminizip */; };
+		3CDCE5CB2F690FA80056E259 /* SwiftMiniZip in Frameworks */ = {isa = PBXBuildFile; productRef = 3CDCE5CA2F690FA80056E259 /* SwiftMiniZip */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXCopyFilesBuildPhase section */
@@ -95,6 +97,8 @@
 			buildActionMask = 2147483647;
 			files = (
 				3CB9FF092CDBAEF200D7A58B /* Sparkle in Frameworks */,
+				3CDCE5CB2F690FA80056E259 /* SwiftMiniZip in Frameworks */,
+				3CDCE5C92F690FA80056E259 /* cminizip in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -108,6 +112,7 @@
 				3C60E16E2CE3A6CB00600C07 /* AdobeDownloaderHelperTool */,
 				3CCC3AE12CC67B8F006E22B4 /* Products */,
 				3CCC3B112CC67F7A006E22B4 /* Localizables */,
+				3CDCE5C22F67CD300056E259 /* Frameworks */,
 			);
 			sourceTree = "<group>";
 		};
@@ -118,6 +123,13 @@
 				3C60E16D2CE3A6CB00600C07 /* com.x1a0he.macOS.Adobe-Downloader.helper */,
 			);
 			name = Products;
+			sourceTree = "<group>";
+		};
+		3CDCE5C22F67CD300056E259 /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+			);
+			name = Frameworks;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -166,6 +178,8 @@
 			name = "Adobe Downloader";
 			packageProductDependencies = (
 				3CB9FF082CDBAEF200D7A58B /* Sparkle */,
+				3CDCE5C82F690FA80056E259 /* cminizip */,
+				3CDCE5CA2F690FA80056E259 /* SwiftMiniZip */,
 			);
 			productName = "Adobe-Downloader";
 			productReference = 3CCC3AE02CC67B8F006E22B4 /* Adobe Downloader.app */;
@@ -200,6 +214,7 @@
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
 				3CB9FF072CDBAEF200D7A58B /* XCRemoteSwiftPackageReference "Sparkle" */,
+				3CDCE5C72F690F9F0056E259 /* XCRemoteSwiftPackageReference "SwiftMiniZip" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 3CCC3AE12CC67B8F006E22B4 /* Products */;
@@ -460,6 +475,10 @@
 				ENABLE_PREVIEWS = YES;
 				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				GENERATE_INFOPLIST_FILE = YES;
+				HEADER_SEARCH_PATHS = (
+					"$(inherited)",
+					/opt/homebrew/opt/xz/include,
+				);
 				INFOPLIST_KEY_CFBundleDisplayName = "Adobe Downloader";
 				INFOPLIST_KEY_NSDownloadsFolderUsageDescription = "需要访问下载文件夹来保存Adobe安装文件";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
@@ -467,11 +486,20 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
+				LIBRARY_SEARCH_PATHS = (
+					"$(inherited)",
+					/opt/homebrew/opt/xz/lib,
+				);
 				MACOSX_DEPLOYMENT_TARGET = 13.0;
 				MARKETING_VERSION = 2.2.0;
+				OTHER_LDFLAGS = (
+					"$(inherited)",
+					"-llzma",
+				);
 				PRODUCT_BUNDLE_IDENTIFIER = "com.x1a0he.macOS.Adobe-Downloader";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_OBJC_BRIDGING_HEADER = "Adobe Downloader/Native/HDPIMLZMA2Bridge.h";
 				SWIFT_VERSION = 5.0;
 			};
 			name = Debug;
@@ -494,6 +522,10 @@
 				ENABLE_PREVIEWS = YES;
 				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				GENERATE_INFOPLIST_FILE = YES;
+				HEADER_SEARCH_PATHS = (
+					"$(inherited)",
+					/opt/homebrew/opt/xz/include,
+				);
 				INFOPLIST_KEY_CFBundleDisplayName = "Adobe Downloader";
 				INFOPLIST_KEY_NSDownloadsFolderUsageDescription = "需要访问下载文件夹来保存Adobe安装文件";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
@@ -501,11 +533,20 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
+				LIBRARY_SEARCH_PATHS = (
+					"$(inherited)",
+					/opt/homebrew/opt/xz/lib,
+				);
 				MACOSX_DEPLOYMENT_TARGET = 13.0;
 				MARKETING_VERSION = 2.2.0;
+				OTHER_LDFLAGS = (
+					"$(inherited)",
+					"-llzma",
+				);
 				PRODUCT_BUNDLE_IDENTIFIER = "com.x1a0he.macOS.Adobe-Downloader";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_OBJC_BRIDGING_HEADER = "Adobe Downloader/Native/HDPIMLZMA2Bridge.h";
 				SWIFT_VERSION = 5.0;
 			};
 			name = Release;
@@ -548,7 +589,15 @@
 			repositoryURL = "https://github.com/sparkle-project/Sparkle";
 			requirement = {
 				kind = upToNextMajorVersion;
-				minimumVersion = 2.8.0;
+				minimumVersion = 2.9.0;
+			};
+		};
+		3CDCE5C72F690F9F0056E259 /* XCRemoteSwiftPackageReference "SwiftMiniZip" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/iharkatkavets/SwiftMiniZip";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 1.0.5;
 			};
 		};
 /* End XCRemoteSwiftPackageReference section */
@@ -558,6 +607,16 @@
 			isa = XCSwiftPackageProductDependency;
 			package = 3CB9FF072CDBAEF200D7A58B /* XCRemoteSwiftPackageReference "Sparkle" */;
 			productName = Sparkle;
+		};
+		3CDCE5C82F690FA80056E259 /* cminizip */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 3CDCE5C72F690F9F0056E259 /* XCRemoteSwiftPackageReference "SwiftMiniZip" */;
+			productName = cminizip;
+		};
+		3CDCE5CA2F690FA80056E259 /* SwiftMiniZip */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 3CDCE5C72F690F9F0056E259 /* XCRemoteSwiftPackageReference "SwiftMiniZip" */;
+			productName = SwiftMiniZip;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

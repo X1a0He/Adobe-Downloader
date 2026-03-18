@@ -156,72 +156,39 @@ struct NavigationCustomDownloadView: View {
             await MainActor.run {
                 loadingState.currentTask = String(localized: "正在处理 \(dependencyInfo.sapCode) 的包信息...")
             }
-            
-            let jsonString = try await globalNetworkService.getApplicationInfo(buildGuid: dependencyInfo.buildGuid)
+            let jsonString = try await globalNetworkService.getApplicationInfo(
+                buildGuid: dependencyInfo.buildGuid,
+                sapCode: dependencyInfo.sapCode,
+                version: dependencyInfo.version,
+                platform: firstPlatform?.id
+            )
             dependencyInfo.applicationJson = jsonString
-            
-            var processedJsonString = jsonString
-            if dependencyInfo.sapCode == product.id {
-                if let jsonData = jsonString.data(using: .utf8),
-                   var appInfo = try JSONSerialization.jsonObject(with: jsonData) as? [String: Any] {
-                    
-                    if var modules = appInfo["Modules"] as? [String: Any] {
-                        modules["Module"] = [] as [[String: Any]]
-                        appInfo["Modules"] = modules
-                    }
-                    
-                    if let processedData = try? JSONSerialization.data(withJSONObject: appInfo, options: .prettyPrinted),
-                       let processedString = String(data: processedData, encoding: .utf8) {
-                        processedJsonString = processedString
-                    }
-                }
+
+            let appInfo: ApplicationInfo
+            do {
+                appInfo = try ApplicationJSONParser.parse(jsonString: jsonString)
+            } catch {
+                throw NetworkError.invalidData("无法解析产品 \(dependencyInfo.sapCode) 的 Application.json: \(error.localizedDescription)")
             }
-            
-            guard let jsonData = processedJsonString.data(using: .utf8),
-                  let appInfo = try JSONSerialization.jsonObject(with: jsonData) as? [String: Any],
-                  let packages = appInfo["Packages"] as? [String: Any],
-                  let packageArray = packages["Package"] as? [[String: Any]] else {
-                throw NetworkError.invalidData("无法解析产品信息")
-            }
-            
-            for package in packageArray {
-                guard let downloadURL = package["Path"] as? String, !downloadURL.isEmpty else { continue }
-                
-                let packageVersion: String = package["PackageVersion"] as? String ?? ""
-                let fullPackageName: String
-                
-                if let name = package["fullPackageName"] as? String, !name.isEmpty {
-                    fullPackageName = name
-                } else if let name = package["PackageName"] as? String, !name.isEmpty {
-                    fullPackageName = "\(name).zip"
-                } else {
-                    continue
-                }
-                
-                let downloadSize: Int64
-                switch package["DownloadSize"] {
-                case let sizeNumber as NSNumber:
-                    downloadSize = sizeNumber.int64Value
-                case let sizeString as String:
-                    downloadSize = Int64(sizeString) ?? 0
-                default:
-                    downloadSize = 0
-                }
-                
-                let packageType = package["Type"] as? String ?? "non-core"
-                let condition = package["Condition"] as? String ?? ""
+
+            for parsedPkg in appInfo.packages {
+                guard !parsedPkg.path.isEmpty else { continue }
+                guard !parsedPkg.fullPackageName.isEmpty else { continue }
+
+                let packageType = parsedPkg.type
+                let condition = parsedPkg.condition
 
                 let isCore = packageType == "core"
                 let targetArchitecture = StorageData.shared.downloadAppleSilicon ? "arm64" : "x64"
                 let language = StorageData.shared.defaultLanguage
                 let installLanguage = "[installLanguage]==\(language)"
-                
+
                 var shouldDefaultSelect = false
                 var isRequired = false
-                
+
                 if dependencyInfo.sapCode == product.id {
                     if isCore {
-                        shouldDefaultSelect = condition.isEmpty || 
+                        shouldDefaultSelect = condition.isEmpty ||
                                             condition.contains("[OSArchitecture]==\(targetArchitecture)") ||
                                             condition.contains(installLanguage) || language == "ALL"
                         isRequired = shouldDefaultSelect
@@ -234,30 +201,30 @@ struct NavigationCustomDownloadView: View {
                                         condition.contains(installLanguage) || language == "ALL"
                 }
 
-                // Photoshop 的 SuperCafModels 包默认选中
-                if fullPackageName.contains("SuperCafModels") {
+                if parsedPkg.fullPackageName.contains("SuperCafModels") {
                     shouldDefaultSelect = true
                 }
-                
+
                 let packageObj = Package(
                     type: packageType,
-                    fullPackageName: fullPackageName,
-                    downloadSize: downloadSize,
-                    downloadURL: downloadURL,
-                    packageVersion: packageVersion,
+                    fullPackageName: parsedPkg.fullPackageName,
+                    downloadSize: parsedPkg.downloadSize,
+                    downloadURL: parsedPkg.path,
+                    packageVersion: parsedPkg.packageVersion,
                     condition: condition,
-                    isRequired: isRequired
+                    isRequired: isRequired,
+                    validationURL: parsedPkg.validationURLType2
                 )
 
                 packageObj.isSelected = shouldDefaultSelect
-                
+
                 dependencyInfo.packages.append(packageObj)
                 allPackages.append(packageObj)
             }
-            
+
             dependenciesToDownload.append(dependencyInfo)
         }
-        
+
         return (allPackages, dependenciesToDownload)
     }
     

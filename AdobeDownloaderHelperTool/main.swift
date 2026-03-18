@@ -9,6 +9,16 @@ import os.log
     case shellCommand
 }
 
+enum HelperSpecialCommand {
+    static let hdpimInstallPrefix = "__HDPIM_INSTALL__:"
+    static let hdpimCancel = "__HDPIM_CANCEL__"
+}
+
+enum HDPIMHeadlessInstallEnvironment {
+    static let localExecutionKey = "ADOBE_DOWNLOADER_LOCAL_INSTALL"
+    static let userHomeKey = "ADOBE_DOWNLOADER_USER_HOME"
+}
+
 @objc(HelperToolProtocol) protocol HelperToolProtocol {
     @objc(executeCommand:path1:path2:permissions:withReply:)
     func executeCommand(type: CommandType, path1: String, path2: String, permissions: Int, withReply reply: @escaping (String) -> Void)
@@ -66,6 +76,7 @@ class HelperTool: NSObject, HelperToolProtocol {
     private var connections: Set<NSXPCConnection> = []
     private var currentTask: Process?
     private var outputPipe: Pipe?
+    private var errorPipe: Pipe?
     private var outputBuffer: String = ""
     private let logger = Logger(subsystem: "com.x1a0he.macOS.Adobe-Downloader.helper", category: "Helper")
     private let operationQueue = DispatchQueue(label: "com.x1a0he.macOS.Adobe-Downloader.helper.operation")
@@ -93,6 +104,17 @@ class HelperTool: NSObject, HelperToolProtocol {
             guard let shellCommand = SecureCommandHandler.createCommand(type: type, path1: path1, path2: path2, permissions: permissions) else {
                 self.logger.error("不安全的路径访问被拒绝")
                 reply("Error: Invalid path access")
+                return
+            }
+
+            if shellCommand == HelperSpecialCommand.hdpimCancel {
+                self.cleanup()
+                reply("Success")
+                return
+            }
+
+            if shellCommand.hasPrefix(HelperSpecialCommand.hdpimInstallPrefix) {
+                self.startHDPIMInstall(shellCommand: shellCommand, reply: reply)
                 return
             }
             
@@ -193,7 +215,15 @@ class HelperTool: NSObject, HelperToolProtocol {
         
         if !task.isRunning {
             let exitCode = task.terminationStatus
-            reply("Exit Code: \(exitCode)")
+            let remainingOutput = drainInstallationOutput()
+            let result: String
+            if remainingOutput.isEmpty {
+                result = "Exit Code: \(exitCode)"
+            } else {
+                let suffix = remainingOutput.hasSuffix("\n") ? "" : "\n"
+                result = remainingOutput + suffix + "Exit Code: \(exitCode)"
+            }
+            reply(result)
             cleanup()
             return
         }
@@ -211,9 +241,127 @@ class HelperTool: NSObject, HelperToolProtocol {
         if let pipe = outputPipe {
             pipe.fileHandleForReading.readabilityHandler = nil
         }
+        if let pipe = errorPipe {
+            pipe.fileHandleForReading.readabilityHandler = nil
+        }
         currentTask?.terminate()
         currentTask = nil
         outputPipe = nil
+        errorPipe = nil
+        outputBuffer = ""
+    }
+
+    private func drainInstallationOutput() -> String {
+        outputPipe?.fileHandleForReading.readabilityHandler = nil
+        errorPipe?.fileHandleForReading.readabilityHandler = nil
+
+        if let outputPipe {
+            let data = outputPipe.fileHandleForReading.readDataToEndOfFile()
+            if !data.isEmpty, let output = String(data: data, encoding: .utf8) {
+                outputBuffer += output
+            }
+        }
+
+        if let errorPipe {
+            let data = errorPipe.fileHandleForReading.readDataToEndOfFile()
+            if !data.isEmpty, let output = String(data: data, encoding: .utf8) {
+                outputBuffer += output
+            }
+        }
+
+        return outputBuffer
+    }
+
+    private func startHDPIMInstall(shellCommand: String, reply: @escaping (String) -> Void) {
+        do {
+            let payload = String(shellCommand.dropFirst(HelperSpecialCommand.hdpimInstallPrefix.count))
+            let components = payload.split(separator: "|", maxSplits: 2).map(String.init)
+            guard components.count >= 2,
+                  let productDirData = Data(base64Encoded: components[0]),
+                  let userHomeData = Data(base64Encoded: components[1]),
+                  let productDir = String(data: productDirData, encoding: .utf8),
+                  let userHome = String(data: userHomeData, encoding: .utf8),
+                  !productDir.isEmpty else {
+                reply("Error: Invalid install payload")
+                return
+            }
+
+            let executableURL: URL
+            if components.count >= 3,
+               let executableData = Data(base64Encoded: components[2]),
+               let executablePath = String(data: executableData, encoding: .utf8),
+               !executablePath.isEmpty {
+                executableURL = URL(fileURLWithPath: executablePath)
+            } else {
+                executableURL = try locateMainAppExecutable()
+            }
+
+            let task = Process()
+            let outputPipe = Pipe()
+            let errorPipe = Pipe()
+
+            task.executableURL = executableURL
+            task.arguments = ["--hdpim-install", productDir]
+            task.environment = mergedEnvironment(userHome: userHome)
+            task.standardOutput = outputPipe
+            task.standardError = errorPipe
+
+            self.currentTask = task
+            self.outputPipe = outputPipe
+            self.errorPipe = errorPipe
+            self.outputBuffer = ""
+
+            let appendOutput: (FileHandle) -> Void = { [weak self] handle in
+                guard let self else { return }
+                let data = handle.availableData
+                guard !data.isEmpty,
+                      let output = String(data: data, encoding: .utf8) else {
+                    return
+                }
+                self.outputBuffer += output
+            }
+
+            outputPipe.fileHandleForReading.readabilityHandler = appendOutput
+            errorPipe.fileHandleForReading.readabilityHandler = appendOutput
+
+            try task.run()
+            self.logger.notice("HDPIM 安装进程已启动: \(productDir, privacy: .public)")
+            reply("Started")
+        } catch {
+            let message = "Error: \(error.localizedDescription)"
+            self.logger.error("启动 HDPIM 安装失败: \(message, privacy: .public)")
+            reply(message)
+        }
+    }
+
+    private func mergedEnvironment(userHome: String) -> [String: String] {
+        var environment = ProcessInfo.processInfo.environment
+        environment[HDPIMHeadlessInstallEnvironment.localExecutionKey] = "1"
+        environment[HDPIMHeadlessInstallEnvironment.userHomeKey] = userHome
+        environment["HOME"] = userHome
+        return environment
+    }
+
+    private func locateMainAppExecutable() throws -> URL {
+        let helperExecutableURL = URL(fileURLWithPath: CommandLine.arguments[0]).resolvingSymlinksInPath()
+        var cursor = helperExecutableURL.deletingLastPathComponent()
+
+        while cursor.path != "/" {
+            if cursor.pathExtension == "app",
+               let bundle = Bundle(url: cursor),
+               let executableURL = bundle.executableURL {
+                return executableURL
+            }
+            cursor.deleteLastPathComponent()
+        }
+
+        let siblingAppURL = helperExecutableURL.deletingLastPathComponent().appendingPathComponent("Adobe Downloader.app")
+        if let bundle = Bundle(url: siblingAppURL),
+           let executableURL = bundle.executableURL {
+            return executableURL
+        }
+
+        throw NSError(domain: "HelperTool", code: 1, userInfo: [NSLocalizedDescriptionKey: "无法定位主程序可执行文件"])
     }
 }
 

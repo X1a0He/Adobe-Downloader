@@ -611,7 +611,7 @@ class NewDownloadUtils {
             url: url,
             destinationURL: destinationURL,
             headers: NetworkConstants.downloadHeaders,
-            validationURL: package.validationURL,
+            validationURL: nil,
             progressHandler: { progress, downloadedSize, totalSize, speed in
                 Task {
                     await MainActor.run {
@@ -1049,56 +1049,66 @@ class NewDownloadUtils {
 
     func generateDriverXML(version: String, language: String, productInfo: Product, displayName: String, modules: [[String: Any]] = []) -> String {
         // 获取匹配的 platform 和 languageSet
-        guard let platform = globalProducts.first(where: { $0.id == productInfo.id && $0.version == version })?.platforms.first?.id,
-              let languageSet = globalProducts.first(where: { $0.id == productInfo.id && $0.version == version })?.platforms.first?.languageSet else {
+        guard let matchedProduct = globalProducts.first(where: { $0.id == productInfo.id && $0.version == version }),
+              let firstPlatform = matchedProduct.platforms.first,
+              let firstLanguageSet = firstPlatform.languageSet.first else {
             return ""
         }
-        
-        // 构建依赖列表
-        let dependencies = (languageSet.first?.dependencies.map { dependency in
-            """
-            <Dependency>
-                <BuildGuid>\(dependency.buildGuid)</BuildGuid>
-                <BuildVersion>\(dependency.productVersion)</BuildVersion>
-                <CodexVersion>\(dependency.baseVersion)</CodexVersion>
-                <Platform>\(dependency.selectedPlatform)</Platform>
-                <SAPCode>\(dependency.sapCode)</SAPCode>
-                <EsdDirectory>\(dependency.sapCode)</EsdDirectory>
-            </Dependency>
-            """
-        }.joined(separator: "\n")) ?? ""
 
-        // 构建模块列表，官方好像就是这个逻辑，只测试了PS，不知道PR是怎样的，估计也是这样吧
+        let platform = firstPlatform.id
+        let buildGuid = firstLanguageSet.buildGuid
+        let buildVersion = firstLanguageSet.productVersion
+        let baseVersion = firstLanguageSet.baseVersion
+
+        let dependencies = firstLanguageSet.dependencies.map { dependency in
+            let depCodexVersion: String = {
+                if let stiProduct = globalStiResult.products.first(where: { $0.id == dependency.sapCode }) {
+                    return stiProduct.version
+                }
+                return dependency.baseVersion
+            }()
+
+            return """
+                <Dependency>
+                    <SapCode>\(dependency.sapCode)</SapCode>
+                    <CodexVersion>\(depCodexVersion)</CodexVersion>
+                    <BaseVersion>\(dependency.baseVersion)</BaseVersion>
+                    <BuildVersion>\(dependency.productVersion)</BuildVersion>
+                    <EsdDirectory>\(dependency.sapCode)</EsdDirectory>
+                    <Platform>\(dependency.selectedPlatform)</Platform>
+                    <BuildGuid>\(dependency.buildGuid)</BuildGuid>
+                </Dependency>
+            """
+        }.joined(separator: "\n")
+
         let moduleXml = modules.compactMap { module in
             if let moduleId = module["Id"] as? String {
                 return """
-                <Module>
-                    <Id>\(moduleId)</Id>
-                    <Baseline>false</Baseline>
-                </Module>
+                    <Module>
+                        <Id>\(moduleId)</Id>
+                        <Baseline>false</Baseline>
+                    </Module>
                 """
             }
             return nil
-        }.joined(separator: "\n            ")
+        }.joined(separator: "\n")
 
-        let buildGuid = productInfo.platforms.first?.languageSet.first?.buildGuid ?? ""
-        let buildVersion = languageSet.first?.productVersion ?? ""
-        
         return """
         <DriverInfo>
             <ProductInfo>
+                <SapCode>\(productInfo.id)</SapCode>
+                <CodexVersion>\(productInfo.version)</CodexVersion>
+                <BaseVersion>\(baseVersion)</BaseVersion>
+                <BuildVersion>\(buildVersion)</BuildVersion>
+                <EsdDirectory>\(productInfo.id)</EsdDirectory>
+                <Platform>\(platform)</Platform>
+                <BuildGuid>\(buildGuid)</BuildGuid>
                 <Dependencies>
                     \(dependencies)
                 </Dependencies>
                 <Modules>
                     \(moduleXml.isEmpty ? "" : moduleXml)
                 </Modules>
-                <BuildGuid>\(buildGuid)</BuildGuid>
-                <BuildVersion>\(buildVersion)</BuildVersion>
-                <CodexVersion>\(productInfo.version)</CodexVersion>
-                <Platform>\(platform)</Platform>
-                <EsdDirectory>\(productInfo.id)</EsdDirectory>
-                <SAPCode>\(productInfo.id)</SAPCode>
             </ProductInfo>
             <RequestInfo>
                 <InstallDir>/Applications</InstallDir>
@@ -1500,32 +1510,39 @@ class NewDownloadUtils {
             }
 
             for package in packagesToDownload {
-                let packageDir = "\(targetDirectory)/\(package.name)"
+                let packageDir = "\(rawTargetDirectory)/\(package.name)"
+                let packageExtractDir = tempDirectory.appendingPathComponent("\(package.name)-extract", isDirectory: true)
 
-                let removeResult = await executePrivilegedCommand("/bin/rm -rf \(packageDir)")
+                try? FileManager.default.removeItem(at: packageExtractDir)
+                try await ZIPAssetExtractor.extract(
+                    zipURL: tempDirectory.appendingPathComponent("\(package.name).zip"),
+                    to: packageExtractDir
+                )
+
+                let removeResult = await executePrivilegedCommand("/bin/rm -rf '\(packageDir)'")
                 if removeResult.starts(with: "Error:") {
                     print("移除旧目录失败: \(removeResult)")
                 }
 
-                let mkdirResult = await executePrivilegedCommand("/bin/mkdir -p \(packageDir)")
+                let mkdirResult = await executePrivilegedCommand("/bin/mkdir -p '\(packageDir)'")
                 if mkdirResult.starts(with: "Error:") {
                     try? FileManager.default.removeItem(at: tempDirectory)
                     throw NetworkError.installError("创建 \(package.name) 目录失败")
                 }
 
-                let unzipResult = await executePrivilegedCommand("cd \(packageDir) && /usr/bin/unzip -o '\(tempDirectory.path)/\(package.name).zip'")
-                if unzipResult.starts(with: "Error:") {
+                let copyResult = await executePrivilegedCommand("/usr/bin/ditto '\(packageExtractDir.path)' '\(packageDir)'")
+                if copyResult.starts(with: "Error:") {
                     try? FileManager.default.removeItem(at: tempDirectory)
-                    throw NetworkError.installError("解压 \(package.name) 失败: \(unzipResult)")
+                    throw NetworkError.installError("复制 \(package.name) 解压结果失败: \(copyResult)")
                 }
 
-                let chmodResult = await executePrivilegedCommand("/bin/chmod -R 755 \(packageDir)")
+                let chmodResult = await executePrivilegedCommand("/bin/chmod -R 755 '\(packageDir)'")
                 if chmodResult.starts(with: "Error:") {
                     try? FileManager.default.removeItem(at: tempDirectory)
                     throw NetworkError.installError("设置 \(package.name) 权限失败: \(chmodResult)")
                 }
 
-                let chownResult = await executePrivilegedCommand("/usr/sbin/chown -R root:wheel \(packageDir)")
+                let chownResult = await executePrivilegedCommand("/usr/sbin/chown -R root:wheel '\(packageDir)'")
                 if chownResult.starts(with: "Error:") {
                     try? FileManager.default.removeItem(at: tempDirectory)
                     throw NetworkError.installError("设置 \(package.name) 所有者失败: \(chownResult)")

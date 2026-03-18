@@ -143,43 +143,36 @@ struct DownloadProgressView: View {
                                 .foregroundColor(.white)
                         }
                         .buttonStyle(BeautifulButtonStyle(baseColor: .green))
-                        .alert("Setup 组件未处理", isPresented: $showSetupProcessAlert) {
+                        .alert("Helper 未连接", isPresented: $showSetupProcessAlert) {
                             Button("确定") { }
                         } message: {
-                            if !ModifySetup.isSetupModified() {
-                                Text("未对 Setup 组件进行处理或者 Setup 组件不存在，无法使用安装功能\n你可以通过设置页面再次对 Setup 组件进行处理")
-                                    .font(.system(size: 18))
-                            } else {
-                                Text("Helper 未启用或未连接，请先在设置中启用并连接 Helper")
-                                    .font(.system(size: 18))
-                            }
+                            Text("Helper 未启用或未连接，请先在设置中启用并连接 Helper")
+                                .font(.system(size: 18))
                         }
                         #else
-                        if ModifySetup.isSetupModified() {
-                            Button(action: { 
-                                do {
-                                    _ = try PrivilegedHelperAdapter.shared.getHelperProxy()
-                                    showInstallPrompt = false
-                                    isInstalling = true
-                                    Task {
-                                        await globalNetworkManager.installProduct(at: task.directory)
-                                    }
-                                } catch {
-                                    showSetupProcessAlert = true
+                        Button(action: {
+                            do {
+                                _ = try PrivilegedHelperAdapter.shared.getHelperProxy()
+                                showInstallPrompt = false
+                                isInstalling = true
+                                Task {
+                                    await globalNetworkManager.installProduct(at: task.directory)
                                 }
-                            }) {
-                                Label("安装", systemImage: "tray.and.arrow.down")
-                                    .font(.system(size: 13, weight: .medium))
-                                    .foregroundColor(.white)
+                            } catch {
+                                showSetupProcessAlert = true
                             }
-                            .buttonStyle(BeautifulButtonStyle(baseColor: .green))
-                            .alert("Helper 未连接", isPresented: $showSetupProcessAlert) {
-                                Button("确定") { }
-                            } message: {
-                                Text("Helper 未启用或未连接，请先在设置中启用并连接 Helper")
-                                    .font(.system(size: 18))
-                            }
-                        } 
+                        }) {
+                            Label("安装", systemImage: "tray.and.arrow.down")
+                                .font(.system(size: 13, weight: .medium))
+                                .foregroundColor(.white)
+                        }
+                        .buttonStyle(BeautifulButtonStyle(baseColor: .green))
+                        .alert("Helper 未连接", isPresented: $showSetupProcessAlert) {
+                            Button("确定") { }
+                        } message: {
+                            Text("Helper 未启用或未连接，请先在设置中启用并连接 Helper")
+                                .font(.system(size: 18))
+                        }
                         #endif
                     }
                     
@@ -426,30 +419,6 @@ struct DownloadProgressView: View {
                             showCommandLineInstall: $showCommandLineInstall,
                             showCopiedAlert: $showCopiedAlert
                         )
-                    }
-                    #else
-                    if !ModifySetup.isSetupModified(), case .completed = task.status {
-                        HStack {
-                            Image(systemName: "exclamationmark.triangle.fill")
-                                .foregroundColor(.yellow)
-                            Text("Setup 组件未处理，无法安装")
-                                .font(.system(size: 12))
-                                .foregroundColor(.yellow)
-                        }
-                        .padding(.vertical, 6)
-                        .padding(.horizontal, 12)
-                        .background(Color.black.opacity(0.1))
-                        .cornerRadius(5)
-                        .onTapGesture {
-                            showSetupProcessAlert = true
-                        }
-                        .alert("Setup 组件未处理", isPresented: $showSetupProcessAlert) {
-                            Button("确定") { }
-                        } message: {
-                            Text("未对 Setup 组件进行处理或者 Setup 组件不存在，无法使用安装功能\n你可以通过设置页面对 Setup 组件进行处理")
-                                .font(.system(size: 18))
-                        }
-                        .padding(.top, 5)
                     }
                     #endif
                     actionButtons
@@ -789,30 +758,6 @@ private struct PackageListView: View {
                         showCommandLineInstall: $showCommandLineInstall,
                         showCopiedAlert: $showCopiedAlert
                     )
-                }
-                #else
-                if !ModifySetup.isSetupModified(), case .completed = task.status {
-                    HStack {
-                        Image(systemName: "exclamationmark.triangle.fill")
-                            .foregroundColor(.yellow)
-                        Text("Setup 组件未处理，无法安装")
-                            .font(.system(size: 12))
-                            .foregroundColor(.yellow)
-                    }
-                    .padding(.vertical, 6)
-                    .padding(.horizontal, 12)
-                    .background(Color.black.opacity(0.1))
-                    .cornerRadius(5)
-                    .onTapGesture {
-                        showSetupProcessAlert = true
-                    }
-                    .alert("Setup 组件未处理", isPresented: $showSetupProcessAlert) {
-                        Button("确定") { }
-                    } message: {
-                        Text("未对 Setup 组件进行处理或者 Setup 组件不存在，无法使用安装功能\n你可以通过设置页面对 Setup 组件进行处理")
-                            .font(.system(size: 18))
-                    }
-                    .padding(.top, 5)
                 }
                 #endif
                 actionButtons

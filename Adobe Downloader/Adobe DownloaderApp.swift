@@ -17,6 +17,8 @@ struct Adobe_DownloaderApp: App {
     private let updaterController: SPUStandardUpdaterController
 
     init() {
+        HDPIMHeadlessInstallRunner.runIfNeeded()
+
         globalNetworkService = NewNetworkService()
         globalNetworkManager = NetworkManager()
         globalNewDownloadUtils = NewDownloadUtils()
@@ -137,18 +139,7 @@ struct Adobe_DownloaderApp: App {
             globalNetworkManager.loadSavedTasks()
         }
 
-        let needsBackup = !ModifySetup.isSetupBackup()
-        let needsSetup = !ModifySetup.isSetupExists()
-
         await MainActor.run {
-            #if !DEBUG
-            if needsSetup {
-                showCreativeCloudAlert = true
-            } else if needsBackup {
-                showBackupAlert = true
-            }
-            #endif
-
             if storage.isFirstLaunch {
                 showTipsSheet = true
                 storage.isFirstLaunch = false

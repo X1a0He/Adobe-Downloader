@@ -131,6 +131,7 @@
       }
     },
     "%@；已尝试重新下载并处理 X1a0He CC" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -600,6 +601,7 @@
       }
     },
     "Setup 组件未处理" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -610,6 +612,7 @@
       }
     },
     "Setup 组件未处理，无法安装" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -653,16 +656,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "X1a0He CC downloaded successfully"
-          }
-        }
-      }
-    },
-    "X1a0He CC 处理完成，正在重新尝试安装..." : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "new",
-            "value" : "X1a0He CC processing complete, retrying installation..."
           }
         }
       }
@@ -1775,6 +1768,12 @@
         }
       }
     },
+    "安装日志 (%lld)" : {
+
+    },
+    "安装日志已复制到剪贴板" : {
+
+    },
     "安装状态: " : {
       "extractionState" : "stale",
       "localizations" : {
@@ -2291,6 +2290,7 @@
       }
     },
     "找不到安装程序" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -2778,6 +2778,7 @@
       }
     },
     "未对 Setup 组件进行处理或者 Setup 组件不存在，无法使用安装功能\n你可以通过设置页面对 Setup 组件进行处理" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -2956,16 +2957,6 @@
         }
       }
     },
-    "检测到安装错误代码(255)，正在重新下载并处理 X1a0He CC..." : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "new",
-            "value" : "Installation error code (255) detected, re-downloading and processing X1a0He CC..."
-          }
-        }
-      }
-    },
     "检测到旧版 Helper，但卸载失败: %@" : {
       "localizations" : {
         "en" : {
@@ -3050,6 +3041,7 @@
       }
     },
     "正在准备安装..." : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -3100,6 +3092,7 @@
       }
     },
     "正在安装..." : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -3190,6 +3183,7 @@
       }
     },
     "正在清理安装环境..." : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -4372,6 +4366,7 @@
       }
     },
     "错误代码(%lld)，请查看日志详情并向开发者汇报" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {

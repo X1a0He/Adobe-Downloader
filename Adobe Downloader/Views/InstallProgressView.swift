@@ -80,7 +80,7 @@ struct InstallProgressView: View {
                 Image(systemName: statusIcon)
                     .font(.title2)
                     .foregroundColor(statusColor)
-                
+
                 Text(statusTitle)
                     .font(.headline)
             }
@@ -91,6 +91,7 @@ struct InstallProgressView: View {
                     .padding(.vertical, 4)
             }
 
+            InstallLogSection(logs: networkManager.installLogs)
             if isFailed {
                 ErrorSection(
                     status: status,
@@ -112,6 +113,104 @@ struct InstallProgressView: View {
             RoundedRectangle(cornerRadius: 10)
                 .fill(Color(NSColor.clear))
         )
+    }
+}
+
+private struct InstallLogSection: View {
+    let logs: [String]
+    @State private var isExpanded = true
+    @State private var showCopiedAlert = false
+
+    var body: some View {
+        if !logs.isEmpty {
+            VStack(alignment: .leading, spacing: 6) {
+                HStack(spacing: 8) {
+                    Button(action: { withAnimation { isExpanded.toggle() } }) {
+                        HStack(spacing: 6) {
+                            Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
+                                .font(.system(size: 10))
+                                .foregroundColor(.secondary)
+                            Image(systemName: "text.alignleft")
+                                .font(.system(size: 12))
+                                .foregroundColor(.blue.opacity(0.7))
+                            Text("安装日志 (\(logs.count))")
+                                .font(.system(size: 12, weight: .medium))
+                                .foregroundColor(.primary.opacity(0.8))
+                        }
+                    }
+                    .buttonStyle(.plain)
+
+                    Spacer()
+
+                    Button(action: copyLogs) {
+                        Label("复制", systemImage: "doc.on.doc")
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundColor(.white)
+                    }
+                    .buttonStyle(BeautifulButtonStyle(baseColor: .blue))
+                }
+
+                if isExpanded {
+                    ScrollViewReader { proxy in
+                        ScrollView {
+                            LazyVStack(alignment: .leading, spacing: 2) {
+                                ForEach(Array(logs.enumerated()), id: \.offset) { index, line in
+                                    Text(line)
+                                        .font(.system(size: 10, design: .monospaced))
+                                        .foregroundColor(.secondary)
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                        .textSelection(.enabled)
+                                        .id(index)
+                                }
+                            }
+                            .padding(8)
+                            .textSelection(.enabled)
+                        }
+                        .frame(maxHeight: 150)
+                        .background(
+                            RoundedRectangle(cornerRadius: 6)
+                                .fill(Color(NSColor.textBackgroundColor).opacity(0.5))
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 6)
+                                .strokeBorder(Color.secondary.opacity(0.15), lineWidth: 1)
+                        )
+                        .onChange(of: logs.count) { _ in
+                            if let last = logs.indices.last {
+                                proxy.scrollTo(last, anchor: .bottom)
+                            }
+                        }
+                    }
+                }
+
+                if showCopiedAlert {
+                    HStack(spacing: 6) {
+                        Image(systemName: "checkmark.circle.fill")
+                            .foregroundColor(.green)
+                        Text("安装日志已复制到剪贴板")
+                            .font(.system(size: 11))
+                            .foregroundColor(.green)
+                    }
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(Color.green.opacity(0.1))
+                    .cornerRadius(4)
+                    .transition(.opacity)
+                }
+            }
+            .padding(.horizontal, 20)
+        }
+    }
+
+    private func copyLogs() {
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString(logs.joined(separator: "\n"), forType: .string)
+        showCopiedAlert = true
+
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
+            showCopiedAlert = false
+        }
     }
 }
 

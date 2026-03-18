@@ -438,28 +438,59 @@ struct NetworkConstants {
     static let maxConcurrentDownloads = 3
     static let progressUpdateInterval: TimeInterval = 1
 
-    static func generateCookie() -> String {
-        let chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
-        let randomString = (0..<26).map { _ in chars.randomElement()! }
-        return "fg=\(String(randomString))======"
-    }
+    static let ffcRequestTimeout: TimeInterval = 90
+    static let serviceCallTimeout: TimeInterval = 20
+    static let maxServiceCallRetries = 3
+    static let deadConnectionTimeout: TimeInterval = 101
+    static let maxDeadConnections = 100
 
-    static var productsJSONURL: String {
+    static let adobeAppVersion = "6.8.1.856"
+
+    static var productsURL: String {
         "https://prod-rel-ffc-ccm.oobesaas.adobe.com/adobe-ffc-external/core/v\(UserDefaults.standard.string(forKey: "apiVersion") ?? "6")/products/all"
     }
 
-    static let applicationJsonURL = "https://cdn-ffc.oobesaas.adobe.com/core/v3/applications"
+    static let applicationJsonURLV3 = "https://cdn-ffc.oobesaas.adobe.com/core/v3/applications"
 
-    static var adobeRequestHeaders: [String: String] {
-        [
-            "x-adobe-app-id": "accc-apps-panel-desktop",
+    static var userAgent: String {
+        let osVersion = ProcessInfo.processInfo.operatingSystemVersion
+        return "Creative Cloud/\(adobeAppVersion)/Mac-\(osVersion.majorVersion).\(osVersion.minorVersion)"
+    }
+
+    static var ffcRequestHeaders: [String: String] {
+        var headers: [String: String] = [
+            "x-adobe-app-id": "accc-hdcore-desktop",
             "x-api-key": "Creative Cloud_v\(UserDefaults.standard.string(forKey: "apiVersion") ?? "6")_4",
-            "User-Agent": "Creative Cloud/6.4.0.361/Mac-15.1",
-            "Cookie": generateCookie()
+            "User-Agent": userAgent,
+            "x-adobe-app-version": adobeAppVersion,
+            "Content-Type": "application/json"
+        ]
+        if let token = UserDefaults.standard.string(forKey: "userAuthenticationToken"), !token.isEmpty {
+            headers["Authorization"] = "Bearer \(token)"
+        }
+        return headers
+    }
+
+    static var applicationJsonHeaders: [String: String] {
+        [
+            "x-adobe-app-id": "accc-hdcore-desktop",
+            "x-api-key": "Creative Cloud_v\(UserDefaults.standard.string(forKey: "apiVersion") ?? "6")_4",
+            "User-Agent": userAgent
         ]
     }
 
-    static let downloadHeaders = [
-        "User-Agent": "Creative Cloud"
-    ]
+    static var downloadHeaders: [String: String] {
+        [
+            "x-adobe-app-id": "accc-hdcore-desktop",
+            "x-api-key": "Creative Cloud_v\(UserDefaults.standard.string(forKey: "apiVersion") ?? "6")_4",
+            "User-Agent": userAgent
+        ]
+    }
+
+    static var adobeRequestHeaders: [String: String] {
+        ffcRequestHeaders
+    }
+
+    static var productsJSONURL: String { productsURL }
+    static var applicationJsonURL: String { applicationJsonURLV3 }
 }

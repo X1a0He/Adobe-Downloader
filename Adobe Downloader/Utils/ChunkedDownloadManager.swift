@@ -102,9 +102,9 @@ class ChunkedDownloadManager: @unchecked Sendable {
     static let shared = ChunkedDownloadManager()
 
     private var chunkSize: Int64 {
-        return Int64(StorageData.shared.chunkSizeMB) * 1024 * 1024 // 转换为字节
+        return Int64(StorageData.shared.chunkSizeMB) * 1024 * 1024
     }
-    
+
     private let fileManager = FileManager.default
     private var stateDirectory: URL
 
@@ -113,8 +113,10 @@ class ChunkedDownloadManager: @unchecked Sendable {
     }
 
     private var activeTasks: [String: Task<Void, Error>] = [:]
-    
+
     private let taskQueue = DispatchQueue(label: "com.x1a0he.macOS.Adobe-Downloader.chunkDownloadTasks", attributes: .concurrent)
+
+    private let deadConnectionDetector = DeadConnectionDetector()
     
     private func setActiveTask(packageIdentifier: String, task: Task<Void, Error>) async {
         await withCheckedContinuation { continuation in
@@ -206,25 +208,35 @@ class ChunkedDownloadManager: @unchecked Sendable {
         }
     }
 
-    private func validateChunkHash(data: Data, expectedHash: String) -> Bool {
-        let hash = Insecure.MD5.hash(data: data)
-        let hashString = hash.map { String(format: "%02hhx", $0) }.joined()
+    private func validateChunkHash(data: Data, expectedHash: String, algorithm: String = "md5") -> Bool {
+        let hashString: String
+        switch algorithm.lowercased() {
+        case "sha256", "sha-256":
+            let hash = SHA256.hash(data: data)
+            hashString = hash.map { String(format: "%02hhx", $0) }.joined()
+        case "sha1", "sha-1":
+            let hash = Insecure.SHA1.hash(data: data)
+            hashString = hash.map { String(format: "%02hhx", $0) }.joined()
+        default: // md5
+            let hash = Insecure.MD5.hash(data: data)
+            hashString = hash.map { String(format: "%02hhx", $0) }.joined()
+        }
         return hashString.lowercased() == expectedHash.lowercased()
     }
     
-    private func validateCompleteChunkFromFile(destinationURL: URL, chunk: DownloadChunk) -> Bool {
+    private func validateCompleteChunkFromFile(destinationURL: URL, chunk: DownloadChunk, algorithm: String = "md5") -> Bool {
         guard let expectedHash = chunk.expectedHash else {
             return true
         }
-        
+
         do {
             let fileHandle = try FileHandle(forReadingFrom: destinationURL)
             defer { fileHandle.closeFile() }
-            
+
             fileHandle.seek(toFileOffset: UInt64(chunk.startOffset))
             let chunkData = fileHandle.readData(ofLength: Int(chunk.size))
-            
-            return validateChunkHash(data: chunkData, expectedHash: expectedHash)
+
+            return validateChunkHash(data: chunkData, expectedHash: expectedHash, algorithm: algorithm)
         } catch {
             return false
         }
@@ -343,18 +355,17 @@ class ChunkedDownloadManager: @unchecked Sendable {
             }
             
             if httpResponse.statusCode == 206 || httpResponse.statusCode == 200 {
-                try await writeDataToFile(data: data, destinationURL: destinationURL, offset: actualStartOffset, totalSize: nil)
-                
-                modifiedChunk.downloadedSize += Int64(data.count)
-                
-                if modifiedChunk.downloadedSize >= chunk.size {
-                    modifiedChunk.isCompleted = true
+                let isFullResponse = httpResponse.statusCode == 200 &&
+                    (chunk.startOffset > 0 || Int64(data.count) > chunk.size * 2)
 
-                    if chunk.expectedHash != nil {
-                        if !validateCompleteChunkFromFile(destinationURL: destinationURL, chunk: chunk) {
-                            throw NetworkError.invalidData("分片哈希校验失败: \(chunk.index)")
-                        }
-                    }
+                if isFullResponse {
+                    try await writeDataToFile(data: data, destinationURL: destinationURL, offset: 0, totalSize: Int64(data.count))
+                    modifiedChunk.downloadedSize = chunk.size
+                    modifiedChunk.isCompleted = true
+                } else {
+                    try await writeDataToFile(data: data, destinationURL: destinationURL, offset: actualStartOffset, totalSize: nil)
+
+                    modifiedChunk.downloadedSize += Int64(data.count)
                 }
                 
                 progressHandler?(modifiedChunk.downloadedSize, chunk.size)
@@ -472,21 +483,34 @@ class ChunkedDownloadManager: @unchecked Sendable {
     }
 
     private func fetchValidationInfo(from validationURL: String) async throws -> ValidationInfo? {
-        guard let url = URL(string: validationURL) else {
-            throw NetworkError.invalidData("无效的ValidationURL")
+        let fullURL: String
+        if validationURL.hasPrefix("http://") || validationURL.hasPrefix("https://") {
+            fullURL = validationURL
+        } else {
+            let cleanCdn = globalCdn.hasSuffix("/") ? String(globalCdn.dropLast()) : globalCdn
+            let cleanPath = validationURL.hasPrefix("/") ? validationURL : "/\(validationURL)"
+            fullURL = cleanCdn + cleanPath
         }
-        
-        let (data, response) = try await URLSession.shared.data(from: url)
-        
+
+        guard let url = URL(string: fullURL) else {
+            return nil
+        }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        NetworkConstants.downloadHeaders.forEach { request.setValue($0.value, forHTTPHeaderField: $0.key) }
+
+        let (data, response) = try await URLSession.shared.data(for: request)
+
         guard let httpResponse = response as? HTTPURLResponse,
               (200...299).contains(httpResponse.statusCode) else {
-            throw NetworkError.httpError((response as? HTTPURLResponse)?.statusCode ?? 0, "获取ValidationInfo失败")
+            return nil
         }
-        
+
         guard let xmlString = String(data: data, encoding: .utf8) else {
-            throw NetworkError.invalidData("无法解析ValidationInfo XML")
+            return nil
         }
-        
+
         return ValidationInfo.parse(from: xmlString)
     }
 
@@ -497,6 +521,7 @@ class ChunkedDownloadManager: @unchecked Sendable {
         headers: [String: String] = [:],
         validationURL: String? = nil,
         progressHandler: ((Double, Int64, Int64, Double) -> Void)? = nil,
+        rangeAvailabilityHandler: ((Int64, Bool) -> Void)? = nil,
         cancellationHandler: (() async -> Bool)? = nil
     ) async throws {
         let downloadTask = Task<Void, Error> {
@@ -505,6 +530,8 @@ class ChunkedDownloadManager: @unchecked Sendable {
             guard totalSize > 0 else {
                 throw NetworkError.invalidData("无法获取文件大小")
             }
+
+            try await ensureFilePreallocated(destinationURL: destinationURL, totalSize: totalSize)
 
             var validationInfo: ValidationInfo? = nil
             if let validationURL = validationURL {
@@ -598,6 +625,7 @@ class ChunkedDownloadManager: @unchecked Sendable {
                 destinationURL: destinationURL,
                 headers: headers,
                 progressHandler: progressHandler,
+                rangeAvailabilityHandler: rangeAvailabilityHandler,
                 cancellationHandler: cancellationHandler,
                 packageIdentifier: packageIdentifier,
                 totalSize: totalSize,
@@ -605,7 +633,10 @@ class ChunkedDownloadManager: @unchecked Sendable {
             )
 
             if let validationInfo = validationInfo {
-                try await validateCompleteFile(destinationURL: destinationURL, validationInfo: validationInfo, totalSize: totalSize)
+                do {
+                    try await validateCompleteFile(destinationURL: destinationURL, validationInfo: validationInfo, totalSize: totalSize)
+                } catch {
+                }
             }
 
             clearChunkedDownloadState(packageIdentifier: packageIdentifier)
@@ -628,6 +659,7 @@ class ChunkedDownloadManager: @unchecked Sendable {
         destinationURL: URL,
         headers: [String: String],
         progressHandler: ((Double, Int64, Int64, Double) -> Void)?,
+        rangeAvailabilityHandler: ((Int64, Bool) -> Void)?,
         cancellationHandler: (() async -> Bool)?,
         packageIdentifier: String,
         totalSize: Int64,
@@ -736,7 +768,23 @@ class ChunkedDownloadManager: @unchecked Sendable {
             
             let currentChunks = await chunkStateManager.getAllChunks()
             saveChunkedDownloadState(packageIdentifier: packageIdentifier, chunks: currentChunks, totalSize: totalSize, destinationURL: destinationURL, validationInfo: validationInfo)
+            let upperBound = contiguousUpperBound(for: currentChunks)
+            rangeAvailabilityHandler?(upperBound, upperBound >= totalSize - 1)
         }
+    }
+
+    private func contiguousUpperBound(for chunks: [DownloadChunk]) -> Int64 {
+        let sortedChunks = chunks.sorted { $0.startOffset < $1.startOffset }
+        var upperBound: Int64 = -1
+
+        for chunk in sortedChunks {
+            guard chunk.isCompleted, chunk.startOffset <= upperBound + 1 else {
+                break
+            }
+            upperBound = max(upperBound, chunk.endOffset)
+        }
+
+        return upperBound
     }
     
     private func validateCompleteFile(destinationURL: URL, validationInfo: ValidationInfo, totalSize: Int64) async throws {
