@@ -236,57 +236,22 @@ struct DownloadProgressView: View {
             }
         }
         .sheet(isPresented: $isInstalling) {
-            Group {
-                if case .installing(let progress, let status) = globalNetworkManager.installationState {
-                    InstallProgressView(
-                        productName: task.displayName,
-                        progress: progress,
-                        status: status,
-                        onCancel: {
-                            globalNetworkManager.cancelInstallation()
-                            isInstalling = false
-                        },
-                        onRetry: nil
-                    )
-                } else if case .completed = globalNetworkManager.installationState {
-                    InstallProgressView(
-                        productName: task.displayName,
-                        progress: 1.0,
-                        status: String(localized: "安装完成"),
-                        onCancel: {
-                            isInstalling = false
-                        },
-                        onRetry: nil
-                    )
-                } else if case .failed(let error, let errorDetails) = globalNetworkManager.installationState {
-                    InstallProgressView(
-                        productName: task.displayName,
-                        progress: 0,
-                        status: String(localized: "安装失败: \(error.localizedDescription)"),
-                        onCancel: {
-                            isInstalling = false
-                        },
-                        onRetry: {
-                            Task {
-                                await globalNetworkManager.retryInstallation(at: task.directory)
-                            }
-                        },
-                        errorDetails: errorDetails
-                    )
-                } else {
-                    InstallProgressView(
-                        productName: task.displayName,
-                        progress: 0,
-                        status: String(localized: "准备安装..."),
-                        onCancel: {
-                            globalNetworkManager.cancelInstallation()
-                            isInstalling = false
-                        },
-                        onRetry: nil
-                    )
+            let installViewData = globalNetworkManager.makeInstallProgressViewData(productName: task.displayName)
+            InstallProgressView(
+                data: installViewData,
+                onCancel: {
+                    if case .running = installViewData.outcome {
+                        globalNetworkManager.cancelInstallation()
+                    }
+                    isInstalling = false
+                },
+                onRetry: {
+                    Task {
+                        await globalNetworkManager.retryInstallation(at: task.directory)
+                    }
                 }
-            }
-            .frame(minWidth: 700, minHeight: 200)
+            )
+            .frame(minWidth: 760, minHeight: 420)
             .background(Color(NSColor.windowBackgroundColor))
         }
     }

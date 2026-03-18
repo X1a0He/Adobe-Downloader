@@ -100,6 +100,7 @@
       }
     },
     "%@ 安装失败" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -110,6 +111,7 @@
       }
     },
     "%@ 安装完成" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -1163,6 +1165,7 @@
       }
     },
     "准备安装..." : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -1624,6 +1627,9 @@
         }
       }
     },
+    "复制错误" : {
+
+    },
     "多次尝试连接失败" : {
       "localizations" : {
         "en" : {
@@ -1718,6 +1724,12 @@
         }
       }
     },
+    "安装中" : {
+
+    },
+    "安装信息" : {
+
+    },
     "安装命令" : {
       "localizations" : {
         "en" : {
@@ -1729,6 +1741,7 @@
       }
     },
     "安装失败" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -1749,6 +1762,7 @@
       }
     },
     "安装完成" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -1768,7 +1782,7 @@
         }
       }
     },
-    "安装日志 (%lld)" : {
+    "安装日志" : {
 
     },
     "安装日志已复制到剪贴板" : {
@@ -1795,6 +1809,9 @@
         }
       }
     },
+    "安装进行后，这里会实时展示输出内容。" : {
+
+    },
     "安装错误: %@" : {
       "comment" : "Install error",
       "localizations" : {
@@ -1805,6 +1822,9 @@
           }
         }
       }
+    },
+    "安装阶段" : {
+
     },
     "完全卸载并重新安装 Helper" : {
       "extractionState" : "stale",
@@ -2145,6 +2165,9 @@
           }
         }
       }
+    },
+    "当前包" : {
+
     },
     "当前执行：" : {
       "localizations" : {
@@ -2614,6 +2637,7 @@
       }
     },
     "日志详情" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -2652,6 +2676,9 @@
           }
         }
       }
+    },
+    "暂无安装日志" : {
+
     },
     "暂无清理记录" : {
       "localizations" : {
@@ -2908,6 +2935,7 @@
       }
     },
     "查看" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -2916,6 +2944,9 @@
           }
         }
       }
+    },
+    "查看命令" : {
+
     },
     "检查中" : {
       "localizations" : {
@@ -3082,6 +3113,7 @@
       }
     },
     "正在安装 %@" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -3874,6 +3906,7 @@
       }
     },
     "自行安装命令" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -3884,6 +3917,7 @@
       }
     },
     "自行安装命令:" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -4375,6 +4409,9 @@
           }
         }
       }
+    },
+    "错误摘要" : {
+
     },
     "错误详情" : {
       "localizations" : {

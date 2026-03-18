@@ -111,11 +111,12 @@ actor InstallManager {
 
     func retry(
         at appPath: URL,
-        progressHandler: @escaping (Double, String) -> Void
+        progressHandler: @escaping (Double, String) -> Void,
+        logHandler: ((String) -> Void)? = nil
     ) async throws {
         cancel()
         try await Task.sleep(nanoseconds: 500_000_000)
-        try await install(at: appPath, progressHandler: progressHandler)
+        try await install(at: appPath, progressHandler: progressHandler, logHandler: logHandler)
     }
 
     private static func consumeHelperOutput(

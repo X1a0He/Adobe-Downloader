@@ -19,6 +19,9 @@ class NetworkManager: ObservableObject {
     internal var isFetchingProducts = false
     private let installManager = InstallManager()
     private var hasLoadedSavedTasks = false
+    private var lastInstallationProgress = 0.0
+    private var lastInstallationStatus = "准备安装..."
+    private var lastInstallationPhase: InstallProgressPhase = .preparing
     
     private var defaultDirectory: String {
         get { StorageData.shared.defaultDirectory }
@@ -193,6 +196,9 @@ class NetworkManager: ObservableObject {
         await MainActor.run {
             installationState = .installing(progress: 0, status: "准备安装...")
             installLogs = []
+            installCommand = ""
+            lastInstallationPhase = .preparing
+            updateInstallationSnapshot(progress: 0, status: "准备安装...")
         }
 
         do {
@@ -200,6 +206,7 @@ class NetworkManager: ObservableObject {
                 at: path,
                 progressHandler: { progress, status in
                     Task { @MainActor in
+                        self.updateInstallationSnapshot(progress: progress, status: status)
                         if status == "安装完成" {
                             self.installationState = .completed
                         } else {
@@ -209,12 +216,13 @@ class NetworkManager: ObservableObject {
                 },
                 logHandler: { message in
                     Task { @MainActor in
-                        self.installLogs.append(message)
+                        self.appendInstallLog(message)
                     }
                 }
             )
             
             await MainActor.run {
+                updateInstallationSnapshot(progress: 1.0, status: "安装完成")
                 installationState = .completed
             }
         } catch {
@@ -252,6 +260,10 @@ class NetworkManager: ObservableObject {
     func retryInstallation(at path: URL) async {
         await MainActor.run {
             installationState = .installing(progress: 0, status: "正在重试安装...")
+            installLogs = []
+            installCommand = ""
+            lastInstallationPhase = .preparing
+            updateInstallationSnapshot(progress: 0, status: "正在重试安装...")
         }
         
         do {
@@ -259,16 +271,23 @@ class NetworkManager: ObservableObject {
                 at: path,
                 progressHandler: { progress, status in
                     Task { @MainActor in
+                        self.updateInstallationSnapshot(progress: progress, status: status)
                         if status == "安装完成" {
                             self.installationState = .completed
                         } else {
                             self.installationState = .installing(progress: progress, status: status)
                         }
                     }
+                },
+                logHandler: { message in
+                    Task { @MainActor in
+                        self.appendInstallLog(message)
+                    }
                 }
             )
             
             await MainActor.run {
+                updateInstallationSnapshot(progress: 1.0, status: "安装完成")
                 installationState = .completed
             }
         } catch {
@@ -286,6 +305,116 @@ class NetworkManager: ObservableObject {
                 installationState = .failed(mainError, errorDetails)
             }
         }
+    }
+
+    func makeInstallProgressViewData(productName: String) -> InstallProgressViewData {
+        switch installationState {
+        case .idle:
+            return InstallProgressViewData(
+                productName: productName,
+                progress: 0,
+                status: "准备安装...",
+                logs: installLogs,
+                installCommand: installCommand,
+                errorDetails: nil,
+                phase: .preparing,
+                outcome: .running
+            )
+        case .installing(let progress, let status):
+            return InstallProgressViewData(
+                productName: productName,
+                progress: progress,
+                status: status,
+                logs: installLogs,
+                installCommand: installCommand,
+                errorDetails: nil,
+                phase: lastInstallationPhase,
+                outcome: .running
+            )
+        case .completed:
+            return InstallProgressViewData(
+                productName: productName,
+                progress: 1.0,
+                status: "安装完成",
+                logs: installLogs,
+                installCommand: installCommand,
+                errorDetails: nil,
+                phase: lastInstallationPhase,
+                outcome: .completed
+            )
+        case .failed(let error, let errorDetails):
+            let fallbackStatus = lastInstallationStatus
+            return InstallProgressViewData(
+                productName: productName,
+                progress: lastInstallationProgress,
+                status: normalizedInstallFailureStatus(from: error),
+                logs: installLogs,
+                installCommand: installCommand,
+                errorDetails: errorDetails,
+                phase: lastInstallationPhase,
+                outcome: .failed,
+                contextStatus: fallbackStatus
+            )
+        }
+    }
+
+    private func updateInstallationSnapshot(progress: Double, status: String) {
+        lastInstallationProgress = progress
+        lastInstallationStatus = status
+
+        if status == "安装完成" {
+            lastInstallationPhase = .finishing
+            return
+        }
+
+        let detectedPhase = InstallProgressTextParser.phase(from: status, logs: installLogs, outcome: .running)
+        if detectedPhase.rawValue >= lastInstallationPhase.rawValue {
+            lastInstallationPhase = detectedPhase
+        }
+    }
+
+    private func normalizedInstallFailureStatus(from error: Error) -> String {
+        let message = error.localizedDescription.trimmingCharacters(in: .whitespacesAndNewlines)
+        if message.hasPrefix("安装失败") {
+            return message
+        }
+        return "安装失败: \(message)"
+    }
+
+    private func appendInstallLog(_ message: String) {
+        let trimmedMessage = message.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedMessage.isEmpty else {
+            return
+        }
+        guard !shouldFilterInstallLog(trimmedMessage) else {
+            return
+        }
+        if isProcessingInstallLog(trimmedMessage),
+           !installLogs.isEmpty,
+           isProcessingInstallLog(installLogs[installLogs.count - 1]) {
+            installLogs[installLogs.count - 1] = trimmedMessage
+            return
+        }
+        guard installLogs.last != trimmedMessage else {
+            return
+        }
+        installLogs.append(trimmedMessage)
+    }
+
+    private func shouldFilterInstallLog(_ message: String) -> Bool {
+        guard message.contains("%") else {
+            return false
+        }
+
+        if message.contains("正在解压 ") || message.contains("正在安装 ") {
+            return true
+        }
+
+        return false
+    }
+
+    private func isProcessingInstallLog(_ message: String) -> Bool {
+        message.contains("正在处理:")
     }
 
     func getApplicationInfo(buildGuid: String) async throws -> String {
