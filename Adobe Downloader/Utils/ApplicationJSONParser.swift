@@ -28,6 +28,7 @@ struct DeltaPackageInfo: Codable, Equatable {
 struct ApplicationInfo {
     var properties: [String: Any] = [:]
 
+    var sapCode: String = ""
     var compressionType: String = ""
     var displayName: String = ""
 
@@ -102,6 +103,7 @@ class ApplicationJSONParser {
         info.rawJSON = jsonString
 
         info.properties = flattenJSON(jsonObject, prefix: "")
+        info.sapCode = jsonObject["SAPCode"] as? String ?? (jsonObject["sapCode"] as? String ?? "")
         info.compressionType = jsonObject["CompressionType"] as? String ?? ""
         info.displayName = (jsonObject["Name"] as? String)
             ?? (jsonObject["ProductName"] as? String)

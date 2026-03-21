@@ -63,8 +63,9 @@ struct Product: Codable, Equatable {
                 var targetPlatform: String
                 var selectedPlatform: String
                 var selectedReason: String
-                
-                init(sapCode: String, baseVersion: String, productVersion: String, buildGuid: String, isMatchPlatform: Bool = false, targetPlatform: String = "", selectedPlatform: String = "", selectedReason: String = "") {
+                var isSoftDependency: Bool
+
+                init(sapCode: String, baseVersion: String, productVersion: String, buildGuid: String, isMatchPlatform: Bool = false, targetPlatform: String = "", selectedPlatform: String = "", selectedReason: String = "", isSoftDependency: Bool = false) {
                     self.sapCode = sapCode
                     self.baseVersion = baseVersion
                     self.productVersion = productVersion
@@ -73,6 +74,7 @@ struct Product: Codable, Equatable {
                     self.targetPlatform = targetPlatform
                     self.selectedPlatform = selectedPlatform
                     self.selectedReason = selectedReason
+                    self.isSoftDependency = isSoftDependency
                 }
             }
         }
@@ -124,6 +126,7 @@ class DependenciesToDownload: ObservableObject, Codable {
     var version: String
     var buildGuid: String
     var applicationJson: String?
+    var isSoftDependency: Bool
     @Published var packages: [Package] = []
     @Published var completedPackages: Int = 0
 
@@ -131,11 +134,12 @@ class DependenciesToDownload: ObservableObject, Codable {
         packages.count
     }
 
-    init(sapCode: String, version: String, buildGuid: String, applicationJson: String = "") {
+    init(sapCode: String, version: String, buildGuid: String, applicationJson: String = "", isSoftDependency: Bool = false) {
         self.sapCode = sapCode
         self.version = version
         self.buildGuid = buildGuid
         self.applicationJson = applicationJson
+        self.isSoftDependency = isSoftDependency
     }
 
     func updateCompletedPackages() {
@@ -146,7 +150,7 @@ class DependenciesToDownload: ObservableObject, Codable {
     }
 
     enum CodingKeys: String, CodingKey {
-        case sapCode, version, buildGuid, applicationJson, packages
+        case sapCode, version, buildGuid, applicationJson, packages, isSoftDependency
     }
 
     func encode(to encoder: Encoder) throws {

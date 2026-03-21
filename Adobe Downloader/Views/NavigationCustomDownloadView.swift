@@ -144,24 +144,44 @@ struct NavigationCustomDownloadView: View {
         
         var dependencyInfos: [DependenciesToDownload] = []
         dependencyInfos.append(DependenciesToDownload(sapCode: product.id, version: product.version, buildGuid: buildGuid))
-        
+
         let dependencies = firstPlatform?.languageSet.first?.dependencies
+        var softDependencySapCodes: Set<String> = []
+        var cachedMainJson: String? = nil
+
+        let mainJsonString = try await globalNetworkService.getApplicationInfo(
+            buildGuid: buildGuid,
+            sapCode: product.id,
+            version: product.version,
+            platform: firstPlatform?.id
+        )
+        cachedMainJson = mainJsonString
+        if let mainAppInfo = try? ApplicationJSONParser.parse(jsonString: mainJsonString) {
+            softDependencySapCodes = Set(mainAppInfo.softDependencies)
+        }
+
         if let dependencies = dependencies {
             for dependency in dependencies {
-                dependencyInfos.append(DependenciesToDownload(sapCode: dependency.sapCode, version: dependency.productVersion, buildGuid: dependency.buildGuid))
+                let isSoft = softDependencySapCodes.contains(dependency.sapCode)
+                dependencyInfos.append(DependenciesToDownload(sapCode: dependency.sapCode, version: dependency.productVersion, buildGuid: dependency.buildGuid, isSoftDependency: isSoft))
             }
         }
-        
+
         for dependencyInfo in dependencyInfos {
             await MainActor.run {
                 loadingState.currentTask = String(localized: "正在处理 \(dependencyInfo.sapCode) 的包信息...")
             }
-            let jsonString = try await globalNetworkService.getApplicationInfo(
-                buildGuid: dependencyInfo.buildGuid,
-                sapCode: dependencyInfo.sapCode,
-                version: dependencyInfo.version,
-                platform: firstPlatform?.id
-            )
+            let jsonString: String
+            if dependencyInfo.sapCode == product.id, let cached = cachedMainJson {
+                jsonString = cached
+            } else {
+                jsonString = try await globalNetworkService.getApplicationInfo(
+                    buildGuid: dependencyInfo.buildGuid,
+                    sapCode: dependencyInfo.sapCode,
+                    version: dependencyInfo.version,
+                    platform: firstPlatform?.id
+                )
+            }
             dependencyInfo.applicationJson = jsonString
 
             let appInfo: ApplicationInfo
@@ -169,6 +189,10 @@ struct NavigationCustomDownloadView: View {
                 appInfo = try ApplicationJSONParser.parse(jsonString: jsonString)
             } catch {
                 throw NetworkError.invalidData("无法解析产品 \(dependencyInfo.sapCode) 的 Application.json: \(error.localizedDescription)")
+            }
+
+            if !appInfo.sapCode.isEmpty && appInfo.sapCode != dependencyInfo.sapCode {
+                print("[SapCode Sanity Check] SapCode '\(dependencyInfo.sapCode)' is passed but in Application.JSON it is '\(appInfo.sapCode)'")
             }
 
             for parsedPkg in appInfo.packages {
