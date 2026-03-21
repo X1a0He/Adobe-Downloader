@@ -364,7 +364,7 @@ class PDMWorkflowManager {
 
         let packageIdentifier = "PDM_\(fileName)"
 
-        try await ChunkedDownloadManager.shared.downloadFileWithChunks(
+        try await PDMDownloadEngine.shared.downloadFileWithChunks(
             packageIdentifier: packageIdentifier,
             url: url,
             destinationURL: filePath,

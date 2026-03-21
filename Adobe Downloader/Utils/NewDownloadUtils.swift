@@ -57,6 +57,8 @@ actor ConcurrentDownloadProgressManager {
     private var packageSpeeds: [String: Double] = [:]
     private var totalSize: Int64 = 0
     private var lastUpdateTime = Date()
+    private var smoothedTotalSpeed: Double = 0
+    private let speedSmoothingFactor: Double = 0.3
     
     func initialize(packages: [(id: String, size: Int64)]) {
         totalSize = packages.reduce(0) { $0 + $1.size }
@@ -83,8 +85,15 @@ actor ConcurrentDownloadProgressManager {
             return sum + Int64(Double(size) * item.value)
         }
         let totalProgress = totalSize > 0 ? Double(totalDownloaded) / Double(totalSize) : 0
-        let totalSpeed = packageSpeeds.values.reduce(0, +)
-        return (totalProgress, totalDownloaded, totalSpeed)
+        let rawSpeed = packageSpeeds.values.reduce(0, +)
+
+        if smoothedTotalSpeed == 0 || rawSpeed == 0 {
+            smoothedTotalSpeed = rawSpeed
+        } else {
+            smoothedTotalSpeed = speedSmoothingFactor * rawSpeed + (1 - speedSmoothingFactor) * smoothedTotalSpeed
+        }
+
+        return (totalProgress, totalDownloaded, smoothedTotalSpeed)
     }
     
     func isAllCompleted() -> Bool {
@@ -606,7 +615,7 @@ class NewDownloadUtils {
         guard let packageIdentifier = generatePackageIdentifier(package: package, task: task, dependency: product) else { return }
         let destinationURL = task.directory.appendingPathComponent(product.sapCode).appendingPathComponent(package.fullPackageName)
 
-        try await ChunkedDownloadManager.shared.downloadFileWithChunks(
+        try await PDMDownloadEngine.shared.downloadFileWithChunks(
             packageIdentifier: packageIdentifier,
             url: url,
             destinationURL: destinationURL,
@@ -626,7 +635,7 @@ class NewDownloadUtils {
                         progress: progress,
                         speed: speed
                     )
-                    
+
                     await self.updateTaskProgress(task: task, progressManager: progressManager)
                 }
             },
@@ -634,7 +643,7 @@ class NewDownloadUtils {
                 let isCancelled = await globalCancelTracker.isCancelled(task.id)
                 let isPaused = await globalCancelTracker.isPaused(task.id)
                 let isFlagCancelled = await cancelFlag.isSet()
-                
+
                 return isCancelled || isPaused || isFlagCancelled
             }
         )
@@ -836,7 +845,7 @@ class NewDownloadUtils {
                 try? FileManager.default.removeItem(at: fileURL)
 
                 if let packageIdentifier = generatePackageIdentifier(package: currentPackage, task: task, dependency: task.dependenciesToDownload.first(where: { $0.packages.contains(where: { $0.id == currentPackage.id }) })!) {
-                    ChunkedDownloadManager.shared.clearChunkedDownloadState(packageIdentifier: packageIdentifier)
+                    PDMDownloadEngine.shared.cancelDownload(packageIdentifier: packageIdentifier)
                 }
             }
 
@@ -1289,7 +1298,7 @@ class NewDownloadUtils {
         for dependency in task.dependenciesToDownload {
             for package in dependency.packages {
                 if let packageIdentifier = generatePackageIdentifier(package: package, task: task, dependency: dependency) {
-                    ChunkedDownloadManager.shared.pauseDownload(packageIdentifier: packageIdentifier)
+                    PDMDownloadEngine.shared.cancelDownload(packageIdentifier: packageIdentifier)
                 }
             }
         }
@@ -1582,7 +1591,7 @@ class NewDownloadUtils {
             for dependency in task.dependenciesToDownload {
                 for package in dependency.packages {
                     if let packageIdentifier = generatePackageIdentifier(package: package, task: task, dependency: dependency) {
-                        ChunkedDownloadManager.shared.cancelDownload(packageIdentifier: packageIdentifier)
+                        PDMDownloadEngine.shared.cancelDownload(packageIdentifier: packageIdentifier)
                     }
                 }
             }
