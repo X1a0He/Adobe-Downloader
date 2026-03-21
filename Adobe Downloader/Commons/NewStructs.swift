@@ -160,6 +160,7 @@ class DependenciesToDownload: ObservableObject, Codable {
         try container.encode(buildGuid, forKey: .buildGuid)
         try container.encodeIfPresent(applicationJson, forKey: .applicationJson)
         try container.encode(packages, forKey: .packages)
+        try container.encode(isSoftDependency, forKey: .isSoftDependency)
     }
 
     required init(from decoder: Decoder) throws {
@@ -169,6 +170,7 @@ class DependenciesToDownload: ObservableObject, Codable {
         buildGuid = try container.decode(String.self, forKey: .buildGuid)
         applicationJson = try container.decodeIfPresent(String.self, forKey: .applicationJson)
         packages = try container.decode([Package].self, forKey: .packages)
+        isSoftDependency = try container.decodeIfPresent(Bool.self, forKey: .isSoftDependency) ?? false
         completedPackages = 0
     }
 }
