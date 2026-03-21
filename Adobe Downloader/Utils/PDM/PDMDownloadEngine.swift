@@ -86,20 +86,6 @@ final class PDMDownloadEngine {
         )
     }
 
-    func saveDownloadState(
-        packageIdentifier: String,
-        downloadedBytes: Int64,
-        totalBytes: Int64,
-        destinationURL: URL
-    ) { }
-
-    func loadDownloadState(packageIdentifier: String) -> (downloadedBytes: Int64, totalBytes: Int64)? {
-        return nil
-    }
-
-    func cancelDownload(packageIdentifier: String) {
-    }
-
     private func enrichHeaders(_ headers: [(String, String)]) -> [(String, String)] {
         var result = headers
 

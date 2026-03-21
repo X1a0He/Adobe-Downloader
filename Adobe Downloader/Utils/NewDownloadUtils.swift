@@ -843,10 +843,6 @@ class NewDownloadUtils {
                 let destinationDir = task.directory.appendingPathComponent("\(task.productId)")
                 let fileURL = destinationDir.appendingPathComponent(currentPackage.fullPackageName)
                 try? FileManager.default.removeItem(at: fileURL)
-
-                if let packageIdentifier = generatePackageIdentifier(package: currentPackage, task: task, dependency: task.dependenciesToDownload.first(where: { $0.packages.contains(where: { $0.id == currentPackage.id }) })!) {
-                    PDMDownloadEngine.shared.cancelDownload(packageIdentifier: packageIdentifier)
-                }
             }
 
             await globalNetworkManager.saveTask(task)
@@ -1297,9 +1293,7 @@ class NewDownloadUtils {
 
         for dependency in task.dependenciesToDownload {
             for package in dependency.packages {
-                if let packageIdentifier = generatePackageIdentifier(package: package, task: task, dependency: dependency) {
-                    PDMDownloadEngine.shared.cancelDownload(packageIdentifier: packageIdentifier)
-                }
+                package.status = .downloading
             }
         }
 
@@ -1590,9 +1584,7 @@ class NewDownloadUtils {
         if let task = await globalNetworkManager.downloadTasks.first(where: { $0.id == taskId }) {
             for dependency in task.dependenciesToDownload {
                 for package in dependency.packages {
-                    if let packageIdentifier = generatePackageIdentifier(package: package, task: task, dependency: dependency) {
-                        PDMDownloadEngine.shared.cancelDownload(packageIdentifier: packageIdentifier)
-                    }
+                    package.status = .downloading
                 }
             }
         }
