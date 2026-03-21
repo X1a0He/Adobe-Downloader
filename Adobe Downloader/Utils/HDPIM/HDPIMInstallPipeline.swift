@@ -4,8 +4,17 @@
 //
 
 import Foundation
+import AppKit
 
 class HDPIMInstallPipeline {
+
+    private static let canonicalAllInstallLanguages = [
+        "cs_CZ", "da_DK", "de_DE", "el_GR", "en_AE", "en_GB", "en_IL", "en_US",
+        "es_ES", "es_MX", "fi_FI", "fil_PH", "fr_CA", "fr_FR", "fr_MA", "hi_IN",
+        "hu_HU", "id_ID", "it_IT", "ja_JP", "ko_KR", "ms_MY", "nb_NO", "nl_NL",
+        "pl_PL", "pt_BR", "ro_RO", "ru_RU", "sk_SK", "sl_SI", "sv_SE", "th_TH",
+        "tr_TR", "uk_UA", "vi_VN", "zh_CN", "zh_TW"
+    ]
 
     private var isCancelled = false
     private var backupManager: HDPIMBackupManager?
@@ -67,21 +76,50 @@ class HDPIMInstallPipeline {
         propertyTable.mergeFromRequestInfo(requestInfo)
 
         progressHandler(0.05, "正在收集包信息...")
-        let packagesToInstall = try collectPackages(
+        let collectedPackages = try collectPackages(
             productDir: productDir,
             productInfo: productInfo,
             propertyTable: propertyTable
         )
 
-        guard !packagesToInstall.isEmpty else {
+        guard !collectedPackages.isEmpty else {
             progressHandler(1.0, "没有需要安装的包")
             return
         }
 
-        log("[HDPIM Pipeline] 收集到 \(packagesToInstall.count) 个包: \(packagesToInstall.map { $0.packageName })")
+        log("[HDPIM Pipeline] 收集到 \(collectedPackages.count) 个候选包: \(collectedPackages.map { $0.packageName })")
 
         try HDPIMDatabase.shared.open()
         defer { HDPIMDatabase.shared.close() }
+
+        let installedProductIdentities = HDPIMDatabase.shared.getInstalledProductIdentitySet()
+
+        let allProductContexts = makeProductDatabaseContexts(
+            productInfo: productInfo,
+            requestInfo: requestInfo,
+            propertyTable: propertyTable,
+            packages: collectedPackages
+        )
+        let productContextByIdentity = Dictionary(
+            uniqueKeysWithValues: allProductContexts.map { (productIdentity(for: $0), $0) }
+        )
+        let newProductIdentities = Set(
+            allProductContexts
+                .map(productIdentity(for:))
+                .filter { !installedProductIdentities.contains($0) }
+        )
+
+        let packagesToInstall = try filterPackagesForInstall(collectedPackages)
+
+        guard !packagesToInstall.isEmpty else {
+            progressHandler(1.0, "当前状态已满足安装要求")
+            return
+        }
+
+        log("[HDPIM Pipeline] 本次实际需要安装 \(packagesToInstall.count) 个包: \(packagesToInstall.map { $0.packageName })")
+
+        progressHandler(0.08, "正在检查冲突进程...")
+        try checkConflictingProcesses(packages: packagesToInstall)
 
         progressHandler(0.1, "正在备份现有文件...")
         let backup = HDPIMBackupManager()
@@ -105,6 +143,14 @@ class HDPIMInstallPipeline {
 
         let totalPackages = packagesToInstall.count
         var installedCount = 0
+        var persistedPackageContexts: [HDPIMNativePackageContext] = []
+        let productContexts = makeProductContextsForPersistence(
+            allProductContexts,
+            packagesToInstall: packagesToInstall
+        )
+        let newProductContexts = productContexts.filter {
+            newProductIdentities.contains(productIdentity(for: $0))
+        }
 
         do {
             for (index, pkg) in packagesToInstall.enumerated() {
@@ -170,6 +216,11 @@ class HDPIMInstallPipeline {
                     extractDir: extractedPackage.extractDir,
                     sapCode: pkg.sapCode,
                     version: pkg.version,
+                    platform: pkg.platform,
+                    amtConfigAppID: firstNonEmptyString([
+                        pkg.applicationInfo.amtConfig["AMTConfig.appID"],
+                        pkg.applicationInfo.amtConfig["appID"]
+                    ]),
                     installDir: installDir,
                     aliasPackageName: pkg.aliasPackageName,
                     productInstallDir: pkg.productInstallDir,
@@ -203,23 +254,31 @@ class HDPIMInstallPipeline {
 
                 allExecutedCommands.append(contentsOf: result.executedCommands)
 
-                try HDPIMDatabase.shared.recordInstall(HDPIMInstallRecord(
-                    sapCode: pkg.sapCode,
-                    codexVersion: pkg.version,
-                    platform: pkg.platform,
-                    packageName: pkg.packageName,
-                    packageVersion: pkg.parsed.packageVersion,
-                    installPath: installDir,
-                    uninstallPIMXPath: result.uninstallPIMXPath?.path,
-                    uninstallPIMXHash: result.uninstallPIMXHash256,
-                    installTimestamp: Date()
-                ))
+                let installedPackageContext = makePackageDatabaseContext(
+                    package: pkg,
+                    installResult: result,
+                    validatedPackage: extractedPackage,
+                    installSequenceNumber: index + 1
+                )
+                try HDPIMDatabase.shared.recordInstalledPackage(
+                    installedPackageContext,
+                    product: newProductIdentities.contains(productIdentity(for: pkg))
+                        ? productContextByIdentity[productIdentity(for: pkg)]
+                        : nil
+                )
+                persistedPackageContexts.append(installedPackageContext)
 
                 installedCount += 1
             }
 
+            try HDPIMDatabase.shared.recordInstalledProducts(productContexts)
+
             progressHandler(0.95, "正在清理临时文件...")
-            try await backup.cleanup()
+            do {
+                try await backup.cleanup()
+            } catch {
+                log("[HDPIM Pipeline] 清理备份目录失败: \(error.localizedDescription)")
+            }
 
             progressHandler(1.0, "安装完成")
 
@@ -232,9 +291,20 @@ class HDPIMInstallPipeline {
                 backupManager: backup
             )
 
-            if let sapCode = packagesToInstall.first?.sapCode,
-               let version = packagesToInstall.first?.version {
-                try? HDPIMDatabase.shared.removeInstallation(sapCode: sapCode, version: version)
+            if !persistedPackageContexts.isEmpty {
+                try? HDPIMDatabase.shared.removeInstalledPackages(
+                    persistedPackageContexts,
+                    removeRepairPIMX: true,
+                    removeUninstallPIMX: true
+                )
+            }
+
+            if !newProductContexts.isEmpty {
+                try? HDPIMDatabase.shared.removeInstallations(
+                    products: newProductContexts,
+                    removeRepairPIMX: true,
+                    removeUninstallPIMX: true
+                )
             }
 
             throw error
@@ -257,22 +327,34 @@ class HDPIMInstallPipeline {
 
         let sapCode = try xmlDoc.nodes(forXPath: "//ProductInfo/SapCode").first?.stringValue
             ?? xmlDoc.nodes(forXPath: "//ProductInfo/SAPCode").first?.stringValue ?? ""
-        let codexVersion = try xmlDoc.nodes(forXPath: "//ProductInfo/CodexVersion").first?.stringValue ?? ""
+        let codexVersion = try xmlDoc.nodes(forXPath: "//ProductInfo/CodexVersion").first?.stringValue
+            ?? xmlDoc.nodes(forXPath: "//ProductInfo/ProductVersion").first?.stringValue
+            ?? ""
         let platform = try xmlDoc.nodes(forXPath: "//ProductInfo/Platform").first?.stringValue ?? ""
         let buildGuid = try xmlDoc.nodes(forXPath: "//ProductInfo/BuildGuid").first?.stringValue ?? ""
+        let buildVersion = try xmlDoc.nodes(forXPath: "//ProductInfo/BuildVersion").first?.stringValue ?? ""
+        let moduleNodes = try xmlDoc.nodes(forXPath: "//ProductInfo/Modules/Module")
 
-        var dependencies: [(sapCode: String, platform: String, buildGuid: String)] = []
+        var dependencies: [(sapCode: String, version: String, platform: String, buildGuid: String, buildVersion: String)] = []
         let depNodes = try xmlDoc.nodes(forXPath: "//ProductInfo/Dependencies/Dependency")
         for node in depNodes {
             guard let element = node as? XMLElement else { continue }
             let depSapCode = try element.nodes(forXPath: "SapCode").first?.stringValue
                 ?? element.nodes(forXPath: "SAPCode").first?.stringValue ?? ""
+            let depVersion = try element.nodes(forXPath: "CodexVersion").first?.stringValue
+                ?? element.nodes(forXPath: "ProductVersion").first?.stringValue ?? ""
             let depPlatform = try element.nodes(forXPath: "Platform").first?.stringValue ?? ""
             let depBuildGuid = try element.nodes(forXPath: "BuildGuid").first?.stringValue ?? ""
+            let depBuildVersion = try element.nodes(forXPath: "BuildVersion").first?.stringValue ?? ""
             if !depSapCode.isEmpty {
-                dependencies.append((sapCode: depSapCode, platform: depPlatform, buildGuid: depBuildGuid))
+                dependencies.append((sapCode: depSapCode, version: depVersion, platform: depPlatform, buildGuid: depBuildGuid, buildVersion: depBuildVersion))
             }
         }
+
+        let moduleIds = moduleNodes.compactMap { node -> String? in
+            guard let element = node as? XMLElement else { return nil }
+            return try? element.nodes(forXPath: "Id").first?.stringValue
+        }.compactMap { $0 }.filter { !$0.isEmpty }
 
         var requestInfo: [String: String] = [:]
         let requestNodes = try xmlDoc.nodes(forXPath: "//RequestInfo/*")
@@ -287,7 +369,9 @@ class HDPIMInstallPipeline {
             codexVersion: codexVersion,
             platform: platform,
             buildGuid: buildGuid,
-            dependencies: dependencies
+            buildVersion: buildVersion,
+            dependencies: dependencies,
+            moduleIds: moduleIds
         )
 
         return (productInfo, requestInfo)
@@ -300,12 +384,12 @@ class HDPIMInstallPipeline {
     ) throws -> [PackageToInstall] {
         var packages: [PackageToInstall] = []
 
-        var sapCodes = [(sapCode: productInfo.sapCode, platform: productInfo.platform)]
+        var sapCodes = [(sapCode: productInfo.sapCode, version: productInfo.codexVersion, platform: productInfo.platform)]
         for dep in productInfo.dependencies {
-            sapCodes.append((sapCode: dep.sapCode, platform: dep.platform))
+            sapCodes.append((sapCode: dep.sapCode, version: dep.version, platform: dep.platform))
         }
 
-        for (sapCode, platform) in sapCodes {
+        for (sapCode, version, platform) in sapCodes {
             let sapDir = productDir.appendingPathComponent(sapCode)
             let appJsonPath = sapDir.appendingPathComponent("application.json")
 
@@ -334,10 +418,11 @@ class HDPIMInstallPipeline {
 
                 packages.append(PackageToInstall(
                     sapCode: sapCode,
-                    version: productInfo.codexVersion,
+                    version: version.isEmpty ? appInfo.codexVersion : version,
                     platform: platform,
                     packageName: parsedPkg.packageName,
                     parsed: parsedPkg,
+                    applicationInfo: appInfo,
                     zipPath: zipPath,
                     sapDir: sapDir,
                     compressionType: appInfo.compressionType,
@@ -347,7 +432,37 @@ class HDPIMInstallPipeline {
             }
         }
 
-        return packages
+        return packages.sorted {
+            let leftSequence = $0.parsed.installSequenceNumber > 0 ? $0.parsed.installSequenceNumber : .max
+            let rightSequence = $1.parsed.installSequenceNumber > 0 ? $1.parsed.installSequenceNumber : .max
+            if leftSequence != rightSequence {
+                return leftSequence < rightSequence
+            }
+            return $0.packageName < $1.packageName
+        }
+    }
+
+    private func filterPackagesForInstall(_ packages: [PackageToInstall]) throws -> [PackageToInstall] {
+        try packages.filter { package in
+            let packageVersion = package.parsed.packageVersion.isEmpty ? package.version : package.parsed.packageVersion
+            let isInstalled = try HDPIMDatabase.shared.hasValidInstalledPackage(
+                sapCode: package.sapCode,
+                productVersion: package.version,
+                processorFamily: HDPIMProcessorFamily.from(platform: package.platform),
+                packageName: package.packageName,
+                packageVersion: packageVersion,
+                expectedInstallDir: package.productInstallDir
+            )
+            return !isInstalled
+        }
+    }
+
+    private func makeProductContextsForPersistence(
+        _ products: [HDPIMNativeProductContext],
+        packagesToInstall: [PackageToInstall]
+    ) -> [HDPIMNativeProductContext] {
+        let packageProductIdentities = Set(packagesToInstall.map(productIdentity(for:)))
+        return products.filter { packageProductIdentities.contains(productIdentity(for: $0)) }
     }
 
     private func extractPackage(
@@ -500,6 +615,48 @@ class HDPIMInstallPipeline {
         temporaryExtractDirectories.removeAll()
     }
 
+    private func checkConflictingProcesses(packages: [PackageToInstall]) throws {
+        var regexPatterns: [(regex: String, displayName: String)] = []
+        var seen: Set<String> = []
+
+        for pkg in packages {
+            for process in pkg.applicationInfo.conflictingProcesses {
+                let regex = process.regularExpression.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !regex.isEmpty, seen.insert(regex).inserted else { continue }
+                let name = process.processDisplayName.isEmpty ? regex : process.processDisplayName
+                regexPatterns.append((regex: regex, displayName: name))
+            }
+        }
+
+        guard !regexPatterns.isEmpty else { return }
+
+        let runningApps = NSWorkspace.shared.runningApplications
+        let processNames = runningApps.compactMap { app -> String? in
+            app.localizedName ?? app.bundleIdentifier
+        }
+
+        var conflicting: [String] = []
+        for pattern in regexPatterns {
+            guard let regex = try? NSRegularExpression(pattern: pattern.regex, options: .caseInsensitive) else {
+                continue
+            }
+            for name in processNames {
+                let range = NSRange(name.startIndex..., in: name)
+                if regex.firstMatch(in: name, range: range) != nil {
+                    if !conflicting.contains(pattern.displayName) {
+                        conflicting.append(pattern.displayName)
+                    }
+                    break
+                }
+            }
+        }
+
+        guard !conflicting.isEmpty else { return }
+
+        log("[HDPIM Pipeline] 检测到冲突进程: \(conflicting.joined(separator: ", "))")
+        throw HDPIMInstallError.conflictingProcessDetected(conflicting)
+    }
+
     private func collectInstallDirectories(
         packages: [PackageToInstall],
         installDir: String,
@@ -521,6 +678,477 @@ class HDPIMInstallPipeline {
             return URL(fileURLWithPath: path, isDirectory: true)
         }
     }
+
+    private func makeProductDatabaseContexts(
+        productInfo: ProductInfoFromDriver,
+        requestInfo: [String: String],
+        propertyTable: HDPIMPropertyTable,
+        packages: [PackageToInstall]
+    ) -> [HDPIMNativeProductContext] {
+        let groups = makeProductPackageGroups(
+            productInfo: productInfo,
+            packages: packages
+        )
+        let installLanguage = requestInfo["InstallLanguage"] ?? ""
+        let fallbackInstallDir = requestInfo["InstallDir"]
+            ?? propertyTable.getProperty("INSTALLDIR")
+            ?? "/Applications"
+
+        let groupLookup = Dictionary(uniqueKeysWithValues: groups.map {
+            ("\($0.sapCode)|\($0.version)|\($0.platform)", $0)
+        })
+
+        return groups.map { group in
+            let actualInstallDir = firstNonEmptyString([
+                group.productInstallDir,
+                fallbackInstallDir
+            ]) ?? fallbackInstallDir
+            let productPropertyTable = propertyTable.cloned()
+            productPropertyTable.setInstallDir(actualInstallDir)
+            productPropertyTable.setProductInstallDir(actualInstallDir)
+
+            let appLaunchValue = firstNonEmptyString([
+                propertyString(group.applicationInfo.properties["AppLaunchUsingProcessorFamily"]),
+                propertyString(group.applicationInfo.properties["AppLaunch"]),
+                propertyString(group.applicationInfo.properties["LaunchPath"]),
+                propertyString(group.applicationInfo.properties["AppLaunchPath"])
+            ]) ?? ""
+            let resolvedAppLaunchPath = appLaunchValue.isEmpty ? "" : productPropertyTable.expandPath(appLaunchValue)
+
+            let productName = firstNonEmptyString([
+                group.applicationInfo.displayName,
+                propertyString(group.applicationInfo.properties["ProductName"]),
+                propertyString(group.applicationInfo.properties["Name"]),
+                group.sapCode
+            ]) ?? group.sapCode
+            let conflictingProcesses = makeConflictingProcessList(from: group.applicationInfo)
+            let conflictingProcessesXML = makeConflictingProcessesXML(from: group.applicationInfo)
+
+            let modules: [String]
+            if group.sapCode == productInfo.sapCode && !productInfo.moduleIds.isEmpty {
+                modules = Array(Set(productInfo.moduleIds)).sorted()
+            } else {
+                modules = Array(Set(group.applicationInfo.modules.map(\.id).filter { !$0.isEmpty })).sorted()
+            }
+
+            let dependencies: [HDPIMNativeProductReferenceRecord]
+            if group.sapCode == productInfo.sapCode {
+                dependencies = productInfo.dependencies.compactMap { dependency in
+                    let matchedGroup = groupLookup["\(dependency.sapCode)|\(dependency.version)|\(dependency.platform)"]
+                        ?? groups.first(where: { $0.sapCode == dependency.sapCode })
+                    let dependencyVersion = firstNonEmptyString([
+                        matchedGroup?.applicationInfo.baseVersion,
+                        matchedGroup?.version,
+                        dependency.version
+                    ]) ?? productInfo.codexVersion
+                    let dependencyPlatform = matchedGroup?.platform ?? dependency.platform
+
+                    return HDPIMNativeProductReferenceRecord(
+                        dependencySapCode: dependency.sapCode,
+                        dependencyVersion: dependencyVersion,
+                        dependencyProcessorFamily: HDPIMProcessorFamily.from(platform: dependencyPlatform),
+                        referencingSapCode: productInfo.sapCode,
+                        referencingVersion: productInfo.codexVersion,
+                        referencingProcessorFamily: HDPIMProcessorFamily.from(platform: productInfo.platform),
+                        type: ""
+                    )
+                }
+            } else {
+                dependencies = []
+            }
+
+            return HDPIMNativeProductContext(
+                sapCode: group.sapCode,
+                codexVersion: group.version,
+                platform: group.platform,
+                buildGuid: group.buildGuid,
+                buildVersion: firstNonEmptyString([
+                    group.buildVersion,
+                    group.applicationInfo.productVersion,
+                    group.version
+                ]) ?? group.version,
+                baseVersion: group.applicationInfo.baseVersion,
+                installLanguage: makeInstallLanguage(
+                    from: group.applicationInfo,
+                    requestedLanguage: installLanguage
+                ),
+                productName: productName,
+                amtConfigLEID: firstNonEmptyString([
+                    group.applicationInfo.amtConfig["AMTConfig.LEID"],
+                    group.applicationInfo.amtConfig["LEID"]
+                ]),
+                amtConfigAppID: firstNonEmptyString([
+                    group.applicationInfo.amtConfig["AMTConfig.appID"],
+                    group.applicationInfo.amtConfig["appID"]
+                ]),
+                amtConfigPath: firstNonEmptyString([
+                    group.applicationInfo.amtConfig["AMTConfig.path"],
+                    group.applicationInfo.amtConfig["path"]
+                ]),
+                conflictingProcesses: conflictingProcesses,
+                conflictingProcessesXML: conflictingProcessesXML,
+                installDir: actualInstallDir,
+                appLaunchPath: appLaunchValue,
+                resolvedAppLaunchPath: resolvedAppLaunchPath,
+                modules: modules,
+                autoInstall: group.applicationInfo.autoInstall,
+                isVisibleProduct: group.applicationInfo.isVisibleProduct,
+                isSelfReference: group.applicationInfo.isSelfReference,
+                isNonCCProduct: group.applicationInfo.isNonCCProduct,
+                vulcanConfig: propertyString(group.applicationInfo.properties["VulcanConfig"]),
+                uxpPluginConfig: propertyString(group.applicationInfo.properties["UxpPluginConfig"]),
+                ffcEnvironment: propertyTable.getProperty("FFCEnvironment"),
+                dependencies: dependencies
+            )
+        }
+    }
+
+    private func makeProductPackageGroups(
+        productInfo: ProductInfoFromDriver,
+        packages: [PackageToInstall]
+    ) -> [ProductPackageGroup] {
+        var buildGuidByKey: [String: String] = [
+            "\(productInfo.sapCode)|\(productInfo.codexVersion)|\(productInfo.platform)": productInfo.buildGuid
+        ]
+        var buildVersionByKey: [String: String] = [
+            "\(productInfo.sapCode)|\(productInfo.codexVersion)|\(productInfo.platform)": productInfo.buildVersion
+        ]
+
+        for dependency in productInfo.dependencies {
+            buildGuidByKey["\(dependency.sapCode)|\(dependency.version)|\(dependency.platform)"] = dependency.buildGuid
+            buildVersionByKey["\(dependency.sapCode)|\(dependency.version)|\(dependency.platform)"] = dependency.buildVersion
+        }
+
+        var groups: [ProductPackageGroup] = []
+        var indexByKey: [String: Int] = [:]
+
+        for package in packages {
+            let key = "\(package.sapCode)|\(package.version)|\(package.platform)"
+            if let index = indexByKey[key] {
+                let existing = groups[index]
+                groups[index] = ProductPackageGroup(
+                    sapCode: existing.sapCode,
+                    version: existing.version,
+                    platform: existing.platform,
+                    buildGuid: existing.buildGuid,
+                    buildVersion: existing.buildVersion,
+                    applicationInfo: existing.applicationInfo,
+                    productInstallDir: existing.productInstallDir,
+                    packages: existing.packages + [package]
+                )
+                continue
+            }
+
+            indexByKey[key] = groups.count
+            groups.append(
+                ProductPackageGroup(
+                    sapCode: package.sapCode,
+                    version: package.version,
+                    platform: package.platform,
+                    buildGuid: buildGuidByKey["\(package.sapCode)|\(package.version)|\(package.platform)"] ?? "",
+                    buildVersion: buildVersionByKey["\(package.sapCode)|\(package.version)|\(package.platform)"] ?? "",
+                    applicationInfo: package.applicationInfo,
+                    productInstallDir: package.productInstallDir,
+                    packages: [package]
+                )
+            )
+        }
+
+        return groups
+    }
+
+    private func makePackageDatabaseContext(
+        package: PackageToInstall,
+        installResult: HDPIMInstallHelper.InstallResult,
+        validatedPackage: ValidatedExtractPackage,
+        installSequenceNumber: Int
+    ) -> HDPIMNativePackageContext {
+        let targetFolders = makeTargetFolders(from: validatedPackage.validation.packageInfo.assetReferences)
+        let moduleValue = makeModuleValue(for: package)
+        let packageProcessorFamily = officialPackageProcessorFamily(for: package)
+        let extractSizeValue: String = {
+            if package.parsed.extractSize > 0 {
+                return "\(package.parsed.extractSize)"
+            }
+            if package.parsed.downloadSize > 0 {
+                return "\(package.parsed.downloadSize)"
+            }
+            let zipSize = (try? FileManager.default.attributesOfItem(atPath: package.zipPath.path)[.size] as? Int64) ?? 0
+            return zipSize > 0 ? "\(zipSize)" : "0"
+        }()
+
+        return HDPIMNativePackageContext(
+            sapCode: package.sapCode,
+            productVersion: package.version,
+            platform: package.platform,
+            packageName: package.packageName,
+            packageVersion: package.parsed.packageVersion.isEmpty ? package.version : package.parsed.packageVersion,
+            packageType: package.parsed.type,
+            packageProcessorFamily: packageProcessorFamily,
+            sequenceNumber: package.parsed.installSequenceNumber > 0 ? package.parsed.installSequenceNumber : installSequenceNumber,
+            installDir: package.productInstallDir,
+            uninstallPIMXPath: installResult.uninstallPIMXPath?.path,
+            uninstallPIMXHash: installResult.uninstallPIMXHash,
+            uninstallPIMXHash256: installResult.uninstallPIMXHash256,
+            repairPIMXPath: installResult.repairPIMXPath?.path,
+            repairPIMXHash: installResult.repairPIMXHash,
+            repairPIMXHash256: installResult.repairPIMXHash256,
+            installSize: extractSizeValue,
+            targetFolders: targetFolders,
+            ribsCoexistenceCode: propertyString(package.applicationInfo.properties["RIBSCoexistenceCode"]),
+            module: moduleValue,
+            uwpInfoXML: nil,
+            isShared: package.parsed.isShared
+        )
+    }
+
+    private func makeTargetFolders(from assets: [PIMXAssetReference]) -> [String] {
+        var seen: Set<String> = []
+        var folders: [String] = []
+
+        for asset in assets {
+            let targetPath = asset.targetTemplate.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !targetPath.isEmpty,
+                  !shouldSkipTargetFolder(targetPath),
+                  seen.insert(targetPath).inserted else {
+                continue
+            }
+            folders.append(targetPath)
+        }
+
+        return folders.sorted(by: targetFolderComesFirst)
+    }
+
+    private func productIdentity(for product: HDPIMNativeProductContext) -> String {
+        "\(product.sapCode)|\(product.codexVersion)|\(product.processorFamily.rawValue)"
+    }
+
+    private func productIdentity(for package: PackageToInstall) -> String {
+        "\(package.sapCode)|\(package.version)|\(HDPIMProcessorFamily.from(platform: package.platform).rawValue)"
+    }
+
+    private func packageIdentity(for package: PackageToInstall) -> String {
+        let processorFamily = HDPIMProcessorFamily.from(platform: package.platform).rawValue
+        let packageVersion = package.parsed.packageVersion.isEmpty ? package.version : package.parsed.packageVersion
+        return "\(package.sapCode)|\(package.version)|\(processorFamily)|\(package.packageName)|\(packageVersion)"
+    }
+
+    private func makeModuleValue(for package: PackageToInstall) -> String? {
+        let matchedModules = package.applicationInfo.modules
+            .filter { module in
+                module.referencePackages.contains(package.packageName)
+                    || module.referencePackages.contains(package.aliasPackageName)
+                    || module.referencePackages.contains(package.parsed.fullPackageName)
+            }
+            .map(\.id)
+            .filter { !$0.isEmpty }
+
+        guard !matchedModules.isEmpty else {
+            return nil
+        }
+        return matchedModules.joined(separator: ",")
+    }
+
+    private func makeConflictingProcessList(from appInfo: ApplicationInfo) -> String {
+        appInfo.conflictingProcesses.compactMap { process in
+            firstNonEmptyString([
+                process.processDisplayName,
+                process.regularExpression,
+                process.relativePath
+            ])
+        }.joined(separator: ",")
+    }
+
+    private func makeConflictingProcessesXML(from appInfo: ApplicationInfo) -> String {
+        guard !appInfo.conflictingProcesses.isEmpty else {
+            return "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ConflictingProcesses></ConflictingProcesses>"
+        }
+
+        var xml = "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<ConflictingProcesses>\n"
+
+        for process in appInfo.conflictingProcesses {
+            xml += "    <ConflictingProcess headless=\"\(xmlEscaped(process.headless))\" forceKillAllowed=\"\(xmlEscaped(process.forceKillAllowed))\" adobeOwned=\"\(xmlEscaped(process.adobeOwned))\">"
+            xml += "<RegularExpression>\(xmlEscaped(process.regularExpression))</RegularExpression>\n"
+            xml += "        <ProcessDisplayName>\(xmlEscaped(process.processDisplayName))</ProcessDisplayName>\n"
+            xml += "        <RelativePath>\(xmlEscaped(process.relativePath))</RelativePath>\n"
+            let parentRegex = process.parentRegularExpression.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !parentRegex.isEmpty {
+                xml += "        <ParentRegularExpression>\(xmlEscaped(process.parentRegularExpression))</ParentRegularExpression>\n"
+            }
+            let parentDisplayName = process.parentDisplayName.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !parentDisplayName.isEmpty {
+                xml += "        <ParentDisplayName>\(xmlEscaped(process.parentDisplayName))</ParentDisplayName>\n"
+            }
+            xml += "    </ConflictingProcess>\n"
+        }
+
+        xml += "</ConflictingProcesses>"
+        return xml
+    }
+
+    private func officialPackageProcessorFamily(for package: PackageToInstall) -> String {
+        let explicitValue = package.parsed.processorFamily.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !explicitValue.isEmpty {
+            return explicitValue
+        }
+
+        let productPlatform = firstNonEmptyString([
+            propertyString(package.applicationInfo.properties["Platform"]),
+            package.platform
+        ]) ?? ""
+
+        return productPlatform.localizedCaseInsensitiveContains("64") ? "64-bit" : "32-bit"
+    }
+
+    private func makeInstallLanguage(from appInfo: ApplicationInfo, requestedLanguage: String) -> String {
+        let rawLanguages = appInfo.supportedLanguages
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        let supportedLanguages = rawLanguages.filter { $0.caseInsensitiveCompare("mul") != .orderedSame }
+        let hasMulLanguage = rawLanguages.contains { $0.caseInsensitiveCompare("mul") == .orderedSame }
+        let trimmedRequested = requestedLanguage.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        if appInfo.autoInstall && !appInfo.isVisibleProduct {
+            if hasMulLanguage {
+                return Self.canonicalAllInstallLanguages.joined(separator: ",")
+            }
+            if !supportedLanguages.isEmpty {
+                return supportedLanguages.joined(separator: ",")
+            }
+        }
+
+        if !supportedLanguages.isEmpty,
+            supportedLanguages.count <= 2,
+            !trimmedRequested.isEmpty,
+           supportedLanguages.contains(trimmedRequested),
+           supportedLanguages.contains("en_US") {
+            return supportedLanguages.joined(separator: ",")
+        }
+
+        if !trimmedRequested.isEmpty {
+            if supportedLanguages.contains(trimmedRequested) {
+                return trimmedRequested
+            }
+            if hasMulLanguage {
+                return Self.canonicalAllInstallLanguages.joined(separator: ",")
+            }
+            if supportedLanguages.contains("en_US"), trimmedRequested != "en_US" {
+                return ["en_US", trimmedRequested].joined(separator: ",")
+            }
+            return trimmedRequested
+        }
+
+        if !supportedLanguages.isEmpty {
+            return supportedLanguages.joined(separator: ",")
+        }
+
+        if hasMulLanguage {
+            return Self.canonicalAllInstallLanguages.joined(separator: ",")
+        }
+
+        return ""
+    }
+
+    private func shouldSkipTargetFolder(_ path: String) -> Bool {
+        path.localizedCaseInsensitiveContains("/CustomHook/")
+    }
+
+    private func targetFolderComesFirst(_ lhs: String, _ rhs: String) -> Bool {
+        let leftCategory = targetFolderCategoryRank(lhs)
+        let rightCategory = targetFolderCategoryRank(rhs)
+        if leftCategory != rightCategory {
+            return leftCategory < rightCategory
+        }
+
+        let leftSpecial = targetFolderSpecialRank(lhs, category: leftCategory)
+        let rightSpecial = targetFolderSpecialRank(rhs, category: rightCategory)
+        if leftSpecial != rightSpecial {
+            return leftSpecial < rightSpecial
+        }
+
+        return lhs.localizedStandardCompare(rhs) == .orderedDescending
+    }
+
+    private func targetFolderCategoryRank(_ path: String) -> Int {
+        let normalized = path.lowercased()
+        if normalized.hasPrefix("[userpreferences]") {
+            return 0
+        }
+        if normalized.hasPrefix("[usercommon]") {
+            return 1
+        }
+        if normalized.hasPrefix("[shareddocuments]") {
+            return 2
+        }
+        if normalized.hasPrefix("[installdir]") {
+            return 3
+        }
+        if normalized.hasPrefix("[adobecommon]") {
+            return 4
+        }
+        return 5
+    }
+
+    private func targetFolderSpecialRank(_ path: String, category: Int) -> Int {
+        let normalized = path.lowercased()
+        switch category {
+        case 0:
+            return normalized == "[userpreferences]" ? 1 : 0
+        case 1:
+            return normalized.contains("/uxp/pluginsstorage/") ? 0 : 1
+        case 3:
+            return normalized == "[installdir]" ? 1 : 0
+        case 4:
+            if normalized == "[adobecommon]" {
+                return 2
+            }
+            if normalized.contains("/amt") {
+                return 0
+            }
+            return 1
+        default:
+            return 0
+        }
+    }
+
+    private func propertyString(_ value: Any?) -> String? {
+        switch value {
+        case let value as String where !value.isEmpty:
+            return value
+        case let value as NSNumber:
+            return value.stringValue
+        default:
+            return nil
+        }
+    }
+
+    private func firstNonEmptyString(_ values: [String?]) -> String? {
+        values.compactMap { value in
+            guard let value else { return nil }
+            let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+            return trimmed.isEmpty ? nil : trimmed
+        }.first
+    }
+
+    private func xmlEscaped(_ value: String) -> String {
+        value
+            .replacingOccurrences(of: "&", with: "&amp;")
+            .replacingOccurrences(of: "<", with: "&lt;")
+            .replacingOccurrences(of: ">", with: "&gt;")
+            .replacingOccurrences(of: "\"", with: "&quot;")
+            .replacingOccurrences(of: "'", with: "&apos;")
+    }
+}
+
+private struct ProductPackageGroup {
+    let sapCode: String
+    let version: String
+    let platform: String
+    let buildGuid: String
+    let buildVersion: String
+    let applicationInfo: ApplicationInfo
+    let productInstallDir: String
+    let packages: [PackageToInstall]
 }
 
 struct ProductInfoFromDriver {
@@ -528,7 +1156,9 @@ struct ProductInfoFromDriver {
     let codexVersion: String
     let platform: String
     let buildGuid: String
-    let dependencies: [(sapCode: String, platform: String, buildGuid: String)]
+    let buildVersion: String
+    let dependencies: [(sapCode: String, version: String, platform: String, buildGuid: String, buildVersion: String)]
+    let moduleIds: [String]
 }
 
 struct PackageToInstall {
@@ -537,6 +1167,7 @@ struct PackageToInstall {
     let platform: String
     let packageName: String
     let parsed: ParsedPackage
+    let applicationInfo: ApplicationInfo
     let zipPath: URL
     let sapDir: URL
     let compressionType: String

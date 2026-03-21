@@ -6,28 +6,43 @@
 import Foundation
 
 enum PIMXCommandDescriptor {
-    case moveFile(source: String, target: String)
-    case copyFile(source: String, target: String)
-    case blindCopy(source: String, target: String)
-    case createDirectory(path: String)
-    case mergeDirectory(source: String, target: String)
+    case moveFile(source: String, target: String, pimxTarget: String)
+    case copyFile(source: String, target: String, pimxTarget: String)
+    case blindCopy(source: String, target: String, pimxTarget: String)
+    case createDirectory(path: String, pimxPath: String)
+    case mergeDirectory(source: String, target: String, pimxTarget: String)
     case deleteFile(target: String)
     case deleteDirectory(source: String)
-    case createSymlink(source: String, target: String)
+    case createSymlink(source: String, target: String, pimxTarget: String)
 
     case permission(path: String, mode: String)
     case owner(path: String, uid: String, gid: String)
 
-    case runProgram(path: String, arguments: [String], successExitCodes: [Int32])
+    case runProgram(
+        execution: PIMXProgramInvocation?,
+        repair: PIMXProgramInvocation?,
+        uninstall: PIMXProgramInvocation?
+    )
     case registerApplication(path: String)
     case setDisplayAttributes(target: String, icon: String)
     case touch(path: String)
     case folderIcon(folderPath: String, iconPath: String)
 }
 
+struct PIMXProgramInvocation {
+    let path: String
+    let arguments: [String]
+    let successExitCodes: [Int32]
+    let hasExplicitSuccessExitCodes: Bool
+    let pimxPath: String
+    let pimxArguments: [String]
+}
+
 struct PIMXAssetReference {
     let source: String
     let target: String
+    let sourceTemplate: String
+    let targetTemplate: String
     let isDirectoryLike: Bool
 }
 
@@ -95,6 +110,7 @@ class PIMXParser {
 
             let expandedSource = propertyTable.expandPath(source)
             let expandedTarget = propertyTable.expandPath(target)
+            let normalizedTargetTemplate = normalizePIMXPath(target, isDirectoryLike: type.lowercased() == "directory")
 
             let isDirectoryLike = isDirectoryAsset(
                 element: element,
@@ -108,6 +124,8 @@ class PIMXParser {
                 appendAssetCommands(
                     source: expandedSource,
                     target: expandedTarget,
+                    sourceTemplate: source,
+                    targetTemplate: normalizedTargetTemplate,
                     isDirectoryLike: true,
                     style: .move,
                     to: &commands
@@ -115,22 +133,39 @@ class PIMXParser {
                 assetReferences.append(PIMXAssetReference(
                     source: expandedSource,
                     target: expandedTarget,
+                    sourceTemplate: source,
+                    targetTemplate: normalizePIMXPath(target, isDirectoryLike: true),
                     isDirectoryLike: true
                 ))
             case "symlink":
                 let linkTarget = element.attribute(forName: "targetLinkPath")?.stringValue ?? source
-                commands.append(.createSymlink(source: propertyTable.expandPath(linkTarget), target: expandedTarget))
+                commands.append(
+                    .createSymlink(
+                        source: propertyTable.expandPath(linkTarget),
+                        target: expandedTarget,
+                        pimxTarget: normalizePIMXPath(target, isDirectoryLike: false)
+                    )
+                )
             default:
+                let normalizedPimxTarget = isDirectoryLike
+                    ? normalizePIMXPath(target, isDirectoryLike: true)
+                    : resolvedFileTarget(source: source, target: target)
                 appendAssetCommands(
                     source: expandedSource,
                     target: expandedTarget,
+                    sourceTemplate: source,
+                    targetTemplate: target,
                     isDirectoryLike: isDirectoryLike,
                     style: .move,
                     to: &commands
                 )
                 assetReferences.append(PIMXAssetReference(
                     source: expandedSource,
-                    target: expandedTarget,
+                    target: isDirectoryLike
+                        ? normalizePIMXPath(expandedTarget, isDirectoryLike: true)
+                        : resolvedFileTarget(source: expandedSource, target: expandedTarget),
+                    sourceTemplate: source,
+                    targetTemplate: normalizePIMXPath(normalizedPimxTarget, isDirectoryLike: isDirectoryLike),
                     isDirectoryLike: isDirectoryLike
                 ))
             }
@@ -147,17 +182,24 @@ class PIMXParser {
             let expandedSource = propertyTable.expandPath(source)
             let expandedTarget = propertyTable.expandPath(target)
             let isDirectoryLike = expandedSource.hasSuffix("/") || isExistingDirectory(expandedSource)
+            let normalizedPimxTarget = isDirectoryLike
+                ? normalizePIMXPath(target, isDirectoryLike: true)
+                : resolvedFileTarget(source: source, target: target)
 
             appendAssetCommands(
                 source: expandedSource,
                 target: expandedTarget,
+                sourceTemplate: source,
+                targetTemplate: target,
                 isDirectoryLike: isDirectoryLike,
                 style: .blindCopy,
                 to: &commands
             )
             assetReferences.append(PIMXAssetReference(
                 source: expandedSource,
-                target: expandedTarget,
+                target: isDirectoryLike ? expandedTarget : resolvedFileTarget(source: expandedSource, target: expandedTarget),
+                sourceTemplate: source,
+                targetTemplate: normalizePIMXPath(normalizedPimxTarget, isDirectoryLike: isDirectoryLike),
                 isDirectoryLike: isDirectoryLike
             ))
         }
@@ -203,42 +245,26 @@ class PIMXParser {
                 }
 
             case "RunProgram":
-                let programPath = (try element.nodes(forXPath: "Path").first?.stringValue) ?? ""
-                var arguments: [String] = []
-                let argNodes = try element.nodes(forXPath: "Arguments/Argument")
-                for argNode in argNodes {
-                    if let arg = argNode.stringValue {
-                        arguments.append(propertyTable.expandPath(arg))
-                    }
+                let installElement = (element.elements(forName: "InstallCommand").first)
+                let uninstallElement = (element.elements(forName: "UninstallCommand").first)
+                if installElement != nil || uninstallElement != nil {
+                    commands.append(
+                        .runProgram(
+                            execution: try installElement.flatMap(parseProgramInvocation),
+                            repair: try installElement.flatMap(parseProgramInvocation),
+                            uninstall: try uninstallElement.flatMap(parseProgramInvocation)
+                        )
+                    )
+                    continue
                 }
-                var exitCodes: [Int32] = [0]
-                let exitCodeNodes = try element.nodes(forXPath: "SuccessExitCodes/ExitCode")
-                if !exitCodeNodes.isEmpty {
-                    exitCodes = exitCodeNodes.compactMap { Int32($0.stringValue ?? "") }
-                }
-                if !programPath.isEmpty {
-                    commands.append(.runProgram(
-                        path: propertyTable.expandPath(programPath),
-                        arguments: arguments,
-                        successExitCodes: exitCodes
-                    ))
+
+                if let directInvocation = try parseProgramInvocation(from: element) {
+                    commands.append(.runProgram(execution: directInvocation, repair: nil, uninstall: nil))
                 }
 
             case "UninstallCommand":
-                let programPath = (try element.nodes(forXPath: "Path").first?.stringValue) ?? ""
-                var arguments: [String] = []
-                let argNodes = try element.nodes(forXPath: "Arguments/Argument")
-                for argNode in argNodes {
-                    if let arg = argNode.stringValue {
-                        arguments.append(propertyTable.expandPath(arg))
-                    }
-                }
-                if !programPath.isEmpty {
-                    commands.append(.runProgram(
-                        path: propertyTable.expandPath(programPath),
-                        arguments: arguments,
-                        successExitCodes: [0]
-                    ))
+                if let uninstallInvocation = try parseProgramInvocation(from: element) {
+                    commands.append(.runProgram(execution: nil, repair: nil, uninstall: uninstallInvocation))
                 }
 
             case "RegisterApplication":
@@ -298,7 +324,8 @@ class PIMXParser {
                    let target = element.attribute(forName: "target")?.stringValue {
                     commands.append(.createSymlink(
                         source: propertyTable.expandPath(source),
-                        target: propertyTable.expandPath(target)
+                        target: propertyTable.expandPath(target),
+                        pimxTarget: normalizePIMXPath(target, isDirectoryLike: false)
                     ))
                 }
 
@@ -339,28 +366,42 @@ class PIMXParser {
     private func appendAssetCommands(
         source: String,
         target: String,
+        sourceTemplate: String,
+        targetTemplate: String,
         isDirectoryLike: Bool,
         style: AssetCommandStyle,
         to commands: inout [PIMXCommandDescriptor]
     ) {
         guard isDirectoryLike else {
             let fileTarget = resolvedFileTarget(source: source, target: target)
-            commands.append(commandDescriptor(for: style, source: source, target: fileTarget))
+            let pimxTarget = normalizePIMXPath(
+                resolvedFileTarget(source: sourceTemplate, target: targetTemplate),
+                isDirectoryLike: false
+            )
+            commands.append(
+                commandDescriptor(
+                    for: style,
+                    source: source,
+                    target: fileTarget,
+                    pimxTarget: pimxTarget
+                )
+            )
             return
         }
 
         let sourceURL = URL(fileURLWithPath: source, isDirectory: true)
         let normalizedTarget = target.hasSuffix("/") ? String(target.dropLast()) : target
         let targetRootURL = URL(fileURLWithPath: normalizedTarget, isDirectory: true)
+        let normalizedTemplateTarget = normalizePIMXPath(targetTemplate, isDirectoryLike: true)
 
         var createdDirectories = Set<String>()
-        func appendCreateDirectory(_ path: String) {
+        func appendCreateDirectory(_ path: String, pimxPath: String) {
             guard !path.isEmpty, createdDirectories.insert(path).inserted else { return }
-            commands.append(.createDirectory(path: path))
+            commands.append(.createDirectory(path: path, pimxPath: normalizePIMXPath(pimxPath, isDirectoryLike: true)))
         }
 
         if FileManager.default.fileExists(atPath: sourceURL.path) {
-            appendCreateDirectory(targetRootURL.path)
+            appendCreateDirectory(targetRootURL.path, pimxPath: normalizedTemplateTarget)
         }
 
         guard let enumerator = FileManager.default.enumerator(atPath: sourceURL.path) else {
@@ -372,56 +413,128 @@ class PIMXParser {
 
             let itemURL = sourceURL.appendingPathComponent(relativePath)
             let targetURL = targetRootURL.appendingPathComponent(relativePath)
+            let pimxTargetPath = appendPIMXPathComponent(normalizedTemplateTarget, relativePath)
             let resourceValues = try? itemURL.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey])
             let isSymbolicLink = resourceValues?.isSymbolicLink ?? false
             let isDirectory = resourceValues?.isDirectory ?? false
 
             if isSymbolicLink {
-                appendCreateDirectory(targetURL.deletingLastPathComponent().path)
+                appendCreateDirectory(
+                    targetURL.deletingLastPathComponent().path,
+                    pimxPath: deleteLastPIMXPathComponent(pimxTargetPath)
+                )
                 if let linkTarget = try? FileManager.default.destinationOfSymbolicLink(atPath: itemURL.path) {
-                    commands.append(.createSymlink(source: linkTarget, target: targetURL.path))
+                    commands.append(
+                        .createSymlink(
+                            source: linkTarget,
+                            target: targetURL.path,
+                            pimxTarget: normalizePIMXPath(pimxTargetPath, isDirectoryLike: false)
+                        )
+                    )
                 }
                 continue
             }
 
             if isDirectory {
-                appendCreateDirectory(targetURL.path)
+                appendCreateDirectory(targetURL.path, pimxPath: pimxTargetPath)
                 continue
             }
 
-            appendCreateDirectory(targetURL.deletingLastPathComponent().path)
-            commands.append(commandDescriptor(for: style, source: itemURL.path, target: targetURL.path))
+            appendCreateDirectory(
+                targetURL.deletingLastPathComponent().path,
+                pimxPath: deleteLastPIMXPathComponent(pimxTargetPath)
+            )
+            commands.append(
+                commandDescriptor(
+                    for: style,
+                    source: itemURL.path,
+                    target: targetURL.path,
+                    pimxTarget: normalizePIMXPath(pimxTargetPath, isDirectoryLike: false)
+                )
+            )
         }
     }
 
     private func commandDescriptor(
         for style: AssetCommandStyle,
         source: String,
-        target: String
+        target: String,
+        pimxTarget: String
     ) -> PIMXCommandDescriptor {
         switch style {
         case .move:
-            return .moveFile(source: source, target: target)
+            return .moveFile(source: source, target: target, pimxTarget: pimxTarget)
         case .copy:
-            return .copyFile(source: source, target: target)
+            return .copyFile(source: source, target: target, pimxTarget: pimxTarget)
         case .blindCopy:
-            return .blindCopy(source: source, target: target)
+            return .blindCopy(source: source, target: target, pimxTarget: pimxTarget)
         }
     }
 
     private func resolvedFileTarget(source: String, target: String) -> String {
         let sourceName = URL(fileURLWithPath: source).lastPathComponent
-        let targetURL = URL(fileURLWithPath: target)
-
         if target.hasSuffix("/") {
-            return targetURL.appendingPathComponent(sourceName).path
+            return appendPIMXPathComponent(target, sourceName)
         }
 
-        if targetURL.pathExtension.isEmpty {
-            return targetURL.appendingPathComponent(sourceName).path
+        let lastComponent = (target as NSString).lastPathComponent
+        if !lastComponent.contains(".") {
+            return appendPIMXPathComponent(target, sourceName)
         }
 
         return target
+    }
+
+    private func appendPIMXPathComponent(_ base: String, _ component: String) -> String {
+        let normalizedBase = base.hasSuffix("/") ? String(base.dropLast()) : base
+        guard !normalizedBase.isEmpty else {
+            return component
+        }
+        return (normalizedBase as NSString).appendingPathComponent(component)
+    }
+
+    private func deleteLastPIMXPathComponent(_ path: String) -> String {
+        let normalizedPath = path.hasSuffix("/") ? String(path.dropLast()) : path
+        let parent = (normalizedPath as NSString).deletingLastPathComponent
+        return parent.isEmpty ? normalizedPath : parent
+    }
+
+    private func normalizePIMXPath(_ path: String, isDirectoryLike: Bool) -> String {
+        let trimmed = path.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            return trimmed
+        }
+        if isDirectoryLike {
+            return trimmed.hasSuffix("/") ? String(trimmed.dropLast()) : trimmed
+        }
+        return trimmed
+    }
+
+    private func parseProgramInvocation(from element: XMLElement) throws -> PIMXProgramInvocation? {
+        let pimxPath = (try element.nodes(forXPath: "Path").first?.stringValue)
+            ?? element.attribute(forName: "path")?.stringValue
+            ?? ""
+        guard !pimxPath.isEmpty else {
+            return nil
+        }
+
+        let pimxArguments = try element.nodes(forXPath: "Arguments/Argument").compactMap { $0.stringValue }
+        let exitCodeNodes = try element.nodes(forXPath: "SuccessExitCodes/ExitCode")
+        var successExitCodes = exitCodeNodes.compactMap {
+            Int32($0.stringValue ?? "")
+        }
+        if successExitCodes.isEmpty {
+            successExitCodes = [0]
+        }
+
+        return PIMXProgramInvocation(
+            path: propertyTable.expandPath(pimxPath),
+            arguments: pimxArguments.map(propertyTable.expandPath),
+            successExitCodes: successExitCodes,
+            hasExplicitSuccessExitCodes: !exitCodeNodes.isEmpty,
+            pimxPath: pimxPath,
+            pimxArguments: pimxArguments
+        )
     }
 
     private func boolAttribute(_ value: String?) -> Bool {

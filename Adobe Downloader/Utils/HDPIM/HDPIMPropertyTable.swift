@@ -64,6 +64,7 @@ class HDPIMPropertyTable {
     func setupSystemDirectories() {
         let home = HDPIMRuntimeEnvironment.userHomeDirectory()
 
+        properties["ffcenvironment"] = "PROD"
         properties["adobecommon"] = "/Library/Application Support/Adobe"
         properties["adobeprogramfiles"] = "/Applications"
         properties["programfiles"] = "/Applications"

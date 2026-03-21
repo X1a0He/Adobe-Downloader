@@ -29,6 +29,7 @@ struct ApplicationInfo {
     var properties: [String: Any] = [:]
 
     var compressionType: String = ""
+    var displayName: String = ""
 
     var codexVersion: String = ""
     var productVersion: String = ""
@@ -36,7 +37,7 @@ struct ApplicationInfo {
 
     var softDependencies: [String] = [] // SAP codes
 
-    var supportedLanguages: Set<String> = []
+    var supportedLanguages: [String] = []
 
     var osVersionRanges: [(min: String, max: String)] = []
     var systemRequirementExternalUrlProd: String = ""
@@ -46,6 +47,10 @@ struct ApplicationInfo {
 
     var installDir: String = ""
     var isInstallDirFixed: Bool = false
+    var autoInstall: Bool = false
+    var isVisibleProduct: Bool = true
+    var isSelfReference: Bool = false
+    var isNonCCProduct: Bool = false
 
     var packages: [ParsedPackage] = []
 
@@ -60,7 +65,11 @@ struct ParsedPackage: Codable, Equatable {
     var packageName: String = ""
     var fullPackageName: String = ""
     var type: String = "noncore"
+    var isShared: Bool = false
+    var processorFamily: String = ""
     var downloadSize: Int64 = 0
+    var extractSize: Int64 = 0
+    var installSequenceNumber: Int = 0
     var path: String = ""
     var packageVersion: String = ""
     var condition: String = ""
@@ -94,6 +103,10 @@ class ApplicationJSONParser {
 
         info.properties = flattenJSON(jsonObject, prefix: "")
         info.compressionType = jsonObject["CompressionType"] as? String ?? ""
+        info.displayName = (jsonObject["Name"] as? String)
+            ?? (jsonObject["ProductName"] as? String)
+            ?? (jsonObject["DisplayName"] as? String)
+            ?? ""
 
         info.codexVersion = jsonObject["CodexVersion"] as? String ?? ""
         info.productVersion = jsonObject["ProductVersion"] as? String ?? ""
@@ -107,9 +120,10 @@ class ApplicationJSONParser {
         }
 
         if let langs = getNestedValue(jsonObject, path: "SupportedLanguages.Language") as? [[String: Any]] {
+            var seenLanguages: Set<String> = []
             for lang in langs {
-                if let locale = lang["locale"] as? String {
-                    info.supportedLanguages.insert(locale)
+                if let locale = lang["locale"] as? String, seenLanguages.insert(locale).inserted {
+                    info.supportedLanguages.append(locale)
                 }
             }
         }
@@ -122,6 +136,12 @@ class ApplicationJSONParser {
             info.installDir = installDir["value"] as? String ?? ""
             info.isInstallDirFixed = (installDir["isFixed"] as? String) == "true"
         }
+        info.autoInstall = stringBool(jsonObject["AutoInstall"])
+        if jsonObject.keys.contains("IsVisibleProduct") {
+            info.isVisibleProduct = stringBool(jsonObject["IsVisibleProduct"])
+        }
+        info.isSelfReference = stringBool(jsonObject["IsSelfReference"])
+        info.isNonCCProduct = stringBool(jsonObject["IsNonCCProduct"])
 
         if let packages = getNestedValue(jsonObject, path: "Packages.Package") as? [[String: Any]] {
             info.packages = packages.map { parsePackage($0) }
@@ -149,11 +169,25 @@ class ApplicationJSONParser {
 
         let type = json["Type"] as? String ?? ""
         pkg.type = type.isEmpty ? "noncore" : type
+        pkg.isShared = stringBool(json["IsShared"]) || stringBool(json["isShared"])
+        pkg.processorFamily = json["ProcessorFamily"] as? String ?? ""
 
         switch json["DownloadSize"] {
         case let n as NSNumber: pkg.downloadSize = n.int64Value
         case let s as String: pkg.downloadSize = Int64(s) ?? 0
         default: pkg.downloadSize = 0
+        }
+
+        switch json["ExtractSize"] {
+        case let n as NSNumber: pkg.extractSize = n.int64Value
+        case let s as String: pkg.extractSize = Int64(s) ?? 0
+        default: pkg.extractSize = 0
+        }
+
+        switch json["InstallSequenceNumber"] {
+        case let n as NSNumber: pkg.installSequenceNumber = n.intValue
+        case let s as String: pkg.installSequenceNumber = Int(s) ?? 0
+        default: pkg.installSequenceNumber = 0
         }
 
         pkg.path = json["Path"] as? String ?? ""
@@ -192,6 +226,19 @@ class ApplicationJSONParser {
         pkg.aliasPackageName = json["AliasPackageName"] as? String ?? ""
 
         return pkg
+    }
+
+    private static func stringBool(_ value: Any?) -> Bool {
+        switch value {
+        case let value as Bool:
+            return value
+        case let value as NSNumber:
+            return value.boolValue
+        case let value as String:
+            return ["true", "1", "yes"].contains(value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased())
+        default:
+            return false
+        }
     }
 
     private static func parseModule(_ json: [String: Any]) -> ParsedModule {

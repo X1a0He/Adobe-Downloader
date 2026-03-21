@@ -6,6 +6,10 @@
 import Foundation
 import Darwin
 
+private func shellQuotedPermission(_ value: String) -> String {
+    "'" + value.replacingOccurrences(of: "'", with: "'\"'\"'") + "'"
+}
+
 class ChmodCommand: HDPIMCommand {
     let path: String
     let mode: String
@@ -29,18 +33,18 @@ class ChmodCommand: HDPIMCommand {
             throw HDPIMCommandError.setPermissionFailed
         }
 
-        guard chmod(path, octalMode) == 0 else {
-            throw HDPIMCommandError.setPermissionFailed
+        if chmod(path, octalMode) != 0 {
+            try await HDPIMCommandExecutor.executeShellChecked("/bin/chmod \(shellQuotedPermission(mode)) \(shellQuotedPermission(path))", onError: .setPermissionFailed)
         }
     }
 
     func rollBack() async throws {
         if let oldMode, let octalMode = modeParser(oldMode) {
-            _ = chmod(path, octalMode)
+            if chmod(path, octalMode) != 0 {
+                try? await HDPIMCommandExecutor.executeShellChecked("/bin/chmod \(shellQuotedPermission(oldMode)) \(shellQuotedPermission(path))", onError: .setPermissionFailed)
+            }
         }
     }
-
-    func getReverseCommandXML() -> String? { nil }
 }
 
 class ChownerCommand: HDPIMCommand {
@@ -71,8 +75,9 @@ class ChownerCommand: HDPIMCommand {
             throw HDPIMCommandError.setOwnerFailed
         }
 
-        guard chown(path, resolvedUID, resolvedGID) == 0 else {
-            throw HDPIMCommandError.setOwnerFailed
+        if chown(path, resolvedUID, resolvedGID) != 0 {
+            let ownerSpec = "\(resolvedUID):\(resolvedGID)"
+            try await HDPIMCommandExecutor.executeShellChecked("/usr/sbin/chown \(shellQuotedPermission(ownerSpec)) \(shellQuotedPermission(path))", onError: .setOwnerFailed)
         }
     }
 
@@ -82,12 +87,12 @@ class ChownerCommand: HDPIMCommand {
             if parts.count == 2,
                let restoredUID = parseUID(parts[0]),
                let restoredGID = parseGID(parts[1]) {
-                _ = chown(path, restoredUID, restoredGID)
+                if chown(path, restoredUID, restoredGID) != 0 {
+                    try? await HDPIMCommandExecutor.executeShellChecked("/usr/sbin/chown \(shellQuotedPermission(oldOwner)) \(shellQuotedPermission(path))", onError: .setOwnerFailed)
+                }
             }
         }
     }
-
-    func getReverseCommandXML() -> String? { nil }
 }
 
 private func modeParser(_ value: String) -> mode_t? {

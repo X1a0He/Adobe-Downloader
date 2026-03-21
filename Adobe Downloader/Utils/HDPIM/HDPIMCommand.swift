@@ -16,11 +16,17 @@ protocol HDPIMCommand {
 
     func rollBack() async throws
 
-    func getReverseCommandXML() -> String?
+    func getDeleteEntries() -> [HDPIMDeleteEntry]
+
+    func getPimxCommandFragments() -> [HDPIMPimxCommandFragment]
 }
 
 extension HDPIMCommand {
     var commandDetails: String? { nil }
+
+    func getDeleteEntries() -> [HDPIMDeleteEntry] { [] }
+
+    func getPimxCommandFragments() -> [HDPIMPimxCommandFragment] { [] }
 }
 
 enum HDPIMCommandError: Int, Error, LocalizedError {
@@ -100,10 +106,15 @@ enum HDPIMCommandExecutor {
         }
     }
 
-    static func executeShellChecked(_ command: String) async throws {
+    static func executeShellChecked(
+        _ command: String,
+        onError error: HDPIMCommandError = .moveFileFailed
+    ) async throws {
         let result = try await executeShell(command)
         if result.hasPrefix("Error:") {
-            throw HDPIMCommandError.moveFileFailed
+            print("[HDPIM] Shell 命令失败: \(command)")
+            print("[HDPIM] 错误输出: \(result)")
+            throw error
         }
     }
 
@@ -157,28 +168,28 @@ class HDPIMCommandEngine {
     func generateCommands(from descriptors: [PIMXCommandDescriptor]) -> [HDPIMCommand] {
         descriptors.compactMap { descriptor -> HDPIMCommand? in
             switch descriptor {
-            case .moveFile(let source, let target):
-                return MoveFileCommand(source: source, target: target)
-            case .mergeDirectory(let source, let target):
-                return MergeDirectoryCommand(source: source, target: target)
-            case .copyFile(let source, let target):
-                return CopyFileCommand(source: source, target: target)
-            case .blindCopy(let source, let target):
-                return BlindCopyCommand(source: source, target: target)
-            case .createDirectory(let path):
-                return CreateDirectoryCommand(path: path)
+            case .moveFile(let source, let target, let pimxTarget):
+                return MoveFileCommand(source: source, target: target, pimxTargetPath: pimxTarget)
+            case .mergeDirectory(let source, let target, let pimxTarget):
+                return MergeDirectoryCommand(source: source, target: target, pimxTargetPath: pimxTarget)
+            case .copyFile(let source, let target, let pimxTarget):
+                return CopyFileCommand(source: source, target: target, pimxTargetPath: pimxTarget)
+            case .blindCopy(let source, let target, let pimxTarget):
+                return BlindCopyCommand(source: source, target: target, pimxTargetPath: pimxTarget)
+            case .createDirectory(let path, let pimxPath):
+                return CreateDirectoryCommand(path: path, pimxPath: pimxPath)
             case .deleteFile(let target):
                 return DeleteFileCommand(target: target)
             case .deleteDirectory(let source):
                 return DeleteDirectoryCommand(source: source)
-            case .createSymlink(let source, let target):
-                return CreateSymlinkCommand(source: source, target: target)
+            case .createSymlink(let source, let target, let pimxTarget):
+                return CreateSymlinkCommand(source: source, target: target, pimxTargetPath: pimxTarget)
             case .permission(let path, let mode):
                 return ChmodCommand(path: path, mode: mode)
             case .owner(let path, let uid, let gid):
                 return ChownerCommand(path: path, uid: uid, gid: gid)
-            case .runProgram(let path, let arguments, let exitCodes):
-                return RunProgramCommand(path: path, arguments: arguments, successExitCodes: exitCodes)
+            case .runProgram(let execution, let repair, let uninstall):
+                return RunProgramCommand(execution: execution, repair: repair, uninstall: uninstall)
             case .registerApplication(let path):
                 return RegisterApplicationCommand(path: path)
             case .setDisplayAttributes(let target, let icon):
@@ -194,9 +205,14 @@ class HDPIMCommandEngine {
     func executeAll(
         commands: [HDPIMCommand],
         progressHandler: ((Int, Int, String) -> Void)? = nil
-    ) async throws -> (executedCommands: [HDPIMCommand], reverseXMLs: [String]) {
+    ) async throws -> (
+        executedCommands: [HDPIMCommand],
+        deleteEntries: [HDPIMDeleteEntry],
+        pimxFragments: [HDPIMPimxCommandFragment]
+    ) {
         var executed: [HDPIMCommand] = []
-        var reverseXMLs: [String] = []
+        var deleteEntries: [HDPIMDeleteEntry] = []
+        var pimxFragments: [HDPIMPimxCommandFragment] = []
 
         for (index, command) in commands.enumerated() {
             progressHandler?(index, commands.count, command.commandName)
@@ -213,10 +229,8 @@ class HDPIMCommandEngine {
                 try await command.execute()
                 heartbeatTask.cancel()
                 executed.append(command)
-
-                if let reverseXML = command.getReverseCommandXML() {
-                    reverseXMLs.append(reverseXML)
-                }
+                deleteEntries.append(contentsOf: command.getDeleteEntries())
+                pimxFragments.append(contentsOf: command.getPimxCommandFragments())
             } catch {
                 heartbeatTask.cancel()
                 let cmdError = error as? HDPIMCommandError
@@ -226,7 +240,8 @@ class HDPIMCommandEngine {
                         command: command.commandName,
                         error: error,
                         executedCommands: executed,
-                        reverseXMLs: reverseXMLs
+                        deleteEntries: deleteEntries,
+                        pimxFragments: pimxFragments
                     )
                 } else {
                     print("命令 '\(command.commandName)' 执行失败 (非致命): \(error.localizedDescription)")
@@ -234,22 +249,29 @@ class HDPIMCommandEngine {
             }
         }
 
-        return (executed, reverseXMLs)
+        return (executed, deleteEntries, pimxFragments)
     }
 }
 
 enum HDPIMInstallError: Error, LocalizedError {
-    case commandFailed(command: String, error: Error, executedCommands: [HDPIMCommand], reverseXMLs: [String])
+    case commandFailed(
+        command: String,
+        error: Error,
+        executedCommands: [HDPIMCommand],
+        deleteEntries: [HDPIMDeleteEntry],
+        pimxFragments: [HDPIMPimxCommandFragment]
+    )
     case extractionFailed(String)
     case pimxNotFound(String)
     case packageNameMismatch(expected: String, actual: String)
     case rollbackFailed(String)
     case databaseError(String)
     case cancelled
+    case conflictingProcessDetected([String])
 
     var errorDescription: String? {
         switch self {
-        case .commandFailed(let cmd, let err, _, _):
+        case .commandFailed(let cmd, let err, _, _, _):
             return "安装命令 '\(cmd)' 执行失败: \(err.localizedDescription)"
         case .extractionFailed(let msg): return "解压失败: \(msg)"
         case .pimxNotFound(let path): return "PIMX 文件不存在: \(path)"
@@ -258,6 +280,8 @@ enum HDPIMInstallError: Error, LocalizedError {
         case .rollbackFailed(let msg): return "回滚失败: \(msg)"
         case .databaseError(let msg): return "数据库错误: \(msg)"
         case .cancelled: return "安装已取消"
+        case .conflictingProcessDetected(let processes):
+            return "检测到冲突进程正在运行: \(processes.joined(separator: ", "))，请关闭后重试"
         }
     }
 }
@@ -275,5 +299,4 @@ class TouchCommand: HDPIMCommand {
     }
 
     func rollBack() async throws {  }
-    func getReverseCommandXML() -> String? { nil }
 }

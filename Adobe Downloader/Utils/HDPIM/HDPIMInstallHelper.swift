@@ -6,6 +6,52 @@
 
 import Foundation
 
+private func xmlEscapedPIMXValue(_ value: String) -> String {
+    value
+        .replacingOccurrences(of: "&", with: "&amp;")
+        .replacingOccurrences(of: "<", with: "&lt;")
+        .replacingOccurrences(of: ">", with: "&gt;")
+        .replacingOccurrences(of: "\"", with: "&quot;")
+        .replacingOccurrences(of: "'", with: "&apos;")
+}
+
+enum HDPIMPimxFragmentKind {
+    case uninstall
+    case repair
+}
+
+struct HDPIMDeleteEntry {
+    let targetPath: String
+    let isDirectory: Bool
+    let isRecursiveDelete: Bool
+    let isUserPreferences: Bool
+
+    var normalizedTargetPath: String {
+        let trimmed = targetPath.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard isDirectory else {
+            return trimmed
+        }
+        return trimmed.hasSuffix("/") ? trimmed : trimmed + "/"
+    }
+
+    var xml: String {
+        let tagName = isDirectory ? "DeleteDirectory" : "DeleteFile"
+        var attributes = ["target=\"\(xmlEscapedPIMXValue(normalizedTargetPath))\""]
+        if isDirectory && isRecursiveDelete {
+            attributes.append("isRecursiveDelete=\"true\"")
+        }
+        if isUserPreferences {
+            attributes.append("isUserPreferences=\"true\"")
+        }
+        return "<\(tagName) \(attributes.joined(separator: " "))></\(tagName)>"
+    }
+}
+
+struct HDPIMPimxCommandFragment {
+    let xml: String
+    let kind: HDPIMPimxFragmentKind
+}
+
 class HDPIMInstallHelper {
 
     private let propertyTable: HDPIMPropertyTable
@@ -25,10 +71,14 @@ class HDPIMInstallHelper {
 
     struct InstallResult {
         let executedCommands: [HDPIMCommand]
-        let reverseXMLs: [String]
+        let deleteEntries: [HDPIMDeleteEntry]
+        let pimxFragments: [HDPIMPimxCommandFragment]
         let uninstallPIMXPath: URL?
         let uninstallPIMXHash: String?
         let uninstallPIMXHash256: String?
+        let repairPIMXPath: URL?
+        let repairPIMXHash: String?
+        let repairPIMXHash256: String?
     }
 
     struct ExtractedPackageValidationResult {
@@ -43,6 +93,8 @@ class HDPIMInstallHelper {
         extractDir: URL,
         sapCode: String,
         version: String,
+        platform: String,
+        amtConfigAppID: String?,
         installDir: String,
         aliasPackageName: String,
         productInstallDir: String,
@@ -114,7 +166,7 @@ class HDPIMInstallHelper {
         let engine = HDPIMCommandEngine(propertyTable: propertyTable)
         let commands = engine.generateCommands(from: packageInfo.commands)
 
-        let (executed, reverseXMLs) = try await engine.executeAll(
+        let executionResult = try await engine.executeAll(
             commands: commands,
             progressHandler: progressHandler
         )
@@ -122,29 +174,269 @@ class HDPIMInstallHelper {
         var uninstallPath: URL?
         var sha1Hash: String?
         var sha256Hash: String?
+        var repairPath: URL?
+        var repairSha1Hash: String?
+        var repairSha256Hash: String?
 
-        if !reverseXMLs.isEmpty {
-            let generator = UninstallPIMXGenerator()
-            generator.addReverseCommands(reverseXMLs)
+        let pimxFileName = makePIMXFileName(
+            sapCode: sapCode,
+            version: version,
+            platform: platform,
+            amtConfigAppID: amtConfigAppID,
+            packageName: parsedPackage.packageName,
+            packageVersion: parsedPackage.packageVersion.isEmpty ? version : parsedPackage.packageVersion
+        )
+        let uninstallFragments = executionResult.pimxFragments
+            .filter { $0.kind == .uninstall }
+            .map(\.xml)
+        let repairFragments = executionResult.pimxFragments
+            .filter { $0.kind == .repair }
+            .map(\.xml)
+        let deleteFragments = makeDeleteCommandFragments(
+            from: executionResult.deleteEntries,
+            assetReferences: packageInfo.assetReferences
+        )
+
+        if !deleteFragments.isEmpty || !uninstallFragments.isEmpty {
+            let uninstallGenerator = UninstallPIMXGenerator()
+            uninstallGenerator.addReverseCommands(deleteFragments)
+            uninstallGenerator.addReverseCommands(uninstallFragments)
 
             let uninstallDir = URL(fileURLWithPath: "/Library/Application Support/Adobe/Installers/uninstallXml")
 
-            let result = try generator.writeAndHash(
+            let result = try uninstallGenerator.writeAndHash(
                 to: uninstallDir,
-                packageName: parsedPackage.packageName
+                fileName: pimxFileName
             )
             uninstallPath = result.path
             sha1Hash = result.sha1
             sha256Hash = result.sha256
         }
 
+        let repairDir = URL(fileURLWithPath: "/Library/Application Support/Adobe/Installers/repairXml")
+        let repairGenerator = UninstallPIMXGenerator()
+        repairGenerator.addReverseCommands(repairFragments)
+        let repairResult = try repairGenerator.writeAndHash(
+            to: repairDir,
+            fileName: pimxFileName
+        )
+        repairPath = repairResult.path
+        repairSha1Hash = repairResult.sha1
+        repairSha256Hash = repairResult.sha256
+
         return InstallResult(
-            executedCommands: executed,
-            reverseXMLs: reverseXMLs,
+            executedCommands: executionResult.executedCommands,
+            deleteEntries: executionResult.deleteEntries,
+            pimxFragments: executionResult.pimxFragments,
             uninstallPIMXPath: uninstallPath,
             uninstallPIMXHash: sha1Hash,
-            uninstallPIMXHash256: sha256Hash
+            uninstallPIMXHash256: sha256Hash,
+            repairPIMXPath: repairPath,
+            repairPIMXHash: repairSha1Hash,
+            repairPIMXHash256: repairSha256Hash
         )
+    }
+
+    private func makePIMXFileName(
+        sapCode: String,
+        version: String,
+        platform: String,
+        amtConfigAppID: String?,
+        packageName: String,
+        packageVersion: String
+    ) -> String {
+        let normalizedVersion = version.replacingOccurrences(of: ".", with: "_")
+        let appGuid = makeAPPGUIDPrefix(
+            sapCode: sapCode,
+            version: normalizedVersion,
+            platform: platform,
+            amtConfigAppID: amtConfigAppID
+        )
+        return "\(appGuid)_\(packageName)_\(packageVersion).pimx"
+    }
+
+    private func makeAPPGUIDPrefix(
+        sapCode: String,
+        version: String,
+        platform: String,
+        amtConfigAppID: String?
+    ) -> String {
+        let uppercasedAppID = amtConfigAppID?.uppercased() ?? ""
+        if uppercasedAppID.contains("-32-") {
+            return "\(sapCode)_\(version)_32"
+        }
+        if uppercasedAppID.contains("-64-") {
+            return "\(sapCode)_\(version)"
+        }
+
+        let normalizedPlatform = platform.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+        if normalizedPlatform == "OSX" || normalizedPlatform == "OSX10" {
+            return "\(sapCode)_\(version)_32"
+        }
+        if normalizedPlatform == "WINARM64" {
+            return "\(sapCode)_\(version)_arm64"
+        }
+        return "\(sapCode)_\(version)"
+    }
+
+    private func makeDeleteCommandFragments(
+        from deleteEntries: [HDPIMDeleteEntry],
+        assetReferences: [PIMXAssetReference]
+    ) -> [String] {
+        let orderedEntries = deleteEntries
+            .filter { !shouldSkipDeleteEntry($0.normalizedTargetPath) }
+            + makeSourceSideDeleteEntries(from: assetReferences)
+            + makeDirectoryDeleteEntries(from: assetReferences)
+
+        var seen: Set<String> = []
+        return orderedEntries.compactMap { entry in
+            guard !entry.normalizedTargetPath.isEmpty else {
+                return nil
+            }
+            let key = "\(entry.isDirectory ? "D" : "F")|\(entry.normalizedTargetPath)|\(entry.isRecursiveDelete)|\(entry.isUserPreferences)"
+            guard seen.insert(key).inserted else {
+                return nil
+            }
+            return entry.xml
+        }
+    }
+
+    private func makeSourceSideDeleteEntries(from assetReferences: [PIMXAssetReference]) -> [HDPIMDeleteEntry] {
+        var entries: [HDPIMDeleteEntry] = []
+
+        for asset in assetReferences {
+            let sourcePath = asset.sourceTemplate.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard isRelativePIMXPath(sourcePath) else {
+                continue
+            }
+
+            if sourcePath.localizedCaseInsensitiveContains("CustomHook"),
+               !asset.isDirectoryLike {
+                entries.append(
+                    HDPIMDeleteEntry(
+                        targetPath: sourcePath,
+                        isDirectory: false,
+                        isRecursiveDelete: false,
+                        isUserPreferences: false
+                    )
+                )
+            }
+
+            for directory in recursiveParentDirectories(for: sourcePath) {
+                entries.append(
+                    HDPIMDeleteEntry(
+                        targetPath: directory,
+                        isDirectory: true,
+                        isRecursiveDelete: false,
+                        isUserPreferences: false
+                    )
+                )
+            }
+        }
+
+        return entries
+    }
+
+    private func makeDirectoryDeleteEntries(from assetReferences: [PIMXAssetReference]) -> [HDPIMDeleteEntry] {
+        let targetRoots = makeTargetRoots(from: assetReferences)
+        var entries: [HDPIMDeleteEntry] = []
+
+        for asset in assetReferences {
+            let targetPath = asset.targetTemplate.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !targetPath.isEmpty, !shouldSkipDeleteEntry(targetPath) else {
+                continue
+            }
+
+            let directoryPath = asset.isDirectoryLike
+                ? normalizeDirectoryPIMXPath(targetPath)
+                : normalizeDirectoryPIMXPath((targetPath as NSString).deletingLastPathComponent)
+            guard !directoryPath.isEmpty else {
+                continue
+            }
+
+            let root = targetRoots.first { directoryPath.hasPrefix($0) } ?? directoryPath
+            for directory in recursiveParentDirectories(for: directoryPath, stoppingAt: root) {
+                let isUserPreferences = directory.lowercased().hasPrefix("[userpreferences]/")
+                    || directory.lowercased().hasPrefix("[usercommon]/")
+                entries.append(
+                    HDPIMDeleteEntry(
+                        targetPath: directory,
+                        isDirectory: true,
+                        isRecursiveDelete: isUserPreferences,
+                        isUserPreferences: isUserPreferences
+                    )
+                )
+            }
+        }
+
+        return entries
+    }
+
+    private func makeTargetRoots(from assetReferences: [PIMXAssetReference]) -> [String] {
+        var seen: Set<String> = []
+        var roots: [String] = []
+
+        for asset in assetReferences {
+            let rawTarget = asset.targetTemplate.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !rawTarget.isEmpty, !shouldSkipDeleteEntry(rawTarget) else {
+                continue
+            }
+
+            let root = asset.isDirectoryLike
+                ? normalizeDirectoryPIMXPath(rawTarget)
+                : normalizeDirectoryPIMXPath((rawTarget as NSString).deletingLastPathComponent)
+            guard !root.isEmpty, seen.insert(root).inserted else {
+                continue
+            }
+            roots.append(root)
+        }
+
+        return roots.sorted { $0.count > $1.count }
+    }
+
+    private func recursiveParentDirectories(
+        for path: String,
+        stoppingAt stopPath: String? = nil
+    ) -> [String] {
+        var directories: [String] = []
+        var cursor = normalizeDirectoryPIMXPath(path)
+        let normalizedStop = stopPath.map(normalizeDirectoryPIMXPath)
+
+        while !cursor.isEmpty {
+            directories.append(cursor)
+            if let normalizedStop, cursor == normalizedStop {
+                break
+            }
+
+            let parent = normalizeDirectoryPIMXPath((cursor as NSString).deletingLastPathComponent)
+            if parent.isEmpty || parent == cursor {
+                break
+            }
+            cursor = parent
+        }
+
+        return directories
+    }
+
+    private func isRelativePIMXPath(_ path: String) -> Bool {
+        !path.isEmpty && !path.hasPrefix("/") && !path.hasPrefix("[")
+    }
+
+    private func normalizeDirectoryPIMXPath(_ path: String) -> String {
+        let trimmed = path.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            return ""
+        }
+        return trimmed.hasSuffix("/") ? String(trimmed.dropLast()) : trimmed
+    }
+
+    private func shouldSkipDeleteEntry(_ path: String) -> Bool {
+        let normalized = path.trimmingCharacters(in: .whitespacesAndNewlines)
+        if normalized.hasPrefix("["),
+           normalized.localizedCaseInsensitiveContains("/CustomHook/") {
+            return true
+        }
+        return false
     }
 
     static func validateExtractedPackage(
