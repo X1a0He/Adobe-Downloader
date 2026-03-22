@@ -605,6 +605,47 @@ final class HDPIMDatabase {
     }
 
     func getInstalledProductIdentitySet() -> Set<String> {
+
+        func getProductMeta(
+        sapCode: String,
+        version: String,
+        processorFamily: HDPIMProcessorFamily,
+        key: String
+    ) -> String? {
+        try? fetchProductMetaValue(sapCode: sapCode, version: version, processorFamily: processorFamily, key: key)
+    }
+
+    func setProductMeta(
+        sapCode: String,
+        version: String,
+        processorFamily: HDPIMProcessorFamily,
+        key: String,
+        value: String
+    ) {
+        let record = HDPIMNativeProductMetaRecord(
+            sapCode: sapCode,
+            productVersion: version,
+            processorFamily: processorFamily.rawValue,
+            key: key,
+            value: value
+        )
+        try? insertProductMeta(record)
+    }
+
+    func getDeltaFailVersions(sapCode: String, version: String, processorFamily: HDPIMProcessorFamily) -> Set<String> {
+        guard let raw = getProductMeta(sapCode: sapCode, version: version, processorFamily: processorFamily, key: "DeltaFailVersions") else {
+            return []
+        }
+        return Set(raw.split(separator: ",").map { String($0) })
+    }
+
+    func addDeltaFailVersion(sapCode: String, version: String, processorFamily: HDPIMProcessorFamily, failedVersion: String) {
+        var existing = getDeltaFailVersions(sapCode: sapCode, version: version, processorFamily: processorFamily)
+        existing.insert(failedVersion)
+        setProductMeta(sapCode: sapCode, version: version, processorFamily: processorFamily, key: "DeltaFailVersions", value: existing.joined(separator: ","))
+    }
+
+    func getInstalledProductIdentitySet() -> Set<String> {
         let sql = """
         SELECT SAPCode, ProductVersion, ProcessorFamily
         FROM \(Schema.productInstallationInfo)
