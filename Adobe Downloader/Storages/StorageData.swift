@@ -110,7 +110,7 @@ final class StorageData: ObservableObject {
         if downloadAppleSilicon {
             return ["macuniversal", "macarm64"]
         } else {
-            return ["macuniversal", "osx10-64", "osx10"]
+            return ["osx10-64", "osx10"]
         }
     }
     
@@ -170,4 +170,3 @@ extension UserDefaults {
         return object(forKey: key) != nil
     }
 }
-

@@ -84,128 +84,94 @@ struct FlatSegmentedPickerStyle: ViewModifier {
     }
 }
 
-struct ToolbarView: View {
-    @Binding var downloadAppleSilicon: Bool
+struct ToolbarView: ToolbarContent {
     @Binding var currentApiVersion: String
-    @Binding var searchText: String
     @Binding var showDownloadManager: Bool
     let isRefreshing: Bool
     let downloadTasksCount: Int
     let onRefresh: () -> Void
     let openSettings: () -> Void
     
-    var body: some View {
-        HStack(spacing: 16) {
-            Toggle("下载 Apple Silicon", isOn: $downloadAppleSilicon)
-            .disabled(isRefreshing)
-            .toggleStyle(SwitchToggleStyle(tint: Color.green))
-            
-            HStack(spacing: 10) {
-                Text("API:")
-                    .font(.system(size: 14, weight: .medium))
-                    .foregroundColor(.primary.opacity(0.8))
-
-                HStack(spacing: 1) {
-                    ForEach(["4", "5", "6"], id: \.self) { version in
-                        Button(action: { 
-                            withAnimation(.easeInOut(duration: 0.2)) {
-                                currentApiVersion = version 
-                            }
-                        }) {
-                            Text("v\(version)")
-                                .font(.system(size: 13, weight: .medium))
-                                .frame(width: 40, height: 28)
-                                .background(
-                                    RoundedRectangle(cornerRadius: 5)
-                                        .fill(currentApiVersion == version ? 
-                                              Color.blue.opacity(0.15) : 
-                                              Color.clear)
-                                        .animation(.easeInOut(duration: 0.2), value: currentApiVersion)
-                                )
-                                .foregroundColor(currentApiVersion == version ? 
-                                                 Color.blue.opacity(0.9) : 
-                                                 Color.secondary.opacity(0.7))
-                        }
-                        .buttonStyle(.plain)
-                    }
-                }
-                .padding(2)
-                .background(
-                    RoundedRectangle(cornerRadius: 6)
-                        .fill(Color(NSColor.windowBackgroundColor).opacity(0.2))
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 6)
-                                .stroke(Color.secondary.opacity(0.15), lineWidth: 0.5)
-                        )
-                )
-            }
-            .disabled(isRefreshing)
-            
+    var body: some ToolbarContent {
+        ToolbarItemGroup(placement: .navigation) {
             HStack(spacing: 8) {
-                BeautifulSearchField(text: $searchText)
-                    .frame(maxWidth: 200)
-
-                Button(action: openSettings) {
-                    ZStack {
-                        Circle()
-                            .fill(Color.secondary.opacity(0.1))
-                            .frame(width: 34, height: 34)
-                        
-                        Image(systemName: "gearshape")
-                            .font(.system(size: 15, weight: .medium))
-                            .foregroundColor(.secondary)
-                    }
+                Picker("API", selection: $currentApiVersion) {
+                    Text("v4").tag("4")
+                    Text("v5").tag("5")
+                    Text("v6").tag("6")
                 }
-                .buttonStyle(.plain)
-
-                Button(action: onRefresh) {
-                    ZStack {
-                        Circle()
-                            .fill(isRefreshing ? Color.secondary.opacity(0.05) : Color.blue.opacity(0.1))
-                            .frame(width: 34, height: 34)
-                        
-                        Image(systemName: "arrow.clockwise")
-                            .font(.system(size: 15, weight: .medium))
-                            .foregroundColor(isRefreshing ? .secondary.opacity(0.5) : .blue)
-                    }
-                }
-                .disabled(isRefreshing)
-                .buttonStyle(.plain)
-                
-                Button(action: { showDownloadManager.toggle() }) {
-                    ZStack {
-                        Circle()
-                            .fill(downloadTasksCount > 0 ? Color.blue.opacity(0.1) : Color.secondary.opacity(0.1))
-                            .frame(width: 34, height: 34)
-                        
-                        Image(systemName: "arrow.down.circle")
-                            .font(.system(size: 15, weight: .medium))
-                            .foregroundColor(downloadTasksCount > 0 ? .blue : .secondary)
-                    }
-                    .overlay(
-                        Group {
-                            if downloadTasksCount > 0 {
-                                ZStack {
-                                    Circle()
-                                        .fill(Color.blue)
-                                        .frame(width: 18, height: 18)
-                                    
-                                    Text("\(downloadTasksCount)")
-                                        .font(.system(size: 10, weight: .bold))
-                                        .foregroundColor(.white)
-                                }
-                                .offset(x: 12, y: -12)
-                            }
-                        }
-                    )
-                }
-                .disabled(isRefreshing)
-                .buttonStyle(.plain)
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .controlSize(.small)
+                .frame(width: 126)
             }
-            .frame(maxWidth: .infinity, alignment: .trailing)
+            .help("切换 API 版本")
+            .disabled(isRefreshing)
         }
-        .padding(.horizontal)
-        .padding(.vertical, 8)
-        .background(Color(.clear))
+        
+        ToolbarItem(placement: .principal) {
+            ToolbarTitleView()
+        }
+        
+        ToolbarItemGroup(placement: .primaryAction) {
+            Button(action: { showDownloadManager.toggle() }) {
+                ToolbarDownloadButtonLabel(downloadTasksCount: downloadTasksCount)
+            }
+            .help(downloadTasksCount > 0 ? "打开下载管理（\(downloadTasksCount) 个任务）" : "打开下载管理")
+            
+            Button(action: onRefresh) {
+                ToolbarRefreshButtonLabel(isRefreshing: isRefreshing)
+            }
+            .help(isRefreshing ? "正在刷新产品列表" : "刷新产品列表")
+            .disabled(isRefreshing)
+            
+            Button(action: openSettings) {
+                Label("设置", systemImage: "gearshape")
+            }
+            .help("打开设置")
+        }
     }
-} 
+}
+
+private struct ToolbarTitleView: View {
+    var body: some View {
+        Text("Adobe Downloader")
+            .font(.headline)
+            .lineLimit(1)
+            .frame(minWidth: 180, maxWidth: 260)
+    }
+}
+
+private struct ToolbarRefreshButtonLabel: View {
+    let isRefreshing: Bool
+    
+    var body: some View {
+        HStack(spacing: 6) {
+            if isRefreshing {
+                ProgressView()
+                    .controlSize(.small)
+                Text("刷新中")
+            } else {
+                Label("刷新", systemImage: "arrow.clockwise")
+            }
+        }
+    }
+}
+
+private struct ToolbarDownloadButtonLabel: View {
+    let downloadTasksCount: Int
+    
+    var body: some View {
+        HStack(spacing: 6) {
+            Label("下载管理", systemImage: downloadTasksCount > 0 ? "arrow.down.circle.fill" : "arrow.down.circle")
+                .foregroundStyle(downloadTasksCount > 0 ? Color.accentColor : Color.primary)
+
+            if downloadTasksCount > 0 {
+                Text(downloadTasksCount.formatted())
+                    .font(.system(size: 12, weight: .semibold, design: .rounded))
+                    .monospacedDigit()
+                    .foregroundStyle(Color.accentColor)
+            }
+        }
+    }
+}
