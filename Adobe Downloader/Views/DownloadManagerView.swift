@@ -11,178 +11,74 @@ struct DownloadManagerView: View {
     
     @ObservedObject private var networkManager = globalNetworkManager
     @State private var sortOrder: SortOrder = .addTime
+    @State private var showClearConfirmation = false
 
-    enum SortOrder {
-        case addTime
-        case name
-        case status
-        
-        var description: String {
+    enum SortOrder: Hashable {
+        case addTime, name, status
+
+        var label: String {
             switch self {
             case .addTime: return String(localized: "按添加时间")
-            case .name: return String(localized: "按名称")
-            case .status: return String(localized: "按状态")
+            case .name:    return String(localized: "按名称")
+            case .status:  return String(localized: "按状态")
             }
-        }
-    }
-    
-    private func removeTask(_ task: NewDownloadTask) {
-        Task { @MainActor in
-            let shouldRemoveFiles: Bool
-            if case .failed = task.status {
-                shouldRemoveFiles = true
-            } else if case .completed = task.status {
-                shouldRemoveFiles = StorageData.shared.deleteCompletedTasksWithFiles
-            } else {
-                shouldRemoveFiles = true
-            }
-            
-            globalNetworkManager.removeTask(taskId: task.id, removeFiles: shouldRemoveFiles)
         }
     }
 
-    private func sortTasks(_ tasks: [NewDownloadTask]) -> [NewDownloadTask] {
-        switch sortOrder {
-        case .addTime:
-            return tasks
-        case .name:
-            return tasks.sorted { task1, task2 in
-                task1.displayName < task2.displayName
-            }
-        case .status:
-            return tasks.sorted { task1, task2 in
-                task1.status.sortOrder < task2.status.sortOrder
-            }
-        }
-    }
-    
     var body: some View {
         VStack(spacing: 0) {
-            DownloadManagerToolbar(
-                sortOrder: $sortOrder,
-                dismiss: dismiss
-            )
-            DownloadTaskList(
-                tasks: sortTasks(networkManager.downloadTasks),
-                removeTask: removeTask
-            )
+            header
+            taskList
         }
-        .background(Color(.clear))
-        .frame(width:750, height: 600)
+        .background(.ultraThinMaterial)
+        .frame(width: 750, height: 600)
     }
-}
 
-private struct DownloadManagerToolbar: View {
-    @Binding var sortOrder: DownloadManagerView.SortOrder
-    let dismiss: DismissAction
-    
-    var body: some View {
+    private var header: some View {
         VStack(spacing: 0) {
             HStack {
-                Text("下载管理")
+                Text(String(localized: "下载管理"))
                     .font(.system(size: 20, weight: .bold))
                     .foregroundColor(.primary)
-                
-                Spacer()
-                
-                SortMenuView(sortOrder: $sortOrder)
-                    .frame(minWidth: 120)
-                    .fixedSize()
-                
-                ToolbarButtons(dismiss: dismiss)
-            }
-            .padding(.horizontal)
-            .padding(.vertical, 14)
-            
-            Divider()
-        }
-        .background(Color(NSColor.clear))
-        .shadow(color: Color.black.opacity(0.1), radius: 2, x: 0, y: 1)
-    }
-}
 
-private struct ToolbarButtons: View {
-    let dismiss: DismissAction
-    @State private var showClearCompletedConfirmation = false
-    
-    var body: some View {
-        HStack(spacing: 12) {
-            Button(action: {
-                Task {
-                    for task in globalNetworkManager.downloadTasks {
-                        if case .downloading = task.status {
-                            await globalNewDownloadUtils.pauseDownloadTask(
-                                taskId: task.id,
-                                reason: .userRequested
-                            )
-                        }
+                Spacer()
+
+                sortMenu
+
+                HStack(spacing: 6) {
+                    Button(action: pauseAll) {
+                        Image(systemName: "pause.fill")
                     }
-                }
-            }) {
-                Image(systemName: "pause.circle.fill")
-                    .font(.system(size: 18))
-                    .foregroundColor(.white)
-            }
-            .buttonStyle(BeautifulButtonStyle(baseColor: .orange))
-            
-            Button(action: {
-                Task {
-                    for task in globalNetworkManager.downloadTasks {
-                        if case .paused = task.status {
-                            await globalNewDownloadUtils.resumeDownloadTask(taskId: task.id)
-                        }
+                    .buttonStyle(GlassIconButtonStyle(tint: .orange))
+                    .help(String(localized: "全部暂停"))
+
+                    Button(action: resumeAll) {
+                        Image(systemName: "play.fill")
                     }
+                    .buttonStyle(GlassIconButtonStyle(tint: .blue))
+                    .help(String(localized: "全部继续"))
+
+                    Button(action: { showClearConfirmation = true }) {
+                        Image(systemName: "trash")
+                    }
+                    .buttonStyle(GlassIconButtonStyle(tint: .red))
+                    .help(String(localized: "清除已完成"))
+
+                    Button(action: { dismiss() }) {
+                        Image(systemName: "xmark")
+                    }
+                    .buttonStyle(GlassIconButtonStyle(tint: .secondary))
                 }
-            }) {
-                Image(systemName: "play.circle.fill")
-                    .font(.system(size: 18))
-                    .foregroundColor(.white)
             }
-            .buttonStyle(BeautifulButtonStyle(baseColor: .blue))
-            
-            Button(action: {
-                showClearCompletedConfirmation = true
-            }) {
-                Image(systemName: "trash.circle.fill")
-                    .font(.system(size: 18))
-                    .foregroundColor(.white)
-            }
-            .buttonStyle(BeautifulButtonStyle(baseColor: .red))
-            
-            Button(action: { dismiss() }) {
-                Image(systemName: "xmark.circle.fill")
-                    .font(.system(size: 18))
-                    .foregroundColor(.white)
-            }
-            .buttonStyle(BeautifulButtonStyle(baseColor: .gray))
+            .padding(.horizontal, 18)
+            .padding(.vertical, 14)
+
+            Divider().opacity(0.5)
         }
-        .background(Color(NSColor.clear))
-        .alert("确认删除", isPresented: $showClearCompletedConfirmation) {
-            Button("取消", role: .cancel) { }
-            Button("确认", role: .destructive) {
-                Task {
-                    let tasksToRemove = globalNetworkManager.downloadTasks.filter { task in
-                        if case .completed = task.status { return true }
-                        if case .failed = task.status { return true }
-                        return false
-                    }
-                    
-                    for task in tasksToRemove {
-                        let shouldRemoveFiles: Bool
-                        if case .failed = task.status {
-                            shouldRemoveFiles = true
-                        } else if case .completed = task.status {
-                            shouldRemoveFiles = StorageData.shared.deleteCompletedTasksWithFiles
-                        } else {
-                            shouldRemoveFiles = false
-                        }
-                        
-                        globalNetworkManager.removeTask(taskId: task.id, removeFiles: shouldRemoveFiles)
-                    }
-                    
-                    globalNetworkManager.updateDockBadge()
-                }
-            }
+        .background(.thinMaterial)
+        .alert(String(localized: "确认删除"), isPresented: $showClearConfirmation) {
+            Button(String(localized: "取消"), role: .cancel) { }
+            Button(String(localized: "确认"), role: .destructive) { clearFinishedTasks() }
         } message: {
             if StorageData.shared.deleteCompletedTasksWithFiles {
                 Text("确定要删除所有已完成和失败的下载任务吗？\n\n• 已完成的任务：将删除任务记录和本地文件\n• 失败的任务：将删除任务记录和本地文件")
@@ -191,120 +87,122 @@ private struct ToolbarButtons: View {
             }
         }
     }
-}
 
-private struct DownloadTaskList: View {
-    let tasks: [NewDownloadTask]
-    let removeTask: (NewDownloadTask) -> Void
-    
-    var body: some View {
-        ScrollView(showsIndicators: false) {
-            LazyVStack(spacing: 8) {
-                ForEach(tasks) { task in
-                    DownloadProgressView(
-                        task: task,
-                        onCancel: { TaskOperations.cancelTask(task) },
-                        onPause: { TaskOperations.pauseTask(task) },
-                        onResume: { TaskOperations.resumeTask(task) },
-                        onRetry: { TaskOperations.resumeTask(task) },
-                        onRemove: { removeTask(task) }
-                    )
-                }
-            }
-            .padding(.horizontal)
-            .padding(.vertical, 8)
-        }
-        .background(Color(NSColor.clear))
-    }
-}
-
-private enum TaskOperations {
-    static func cancelTask(_ task: NewDownloadTask) {
-        Task {
-            await globalNewDownloadUtils.cancelDownloadTask(taskId: task.id)
-        }
-    }
-    
-    static func pauseTask(_ task: NewDownloadTask) {
-        Task {
-            await globalNewDownloadUtils.pauseDownloadTask(
-                taskId: task.id,
-                reason: .userRequested
-            )
-        }
-    }
-    
-    static func resumeTask(_ task: NewDownloadTask) {
-        Task {
-            await globalNewDownloadUtils.resumeDownloadTask(taskId: task.id)
-        }
-    }
-}
-
-extension DownloadManagerView.SortOrder: Hashable {}
-
-struct SortMenuView: View {
-    @Binding var sortOrder: DownloadManagerView.SortOrder
-    
-    var body: some View {
+    private var sortMenu: some View {
         Menu {
-            ForEach([DownloadManagerView.SortOrder.addTime, .name, .status], id: \.self) { order in
-                Button(action: {
-                    sortOrder = order
-                }) {
+            ForEach([SortOrder.addTime, .name, .status], id: \.self) { order in
+                Button(action: { sortOrder = order }) {
                     HStack {
-                        Text(order.description)
-                            .font(.system(size: 14, weight: .medium))
-                        Spacer()
+                        Text(order.label)
                         if sortOrder == order {
                             Image(systemName: "checkmark")
-                                .foregroundColor(.blue)
-                                .font(.system(size: 12, weight: .bold))
                         }
                     }
-                    .frame(minWidth: 120)
-                    .padding(.vertical, 8)
-                    .padding(.horizontal, 12)
-                    .background(
-                        LinearGradient(
-                            gradient: Gradient(colors: [
-                                sortOrder == order ? Color.blue.opacity(0.05) : Color.clear,
-                                sortOrder == order ? Color.blue.opacity(0.1) : Color.clear
-                            ]),
-                            startPoint: .top,
-                            endPoint: .bottom
-                        )
-                    )
-                    .contentShape(Rectangle())
                 }
-                .buttonStyle(PlainButtonStyle())
             }
         } label: {
-            HStack(spacing: 6) {
+            HStack(spacing: 4) {
                 Image(systemName: "arrow.up.arrow.down")
-                    .font(.system(size: 12))
-                Text(sortOrder.description)
-                    .font(.system(size: 13, weight: .medium))
+                    .font(.system(size: 10))
+                Text(sortOrder.label)
+                    .font(.system(size: 12, weight: .medium))
             }
-            .foregroundColor(.white)
-            .padding(.vertical, 6)
+            .foregroundColor(.primary.opacity(0.8))
+            .padding(.vertical, 5)
             .padding(.horizontal, 10)
-            .background(
-                LinearGradient(
-                    gradient: Gradient(colors: [
-                        Color.blue.opacity(0.7),
-                        Color.blue.opacity(0.8)
-                    ]),
-                    startPoint: .top,
-                    endPoint: .bottom
-                )
+            .background(.ultraThinMaterial)
+            .overlay(
+                RoundedRectangle(cornerRadius: 7)
+                    .strokeBorder(.primary.opacity(0.1), lineWidth: 0.5)
             )
-            .clipShape(RoundedRectangle(cornerRadius: 8))
-            .shadow(color: Color.black.opacity(0.1), radius: 2, x: 0, y: 1)
+            .clipShape(RoundedRectangle(cornerRadius: 7))
         }
         .menuStyle(BorderlessButtonMenuStyle())
         .menuIndicator(.hidden)
         .fixedSize()
+    }
+
+    private var taskList: some View {
+        ScrollView(showsIndicators: false) {
+            LazyVStack(spacing: 12) {
+                ForEach(sortedTasks) { task in
+                    TaskCard(task: task) { action in
+                        handleAction(action, for: task)
+                    }
+                }
+            }
+            .padding(.horizontal, 18)
+            .padding(.vertical, 12)
+        }
+    }
+
+    private var sortedTasks: [NewDownloadTask] {
+        switch sortOrder {
+        case .addTime: return networkManager.downloadTasks
+        case .name:    return networkManager.downloadTasks.sorted { $0.displayName < $1.displayName }
+        case .status:  return networkManager.downloadTasks.sorted { $0.status.sortOrder < $1.status.sortOrder }
+        }
+    }
+
+    private func handleAction(_ action: TaskAction, for task: NewDownloadTask) {
+        Task {
+            switch action {
+            case .pause:
+                await globalNewDownloadUtils.pauseDownloadTask(taskId: task.id, reason: .userRequested)
+            case .resume, .retry:
+                await globalNewDownloadUtils.resumeDownloadTask(taskId: task.id)
+            case .cancel:
+                await globalNewDownloadUtils.cancelDownloadTask(taskId: task.id)
+            case .remove:
+                removeTask(task)
+            case .install:
+                break
+            }
+        }
+    }
+
+    private func removeTask(_ task: NewDownloadTask) {
+        let shouldRemoveFiles: Bool
+        if case .failed = task.status {
+            shouldRemoveFiles = true
+        } else if case .completed = task.status {
+            shouldRemoveFiles = StorageData.shared.deleteCompletedTasksWithFiles
+        } else {
+            shouldRemoveFiles = true
+        }
+        globalNetworkManager.removeTask(taskId: task.id, removeFiles: shouldRemoveFiles)
+    }
+
+    private func pauseAll() {
+        Task {
+            for task in networkManager.downloadTasks {
+                if case .downloading = task.status {
+                    await globalNewDownloadUtils.pauseDownloadTask(taskId: task.id, reason: .userRequested)
+                }
+            }
+        }
+    }
+
+    private func resumeAll() {
+        Task {
+            for task in networkManager.downloadTasks {
+                if case .paused = task.status {
+                    await globalNewDownloadUtils.resumeDownloadTask(taskId: task.id)
+                }
+            }
+        }
+    }
+
+    private func clearFinishedTasks() {
+        let tasksToRemove = networkManager.downloadTasks.filter { task in
+            if case .completed = task.status { return true }
+            if case .failed = task.status { return true }
+            return false
+        }
+        for task in tasksToRemove {
+            removeTask(task)
+        }
+        globalNetworkManager.updateDockBadge()
     }
 }
 

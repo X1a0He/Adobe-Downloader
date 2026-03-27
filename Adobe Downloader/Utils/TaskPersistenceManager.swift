@@ -130,6 +130,14 @@ class TaskPersistenceManager: @unchecked Sendable {
             let data = try Data(contentsOf: url)
             let decoder = JSONDecoder()
             let taskData = try decoder.decode(TaskData.self, from: data)
+            let shouldNormalizePackagesToPaused: Bool = {
+                switch taskData.totalStatus {
+                case .completed, .failed:
+                    return false
+                default:
+                    return true
+                }
+            }()
             
             let products = taskData.productsToDownload.map { productData -> DependenciesToDownload in
                 let product = DependenciesToDownload(
@@ -147,21 +155,28 @@ class TaskPersistenceManager: @unchecked Sendable {
                         downloadURL: packageData.downloadURL,
                         packageVersion: packageData.packageVersion
                     )
-                    package.downloadedSize = packageData.downloadedSize
-                    package.progress = packageData.progress
-                    package.speed = packageData.speed
-                    package.status = packageData.status
-                    package.downloaded = packageData.downloaded
+                    let clampedDownloadedSize = packageData.downloadSize > 0
+                        ? min(max(packageData.downloadedSize, 0), packageData.downloadSize)
+                        : max(packageData.downloadedSize, 0)
+                    package.speed = 0
+
+                    if packageData.downloaded || packageData.status == .completed {
+                        package.downloaded = true
+                        package.status = .completed
+                        package.downloadedSize = packageData.downloadSize
+                        package.progress = 1.0
+                    } else {
+                        package.downloaded = false
+                        package.downloadedSize = clampedDownloadedSize
+                        package.progress = package.downloadSize > 0
+                            ? min(max(Double(clampedDownloadedSize) / Double(package.downloadSize), 0), 1)
+                            : packageData.progress
+                        package.status = shouldNormalizePackagesToPaused ? .paused : packageData.status
+                    }
                     return package
                 }
                 
                 return product
-            }
-
-            for product in products {
-                for package in product.packages {
-                    package.speed = 0
-                }
             }
             
             let initialStatus: DownloadStatus
@@ -202,6 +217,23 @@ class TaskPersistenceManager: @unchecked Sendable {
                 platform: taskData.platform
             )
             task.displayInstallButton = taskData.displayInstallButton
+            task.totalPackages = products.reduce(0) { $0 + $1.packages.count }
+            task.completedPackages = products.reduce(0) { result, product in
+                result + product.packages.filter { $0.downloaded }.count
+            }
+            let totalSize = products
+                .flatMap { $0.packages }
+                .reduce(Int64(0)) { $0 + $1.downloadSize }
+            let totalDownloadedSize = products
+                .flatMap { $0.packages }
+                .reduce(Int64(0)) { result, package in
+                    result + min(max(package.downloadedSize, 0), package.downloadSize)
+                }
+            task.totalSize = totalSize
+            task.totalDownloadedSize = totalSize > 0 ? min(max(totalDownloadedSize, 0), totalSize) : 0
+            task.totalProgress = totalSize > 0
+                ? Double(task.totalDownloadedSize) / Double(totalSize)
+                : 0
             
             return task
         } catch {

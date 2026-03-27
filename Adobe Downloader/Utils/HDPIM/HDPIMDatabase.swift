@@ -604,9 +604,7 @@ final class HDPIMDatabase {
         return products
     }
 
-    func getInstalledProductIdentitySet() -> Set<String> {
-
-        func getProductMeta(
+    func getProductMeta(
         sapCode: String,
         version: String,
         processorFamily: HDPIMProcessorFamily,
@@ -625,9 +623,10 @@ final class HDPIMDatabase {
         let record = HDPIMNativeProductMetaRecord(
             sapCode: sapCode,
             productVersion: version,
-            processorFamily: processorFamily.rawValue,
+            processorFamily: processorFamily,
             key: key,
-            value: value
+            value: value,
+            appendIfNeeded: false
         )
         try? insertProductMeta(record)
     }

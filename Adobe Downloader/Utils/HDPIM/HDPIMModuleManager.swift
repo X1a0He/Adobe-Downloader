@@ -22,7 +22,7 @@ final class HDPIMModuleManager {
         appInfo.modules.map { parsed in
             HDPIMModule(
                 id: parsed.id,
-                displayName: parsed.displayName,
+                displayName: parsed.id,
                 referencePackages: parsed.referencePackages
             )
         }

@@ -16,6 +16,9 @@ final class PDMErrorHandler {
         case .none:
             return .ignore
 
+        case .cancelled:
+            return .ignore
+
         case .bluestreakNotAvailable:
             retryCount = 0
             return .switchToSingleStreamAndRetry

@@ -364,13 +364,14 @@ class PDMWorkflowManager {
 
         let packageIdentifier = "PDM_\(fileName)"
 
-        try await PDMDownloadEngine.shared.downloadFileWithChunks(
-            packageIdentifier: packageIdentifier,
+        let result = await PDMDownloadEngine.shared.downloadFile(
+            packageId: packageIdentifier,
             url: url,
             destinationURL: filePath,
             headers: headers,
             validationURL: globalData.validationURL.isEmpty ? nil : globalData.validationURL,
-            progressHandler: { [weak self] progress, downloaded, total, speed in
+            progressHandler: { [weak self] downloaded, total, speed in
+                let progress = total > 0 ? Double(downloaded) / Double(total) : 0
                 self?.progressHandler?(.downloadAssetBits, progress)
             },
             rangeAvailabilityHandler: { [weak self] upperBound, isComplete in
@@ -378,14 +379,19 @@ class PDMWorkflowManager {
                 if isComplete {
                     self?.overlappedExtractor?.completeDownload(totalSize: self?.globalData.totalSize ?? 0)
                 }
-            },
-            cancellationHandler: { [weak self] in
-                if let check = self?.cancellationCheck {
-                    return await check()
-                }
-                return false
             }
         )
+
+        switch result {
+        case .completed:
+            break
+        case .error(let err):
+            throw err
+        case .paused:
+            throw PDMDownloadError.criticalError("Download paused")
+        case .cancelled:
+            throw PDMDownloadError.criticalError("Download cancelled")
+        }
 
         progressHandler?(.downloadAssetBits, 1.0)
         await moveToNextState()

@@ -20,6 +20,9 @@ final class PDMHttpCommunicator {
     private var userAgent: String = ""
     private var bluestreakDisabledDueToProxy = false
     private var cookieSaved = false
+    private var statusCodeChecked = false
+    private(set) var lastResponseStatusCode: Int = 0
+    private(set) var lastETag: String = ""
 
     init() {
         userAgent = Self.buildFFCUserAgent()
@@ -176,6 +179,9 @@ final class PDMHttpCommunicator {
     ) -> Bool {
         currentURL = url
         downloadInitialized = false
+        statusCodeChecked = false
+        lastResponseStatusCode = 0
+        lastETag = ""
 
         let cfURL = url as CFURL
         let request = CFHTTPMessageCreateRequest(
@@ -311,14 +317,14 @@ final class PDMHttpCommunicator {
         progressCallback: ((Int64) -> Void)? = nil
     ) -> (result: PDMReadResult, bytesRead: Int) {
         guard !cancelDownload, let stream = readStream else {
-            return (.error(.criticalError), 0)
+            return (.error(.cancelled), 0)
         }
 
         isInDownloadMode = true
         defer { isInDownloadMode = false }
 
         if cancelDownload {
-            return (.error(.criticalError), 0)
+            return (.error(.cancelled), 0)
         }
 
         let bytesRead = CFReadStreamRead(stream, buffer, bufferSize)
@@ -334,6 +340,20 @@ final class PDMHttpCommunicator {
                     let cfResponse = responseMsg as! CFHTTPMessage
                     cookieManager.saveCookies(from: cfResponse, for: url)
                     cookieSaved = true
+                }
+            }
+
+            if !statusCodeChecked {
+                if let responseMsg = CFReadStreamCopyProperty(
+                    stream,
+                    CFStreamPropertyKey(rawValue: kCFStreamPropertyHTTPResponseHeader)
+                ) {
+                    let cfResponse = responseMsg as! CFHTTPMessage
+                    lastResponseStatusCode = CFHTTPMessageGetResponseStatusCode(cfResponse)
+                    if let etagRef = CFHTTPMessageCopyHeaderFieldValue(cfResponse, "ETag" as CFString) {
+                        lastETag = etagRef.takeRetainedValue() as String
+                    }
+                    statusCodeChecked = true
                 }
             }
 
@@ -382,7 +402,7 @@ final class PDMHttpCommunicator {
         bluestreakDisabledDueToProxy
     }
 
-    private func closeStream() {
+    func closeStream() {
         if let stream = readStream {
             CFReadStreamSetClient(stream, 0, nil, nil)
             if let rl = runLoop {

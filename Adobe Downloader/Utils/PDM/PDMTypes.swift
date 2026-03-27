@@ -11,6 +11,7 @@ enum PDMErrorCode: Int, CustomStringConvertible {
     case bluestreakNotAvailable = 113
     case downloadFailed = 116
     case segmentValidationFailed = 117
+    case cancelled = 118
     case criticalError = 119
     case needRetry = 126
     case signatureValidationFailed = 134
@@ -22,6 +23,7 @@ enum PDMErrorCode: Int, CustomStringConvertible {
         case .bluestreakNotAvailable: return "PDM_BLUESTREAK_NOT_AVAILABLE"
         case .downloadFailed: return "PDM_DOWNLOAD_FAILED"
         case .segmentValidationFailed: return "PDM_SEGMENT_VALIDATION_FAILED"
+        case .cancelled: return "PDM_CANCELLED"
         case .criticalError: return "PDM_CRITICAL_ERROR"
         case .needRetry: return "PDM_NEED_RETRY"
         case .signatureValidationFailed: return "PDM_SIGNATURE_VALIDATION_FAILED"
@@ -30,7 +32,7 @@ enum PDMErrorCode: Int, CustomStringConvertible {
 
     var isFatal: Bool {
         switch self {
-        case .none, .downloadFailed, .needRetry:
+        case .none, .downloadFailed, .needRetry, .cancelled:
             return false
         default:
             return true
@@ -165,6 +167,22 @@ struct PDMHTTPResponse {
     var contentRange: String? {
         headers["Content-Range"] ?? headers["content-range"]
     }
+}
+
+enum PDMDownloadState: Int {
+    case idle = 0
+    case running = 1
+    case paused = 2
+    case cancelled = 3
+    case completed = 4
+    case error = 5
+}
+
+enum PDMDownloadResult {
+    case completed
+    case paused(bytesDownloaded: Int64)
+    case cancelled
+    case error(PDMDownloadError)
 }
 
 enum PDMConstants {
