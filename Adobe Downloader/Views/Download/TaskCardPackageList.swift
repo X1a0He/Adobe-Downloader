@@ -147,16 +147,9 @@ struct TaskCardPackageList: View {
                 let prefix = pkgIndex == product.packages.count - 1 ? "    └── " : "    ├── "
                 result += "\(prefix)\(package.fullPackageName) (\(package.packageVersion)) - \(package.type)\n"
             }
-            if let originalProduct = findProduct(id: task.productId),
-               let platform = originalProduct.platforms.first,
-               let languageSet = platform.languageSet.first,
-               let dependency = languageSet.dependencies.first(where: { $0.sapCode == product.sapCode }) {
-                let matchPlatform = dependency.isMatchPlatform ? "✅" : "❌"
+            if !product.selectedReason.isEmpty {
                 result += "    依赖详情:\n"
-                result += "    - isMatchPlatform: \(matchPlatform)\n"
-                result += "    - targetPlatform: \(dependency.targetPlatform.isEmpty ? "(无)" : dependency.targetPlatform)\n"
-                result += "    - selectedPlatform: \(dependency.selectedPlatform.isEmpty ? "(无)" : dependency.selectedPlatform)\n"
-                result += "    - selectedReason: \(dependency.selectedReason.isEmpty ? "(无)" : dependency.selectedReason)\n"
+                result += "    - targetReason: \(product.selectedReason.isEmpty ? "(无)" : product.selectedReason)\n"
             }
             if index < task.dependenciesToDownload.count - 1 { result += "\n" }
         }

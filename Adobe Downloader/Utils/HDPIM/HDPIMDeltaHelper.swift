@@ -30,7 +30,8 @@ final class HDPIMDeltaHelper {
         diffJsonURL: URL,
         packageName: String,
         packageVersion: String,
-        progressHandler: ((Double, String) -> Void)? = nil
+        progressHandler: ((Double, String) -> Void)? = nil,
+        databaseAlreadyOpen: Bool = false
     ) async throws {
         progressHandler?(0.0, "Preparing delta update for \(packageName)...")
 
@@ -73,8 +74,18 @@ final class HDPIMDeltaHelper {
 
         let processorFamily = HDPIMProcessorFamily.from(platform: platform)
         do {
-            try HDPIMDatabase.shared.open()
-            defer { HDPIMDatabase.shared.close() }
+            let shouldCloseDatabase: Bool
+            if databaseAlreadyOpen {
+                shouldCloseDatabase = false
+            } else {
+                try HDPIMDatabase.shared.open()
+                shouldCloseDatabase = true
+            }
+            defer {
+                if shouldCloseDatabase {
+                    HDPIMDatabase.shared.close()
+                }
+            }
 
             HDPIMDatabase.shared.setProductMeta(
                 sapCode: sapCode,

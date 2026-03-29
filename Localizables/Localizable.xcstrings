@@ -4,10 +4,7 @@
     "" : {
 
     },
-    "--" : {
-
-    },
-    "--:--" : {
+    "·" : {
 
     },
     "(%@)" : {
@@ -16,7 +13,18 @@
     "(%lld)" : {
 
     },
+    "(%lld/%lld)" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "(%1$lld/%2$lld)"
+          }
+        }
+      }
+    },
     "(可能导致处理失败)" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -27,6 +35,7 @@
       }
     },
     "(无法使用安装功能)" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -186,10 +195,17 @@
     "Adobe Creative Cloud" : {
 
     },
+    "Adobe Downloader" : {
+
+    },
     "Adobe Downloader %@" : {
 
     },
+    "Adobe Downloader 完全开源免费" : {
+
+    },
     "Adobe Downloader 完全开源免费: https://github.com/X1a0He/Adobe-Downloader" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -310,7 +326,7 @@
         }
       }
     },
-    "API:" : {
+    "API" : {
 
     },
     "Apple Silicon" : {
@@ -335,6 +351,9 @@
           }
         }
       }
+    },
+    "GitHub" : {
+
     },
     "GNU通用公共许可证GPL v3." : {
       "localizations" : {
@@ -637,6 +656,15 @@
     "v%@" : {
 
     },
+    "v4" : {
+
+    },
+    "v5" : {
+
+    },
+    "v6" : {
+
+    },
     "X1a0He CC" : {
 
     },
@@ -683,6 +711,7 @@
       }
     },
     "下载 Apple Silicon" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -908,6 +937,7 @@
       }
     },
     "产品和包列表" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -1082,7 +1112,6 @@
       }
     },
     "全部暂停" : {
-      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -1093,7 +1122,6 @@
       }
     },
     "全部继续" : {
-      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -1175,7 +1203,11 @@
         }
       }
     },
+    "切换 API 版本" : {
+
+    },
     "删除" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -1275,6 +1307,15 @@
         }
       }
     },
+    "刷新" : {
+
+    },
+    "刷新中" : {
+
+    },
+    "刷新产品列表" : {
+
+    },
     "前往 Adobe Creative Cloud" : {
       "localizations" : {
         "en" : {
@@ -1294,6 +1335,9 @@
           }
         }
       }
+    },
+    "包详情" : {
+
     },
     "升级" : {
       "extractionState" : "stale",
@@ -1375,6 +1419,9 @@
           }
         }
       }
+    },
+    "可选" : {
+
     },
     "可选模块" : {
       "extractionState" : "stale",
@@ -1468,6 +1515,7 @@
       }
     },
     "命令行安装" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -1568,6 +1616,7 @@
       }
     },
     "复制命令" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -1837,6 +1886,9 @@
         }
       }
     },
+    "官方默认" : {
+
+    },
     "客户端错误: %d" : {
       "comment" : "Client error",
       "localizations" : {
@@ -1961,6 +2013,7 @@
       }
     },
     "已处理" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -1971,6 +2024,7 @@
       }
     },
     "已备份" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -2166,6 +2220,9 @@
         }
       }
     },
+    "开源免费" : {
+
+    },
     "当前包" : {
 
     },
@@ -2229,6 +2286,12 @@
         }
       }
     },
+    "打开下载管理" : {
+
+    },
+    "打开下载管理（%lld 个任务）" : {
+
+    },
     "打开登录项" : {
       "localizations" : {
         "en" : {
@@ -2262,7 +2325,6 @@
       }
     },
     "打开设置" : {
-      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -2384,6 +2446,9 @@
           }
         }
       }
+    },
+    "搜索应用或产品 ID" : {
+
     },
     "搜索语言" : {
       "localizations" : {
@@ -2658,6 +2723,7 @@
       }
     },
     "是否要安装 %@?" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -2763,6 +2829,7 @@
       }
     },
     "未处理" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -2773,6 +2840,7 @@
       }
     },
     "未备份" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -3092,6 +3160,9 @@
         }
       }
     },
+    "正在刷新产品列表" : {
+
+    },
     "正在加载..." : {
       "localizations" : {
         "en" : {
@@ -3103,6 +3174,7 @@
       }
     },
     "正在处理 %@ 的包信息..." : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -3465,6 +3537,9 @@
           }
         }
       }
+    },
+    "清除已完成" : {
+
     },
     "点击切换选择状态" : {
       "localizations" : {
@@ -3989,6 +4064,9 @@
         }
       }
     },
+    "设置" : {
+
+    },
     "设置..." : {
       "localizations" : {
         "en" : {
@@ -4021,6 +4099,7 @@
       }
     },
     "请确认你的操作" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -4399,6 +4478,16 @@
         }
       }
     },
+    "重试中 (%lld/%lld)" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "重试中 (%1$lld/%2$lld)"
+          }
+        }
+      }
+    },
     "错误代码(%lld)，请查看日志详情并向开发者汇报" : {
       "extractionState" : "stale",
       "localizations" : {
@@ -4487,6 +4576,7 @@
       }
     },
     "默认" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {

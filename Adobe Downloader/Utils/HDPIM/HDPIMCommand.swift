@@ -268,6 +268,7 @@ enum HDPIMInstallError: Error, LocalizedError {
     case databaseError(String)
     case cancelled
     case conflictingProcessDetected([String])
+    case hostValidationFailed(String)
 
     var errorDescription: String? {
         switch self {
@@ -282,6 +283,8 @@ enum HDPIMInstallError: Error, LocalizedError {
         case .cancelled: return "安装已取消"
         case .conflictingProcessDetected(let processes):
             return "检测到冲突进程正在运行: \(processes.joined(separator: ", "))，请关闭后重试"
+        case .hostValidationFailed(let msg):
+            return msg
         }
     }
 }

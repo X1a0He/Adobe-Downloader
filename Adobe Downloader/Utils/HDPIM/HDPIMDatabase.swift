@@ -20,6 +20,22 @@ struct HDPIMInstallRecord {
     let installTimestamp: Date
 }
 
+struct HDPIMInstalledPackageSnapshot {
+    let sapCode: String
+    let productVersion: String
+    let processorFamily: HDPIMProcessorFamily
+    let packageName: String
+    let packageVersion: String
+    let installDir: String
+    let uninstallPIMXPath: String?
+    let uninstallPIMXHash: String?
+    let uninstallPIMXHash256: String?
+    let repairPIMXPath: String?
+    let repairPIMXHash: String?
+    let repairPIMXHash256: String?
+    let targetFolders: [String]
+}
+
 enum HDPIMInstallStatus: String {
     case notInstalled = "0"
     case installed = "1"
@@ -33,6 +49,8 @@ enum HDPIMProcessorFamily: String {
     static func from(platform: String) -> HDPIMProcessorFamily {
         let normalized = platform.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
         switch normalized {
+        case "MACARM64":
+            return .arm64Bit
         case "OSX", "OSX10":
             return .bit32
         default:
@@ -575,6 +593,199 @@ final class HDPIMDatabase {
             )
         }
         return records
+    }
+
+    func getInstalledPackageNames(
+        sapCode: String,
+        version: String,
+        processorFamily: HDPIMProcessorFamily
+    ) -> [String] {
+        let sql = """
+        SELECT p.PackageName
+        FROM \(Schema.packageInstallationInfo) p
+        INNER JOIN \(Schema.productInstallationInfo) prod
+          ON prod.SAPCode = p.SAPCode
+         AND prod.ProductVersion = p.ProductVersion
+         AND prod.ProcessorFamily = p.ProcessorFamily
+         AND prod.Status = ?
+        WHERE p.SAPCode = ? AND p.ProductVersion = ? AND p.ProcessorFamily = ?
+        ORDER BY p.PackageName;
+        """
+
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+            return []
+        }
+        defer { sqlite3_finalize(stmt) }
+
+        bindText(HDPIMInstallStatus.installed.rawValue, index: 1, to: stmt)
+        bindText(sapCode, index: 2, to: stmt)
+        bindText(version, index: 3, to: stmt)
+        bindText(processorFamily.rawValue, index: 4, to: stmt)
+
+        var packageNames: [String] = []
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            let packageName = columnText(stmt, index: 0)
+            if !packageName.isEmpty {
+                packageNames.append(packageName)
+            }
+        }
+        return packageNames
+    }
+
+    func getInstalledPackageSnapshots(
+        sapCode: String,
+        processorFamily: HDPIMProcessorFamily,
+        packageName: String,
+        expectedInstallDir: String
+    ) -> [HDPIMInstalledPackageSnapshot] {
+        let sql = """
+        SELECT p.SAPCode,
+               p.ProductVersion,
+               p.PackageName,
+               p.PackageVersion,
+               COALESCE(pm_install_dir.Value, ''),
+               pm_uninstall.Value,
+               pm_uninstall_sha1.Value,
+               pm_uninstall_sha256.Value,
+               pm_repair.Value,
+               pm_repair_sha1.Value,
+               pm_repair_sha256.Value
+        FROM \(Schema.packageInstallationInfo) p
+        INNER JOIN \(Schema.productInstallationInfo) prod
+          ON prod.SAPCode = p.SAPCode
+         AND prod.ProductVersion = p.ProductVersion
+         AND prod.ProcessorFamily = p.ProcessorFamily
+         AND prod.Status = ?
+        LEFT JOIN \(Schema.productInstallationMetaInfo) pm_install_dir
+          ON pm_install_dir.SAPCode = p.SAPCode
+         AND pm_install_dir.ProductVersion = p.ProductVersion
+         AND pm_install_dir.ProcessorFamily = p.ProcessorFamily
+         AND pm_install_dir.Key = ?
+        LEFT JOIN \(Schema.packageInstallationMetaInfo) pm_uninstall
+          ON pm_uninstall.SAPCode = p.SAPCode
+         AND pm_uninstall.ProductVersion = p.ProductVersion
+         AND pm_uninstall.ProcessorFamily = p.ProcessorFamily
+         AND pm_uninstall.PackageName = p.PackageName
+         AND pm_uninstall.PackageVersion = p.PackageVersion
+         AND pm_uninstall.Key = ?
+        LEFT JOIN \(Schema.packageInstallationMetaInfo) pm_uninstall_sha1
+          ON pm_uninstall_sha1.SAPCode = p.SAPCode
+         AND pm_uninstall_sha1.ProductVersion = p.ProductVersion
+         AND pm_uninstall_sha1.ProcessorFamily = p.ProcessorFamily
+         AND pm_uninstall_sha1.PackageName = p.PackageName
+         AND pm_uninstall_sha1.PackageVersion = p.PackageVersion
+         AND pm_uninstall_sha1.Key = ?
+        LEFT JOIN \(Schema.packageInstallationMetaInfo) pm_uninstall_sha256
+          ON pm_uninstall_sha256.SAPCode = p.SAPCode
+         AND pm_uninstall_sha256.ProductVersion = p.ProductVersion
+         AND pm_uninstall_sha256.ProcessorFamily = p.ProcessorFamily
+         AND pm_uninstall_sha256.PackageName = p.PackageName
+         AND pm_uninstall_sha256.PackageVersion = p.PackageVersion
+         AND pm_uninstall_sha256.Key = ?
+        LEFT JOIN \(Schema.packageInstallationMetaInfo) pm_repair
+          ON pm_repair.SAPCode = p.SAPCode
+         AND pm_repair.ProductVersion = p.ProductVersion
+         AND pm_repair.ProcessorFamily = p.ProcessorFamily
+         AND pm_repair.PackageName = p.PackageName
+         AND pm_repair.PackageVersion = p.PackageVersion
+         AND pm_repair.Key = ?
+        LEFT JOIN \(Schema.packageInstallationMetaInfo) pm_repair_sha1
+          ON pm_repair_sha1.SAPCode = p.SAPCode
+         AND pm_repair_sha1.ProductVersion = p.ProductVersion
+         AND pm_repair_sha1.ProcessorFamily = p.ProcessorFamily
+         AND pm_repair_sha1.PackageName = p.PackageName
+         AND pm_repair_sha1.PackageVersion = p.PackageVersion
+         AND pm_repair_sha1.Key = ?
+        LEFT JOIN \(Schema.packageInstallationMetaInfo) pm_repair_sha256
+          ON pm_repair_sha256.SAPCode = p.SAPCode
+         AND pm_repair_sha256.ProductVersion = p.ProductVersion
+         AND pm_repair_sha256.ProcessorFamily = p.ProcessorFamily
+         AND pm_repair_sha256.PackageName = p.PackageName
+         AND pm_repair_sha256.PackageVersion = p.PackageVersion
+         AND pm_repair_sha256.Key = ?
+        WHERE p.SAPCode = ? AND p.ProcessorFamily = ? AND p.PackageName = ?;
+        """
+
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+            return []
+        }
+        defer { sqlite3_finalize(stmt) }
+
+        bindText(HDPIMInstallStatus.installed.rawValue, index: 1, to: stmt)
+        bindText(HDPIMProductExtraMetaKey.installDir, index: 2, to: stmt)
+        bindText(HDPIMPackageMetaKey.uninstallPIMX.rawValue, index: 3, to: stmt)
+        bindText(HDPIMPackageMetaKey.uninstallPIMXHash.rawValue, index: 4, to: stmt)
+        bindText(HDPIMPackageMetaKey.uninstallPIMXHash256.rawValue, index: 5, to: stmt)
+        bindText(HDPIMPackageMetaKey.repairPIMX.rawValue, index: 6, to: stmt)
+        bindText(HDPIMPackageMetaKey.repairPIMXHash.rawValue, index: 7, to: stmt)
+        bindText(HDPIMPackageMetaKey.repairPIMXHash256.rawValue, index: 8, to: stmt)
+        bindText(sapCode, index: 9, to: stmt)
+        bindText(processorFamily.rawValue, index: 10, to: stmt)
+        bindText(packageName, index: 11, to: stmt)
+
+        let normalizedExpectedInstallDir = normalizedComparablePath(expectedInstallDir)
+        var snapshots: [HDPIMInstalledPackageSnapshot] = []
+
+        while sqlite3_step(stmt) == SQLITE_ROW {
+            let productVersion = columnText(stmt, index: 1)
+            let resolvedPackageName = columnText(stmt, index: 2)
+            let packageVersion = columnText(stmt, index: 3)
+            let installDir = columnText(stmt, index: 4)
+
+            if !normalizedExpectedInstallDir.isEmpty,
+               normalizedComparablePath(installDir) != normalizedExpectedInstallDir {
+                continue
+            }
+
+            let isValid = (try? hasValidInstalledPackage(
+                sapCode: sapCode,
+                productVersion: productVersion,
+                processorFamily: processorFamily,
+                packageName: resolvedPackageName,
+                packageVersion: packageVersion,
+                expectedInstallDir: expectedInstallDir
+            )) ?? false
+            if !isValid {
+                continue
+            }
+
+            let targetFoldersRaw = (try? fetchPackageMetaValue(
+                sapCode: sapCode,
+                version: productVersion,
+                processorFamily: processorFamily,
+                packageName: resolvedPackageName,
+                packageVersion: packageVersion,
+                key: HDPIMPackageMetaKey.targetFolderList.rawValue
+            )) ?? nil
+
+            snapshots.append(
+                HDPIMInstalledPackageSnapshot(
+                    sapCode: columnText(stmt, index: 0),
+                    productVersion: productVersion,
+                    processorFamily: processorFamily,
+                    packageName: resolvedPackageName,
+                    packageVersion: packageVersion,
+                    installDir: installDir,
+                    uninstallPIMXPath: columnOptionalText(stmt, index: 5),
+                    uninstallPIMXHash: columnOptionalText(stmt, index: 6),
+                    uninstallPIMXHash256: columnOptionalText(stmt, index: 7),
+                    repairPIMXPath: columnOptionalText(stmt, index: 8),
+                    repairPIMXHash: columnOptionalText(stmt, index: 9),
+                    repairPIMXHash256: columnOptionalText(stmt, index: 10),
+                    targetFolders: splitMetaValues(targetFoldersRaw ?? "")
+                )
+            )
+        }
+
+        return snapshots.sorted { lhs, rhs in
+            let productCompare = AppStatics.compareVersions(lhs.productVersion, rhs.productVersion)
+            if productCompare != 0 {
+                return productCompare > 0
+            }
+            return AppStatics.compareVersions(lhs.packageVersion, rhs.packageVersion) > 0
+        }
     }
 
     func getAllInstalledProducts() -> [(sapCode: String, version: String, platform: String)] {

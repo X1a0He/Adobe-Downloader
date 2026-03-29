@@ -29,6 +29,22 @@ class HDPIMInstallPipeline {
         let validation: HDPIMInstallHelper.ExtractedPackageValidationResult
     }
 
+    private enum PackageExecutionMode {
+        case full(HDPIMInstalledPackageSnapshot?)
+        case databaseOnly(HDPIMInstalledPackageSnapshot)
+        case delta(HDPIMInstalledPackageSnapshot, DeltaPackageInfo, URL)
+    }
+
+    private struct PackagePersistenceArtifacts {
+        let uninstallPIMXPath: String?
+        let uninstallPIMXHash: String?
+        let uninstallPIMXHash256: String?
+        let repairPIMXPath: String?
+        let repairPIMXHash: String?
+        let repairPIMXHash256: String?
+        let targetFolders: [String]
+    }
+
     private final class ExtractionProgressState {
         var lastReportedStep = -1
     }
@@ -76,6 +92,10 @@ class HDPIMInstallPipeline {
         propertyTable.mergeFromRequestInfo(requestInfo)
 
         progressHandler(0.05, "正在收集包信息...")
+        try HDPIMDatabase.shared.open()
+        let databaseAvailable = true
+        defer { HDPIMDatabase.shared.close() }
+
         let collectedPackages = try collectPackages(
             productDir: productDir,
             productInfo: productInfo,
@@ -89,10 +109,8 @@ class HDPIMInstallPipeline {
 
         log("[HDPIM Pipeline] 收集到 \(collectedPackages.count) 个候选包: \(collectedPackages.map { $0.packageName })")
 
-        try HDPIMDatabase.shared.open()
-        defer { HDPIMDatabase.shared.close() }
-
         let installedProductIdentities = HDPIMDatabase.shared.getInstalledProductIdentitySet()
+        let installedProducts = HDPIMParityDecisionEngine.shared.makeInstalledProductSnapshots(databaseAlreadyOpen: true)
 
         let allProductContexts = makeProductDatabaseContexts(
             productInfo: productInfo,
@@ -109,7 +127,13 @@ class HDPIMInstallPipeline {
                 .filter { !installedProductIdentities.contains($0) }
         )
 
-        let packagesToInstall = try filterPackagesForInstall(collectedPackages)
+        let packagesToInstall = try filterPackagesForInstall(
+            collectedPackages,
+            productInfo: productInfo,
+            requestInfo: requestInfo,
+            propertyTable: propertyTable,
+            databaseAvailable: databaseAvailable
+        )
 
         guard !packagesToInstall.isEmpty else {
             progressHandler(1.0, "当前状态已满足安装要求")
@@ -144,6 +168,8 @@ class HDPIMInstallPipeline {
         let totalPackages = packagesToInstall.count
         var installedCount = 0
         var persistedPackageContexts: [HDPIMNativePackageContext] = []
+        var obsoletePackageContexts: [HDPIMNativePackageContext] = []
+        var obsoleteProductKeys: [HDPIMNativeProductKey] = []
         let productContexts = makeProductContextsForPersistence(
             allProductContexts,
             packagesToInstall: packagesToInstall
@@ -160,104 +186,228 @@ class HDPIMInstallPipeline {
 
                 let packageProgress = Double(index) / Double(totalPackages)
                 let baseProgress = 0.15 + packageProgress * 0.8  // 15%~95%
+                let executionMode = await resolvePackageExecutionMode(for: pkg)
+                let amtConfigAppID = firstNonEmptyString([
+                    pkg.applicationInfo.amtConfig["AMTConfig.appID"],
+                    pkg.applicationInfo.amtConfig["appID"]
+                ])
+                let targetPackageVersion = firstNonEmptyString([
+                    pkg.parsed.packageVersion,
+                    pkg.version
+                ]) ?? pkg.version
+                let persistenceArtifacts: PackagePersistenceArtifacts
 
-                log("[HDPIM Pipeline] 开始解压 (\(index+1)/\(totalPackages)): \(pkg.packageName) (\(pkg.zipPath.lastPathComponent))")
-                let zipSize = (try? FileManager.default.attributesOfItem(atPath: pkg.zipPath.path)[.size] as? Int64) ?? 0
-                log("[HDPIM Pipeline] ZIP 大小: \(ByteCountFormatter.string(fromByteCount: zipSize, countStyle: .file))")
-                if pkg.compressionType.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == "zip-lzma2" {
-                    log("[HDPIM Pipeline] 解压后端: native-liblzma + 3 worker")
-                } else {
-                    log("[HDPIM Pipeline] 解压后端: cminizip + 3 worker")
-                }
-                progressHandler(baseProgress, "正在解压 \(pkg.packageName) (\(index+1)/\(totalPackages))...")
-                let extractedPackage: ValidatedExtractPackage
-                do {
-                    let extractionState = ExtractionProgressState()
-                    extractedPackage = try await extractPackage(
-                        pkg: pkg,
-                        propertyTable: propertyTable,
-                        progressHandler: { extractProgress in
-                            let clampedProgress = min(max(extractProgress, 0), 1)
-                            let mappedProgress = baseProgress + clampedProgress * 0.02
-                            let percent = Int(clampedProgress * 100)
-                            let coarseStep = percent / 2
-                            guard coarseStep != extractionState.lastReportedStep || percent == 100 else {
-                                return
+                switch executionMode {
+                case .databaseOnly(let installedPackage):
+                    log("[HDPIM Pipeline] 包 \(pkg.packageName) 已存在相同版本 \(installedPackage.packageVersion)，按官方链路仅补数据库记录")
+                    progressHandler(baseProgress + 0.08, "正在复用 \(pkg.packageName) 的已安装包信息...")
+                    persistenceArtifacts = makePersistenceArtifacts(from: installedPackage)
+
+                case .full(_), .delta(_, _, _):
+                    log("[HDPIM Pipeline] 开始解压 (\(index+1)/\(totalPackages)): \(pkg.packageName) (\(pkg.zipPath.lastPathComponent))")
+                    let zipSize = (try? FileManager.default.attributesOfItem(atPath: pkg.zipPath.path)[.size] as? Int64) ?? 0
+                    log("[HDPIM Pipeline] ZIP 大小: \(ByteCountFormatter.string(fromByteCount: zipSize, countStyle: .file))")
+                    if pkg.compressionType.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == "zip-lzma2" {
+                        log("[HDPIM Pipeline] 解压后端: native-liblzma + 3 worker")
+                    } else {
+                        log("[HDPIM Pipeline] 解压后端: cminizip + 3 worker")
+                    }
+                    progressHandler(baseProgress, "正在解压 \(pkg.packageName) (\(index+1)/\(totalPackages))...")
+
+                    let extractedPackage: ValidatedExtractPackage
+                    do {
+                        let extractionState = ExtractionProgressState()
+                        extractedPackage = try await extractPackage(
+                            pkg: pkg,
+                            propertyTable: propertyTable,
+                            progressHandler: { extractProgress in
+                                let clampedProgress = min(max(extractProgress, 0), 1)
+                                let mappedProgress = baseProgress + clampedProgress * 0.02
+                                let percent = Int(clampedProgress * 100)
+                                let coarseStep = percent / 2
+                                guard coarseStep != extractionState.lastReportedStep || percent == 100 else {
+                                    return
+                                }
+                                extractionState.lastReportedStep = coarseStep
+                                progressHandler(
+                                    mappedProgress,
+                                    "正在解压 \(pkg.packageName) (\(index+1)/\(totalPackages))... \(percent)%"
+                                )
                             }
-                            extractionState.lastReportedStep = coarseStep
-                            progressHandler(
-                                mappedProgress,
-                                "正在解压 \(pkg.packageName) (\(index+1)/\(totalPackages))... \(percent)%"
+                        )
+                        let extractDir = extractedPackage.extractDir
+                        log("[HDPIM Pipeline] 解压完成: \(pkg.packageName) → \(extractDir.path)")
+                        log("[HDPIM Pipeline] PIMX 校验通过: \(extractedPackage.validation.pimxURL.path)")
+                        log("[HDPIM Pipeline] 解压恢复统计: symlink=\(extractedPackage.extractionResult.restoredSymlinkCount), permissions=\(extractedPackage.extractionResult.restoredPermissionCount), retries=\(extractedPackage.extractionResult.usedRetryCount)")
+                        if !extractedPackage.extractionResult.diffJSONURLs.isEmpty {
+                            log("[HDPIM Pipeline] 发现 diff.json: \(extractedPackage.extractionResult.diffJSONURLs.map(\.lastPathComponent))")
+                        }
+                        if let contents = try? FileManager.default.contentsOfDirectory(atPath: extractDir.path) {
+                            log("[HDPIM Pipeline] 解压内容 (\(contents.count) 项): \(contents.prefix(20))")
+                        }
+                    } catch {
+                        log("[HDPIM Pipeline] 解压失败 \(pkg.packageName): \(error)")
+                        throw HDPIMInstallError.extractionFailed("\(pkg.packageName): \(error.localizedDescription)")
+                    }
+
+                    let helper = HDPIMInstallHelper(propertyTable: propertyTable)
+                    helper.logHandler = logHandler
+
+                    switch executionMode {
+                    case .full(_):
+                        progressHandler(baseProgress + 0.02, "正在安装 \(pkg.packageName)...")
+                        let commandState = CommandProgressState()
+
+                        let result = try await helper.installPackage(
+                            parsedPackage: pkg.parsed,
+                            extractDir: extractedPackage.extractDir,
+                            sapCode: pkg.sapCode,
+                            version: pkg.version,
+                            platform: pkg.platform,
+                            amtConfigAppID: amtConfigAppID,
+                            installDir: installDir,
+                            aliasPackageName: pkg.aliasPackageName,
+                            productInstallDir: pkg.productInstallDir,
+                            validatedExtract: extractedPackage.validation,
+                            progressHandler: { cmdIndex, cmdTotal, cmdName in
+                                let normalizedTotal = max(cmdTotal, 1)
+                                let ratio = Double(cmdIndex + 1) / Double(normalizedTotal)
+                                let cmdProgress = baseProgress + 0.02 + ratio * 0.06
+                                let percent = Int(ratio * 100)
+                                let coarseStep = percent / 2
+
+                                let status: String
+                                if cmdName.contains("正在处理:") {
+                                    status = "[\(pkg.packageName)] \(cmdName)"
+                                } else {
+                                    status = "正在安装 \(pkg.packageName)... \(percent)%"
+                                }
+
+                                guard commandState.lastReportedStatus != status
+                                        || commandState.lastReportedStep != coarseStep
+                                        || cmdName.contains("正在处理:")
+                                        || percent == 100 else {
+                                    return
+                                }
+
+                                commandState.lastReportedStatus = status
+                                commandState.lastReportedStep = coarseStep
+                                progressHandler(cmdProgress, status)
+                            }
+                        )
+
+                        allExecutedCommands.append(contentsOf: result.executedCommands)
+                        persistenceArtifacts = makePersistenceArtifacts(
+                            from: result,
+                            validatedPackage: extractedPackage
+                        )
+
+                    case .delta(let installedPackage, let deltaInfo, let diffJsonURL):
+                        log("[HDPIM Pipeline] 包 \(pkg.packageName) 命中 delta 更新，基线版本: \(installedPackage.packageVersion)")
+                        let deltaProgressState = CommandProgressState()
+                        let deltaHelper = HDPIMDeltaHelper()
+                        do {
+                            try await deltaHelper.execute(
+                                sapCode: pkg.sapCode,
+                                codexVersion: pkg.version,
+                                platform: pkg.platform,
+                                installDir: pkg.productInstallDir,
+                                extractDir: extractedPackage.extractDir.path,
+                                deltaInfo: deltaInfo,
+                                diffJsonURL: diffJsonURL,
+                                packageName: pkg.packageName,
+                                packageVersion: installedPackage.packageVersion,
+                                progressHandler: { fraction, message in
+                                    let clampedFraction = min(max(fraction, 0), 1)
+                                    let mappedProgress = baseProgress + 0.02 + clampedFraction * 0.06
+                                    let percent = Int(clampedFraction * 100)
+                                    let coarseStep = percent / 2
+                                    let status = message.contains(pkg.packageName)
+                                        ? message
+                                        : "正在增量更新 \(pkg.packageName)... \(percent)%"
+
+                                    guard deltaProgressState.lastReportedStatus != status
+                                            || deltaProgressState.lastReportedStep != coarseStep
+                                            || percent == 100 else {
+                                        return
+                                    }
+
+                                    deltaProgressState.lastReportedStatus = status
+                                    deltaProgressState.lastReportedStep = coarseStep
+                                    progressHandler(mappedProgress, status)
+                                },
+                                databaseAlreadyOpen: true
+                            )
+
+                            let artifacts = try helper.preparePackageArtifacts(
+                                parsedPackage: pkg.parsed,
+                                validatedExtract: extractedPackage.validation,
+                                sapCode: pkg.sapCode,
+                                version: pkg.version,
+                                platform: pkg.platform,
+                                amtConfigAppID: amtConfigAppID
+                            )
+                            persistenceArtifacts = makePersistenceArtifacts(
+                                from: artifacts,
+                                validatedPackage: extractedPackage
+                            )
+                        } catch {
+                            log("[HDPIM Pipeline] Delta 更新失败，回退 full install: \(error.localizedDescription)")
+                            progressHandler(baseProgress + 0.02, "正在回退为完整安装 \(pkg.packageName)...")
+                            let commandState = CommandProgressState()
+                            let result = try await helper.installPackage(
+                                parsedPackage: pkg.parsed,
+                                extractDir: extractedPackage.extractDir,
+                                sapCode: pkg.sapCode,
+                                version: pkg.version,
+                                platform: pkg.platform,
+                                amtConfigAppID: amtConfigAppID,
+                                installDir: installDir,
+                                aliasPackageName: pkg.aliasPackageName,
+                                productInstallDir: pkg.productInstallDir,
+                                validatedExtract: extractedPackage.validation,
+                                progressHandler: { cmdIndex, cmdTotal, cmdName in
+                                    let normalizedTotal = max(cmdTotal, 1)
+                                    let ratio = Double(cmdIndex + 1) / Double(normalizedTotal)
+                                    let cmdProgress = baseProgress + 0.02 + ratio * 0.06
+                                    let percent = Int(ratio * 100)
+                                    let coarseStep = percent / 2
+
+                                    let status: String
+                                    if cmdName.contains("正在处理:") {
+                                        status = "[\(pkg.packageName)] \(cmdName)"
+                                    } else {
+                                        status = "正在安装 \(pkg.packageName)... \(percent)%"
+                                    }
+
+                                    guard commandState.lastReportedStatus != status
+                                            || commandState.lastReportedStep != coarseStep
+                                            || cmdName.contains("正在处理:")
+                                            || percent == 100 else {
+                                        return
+                                    }
+
+                                    commandState.lastReportedStatus = status
+                                    commandState.lastReportedStep = coarseStep
+                                    progressHandler(cmdProgress, status)
+                                }
+                            )
+
+                            allExecutedCommands.append(contentsOf: result.executedCommands)
+                            persistenceArtifacts = makePersistenceArtifacts(
+                                from: result,
+                                validatedPackage: extractedPackage
                             )
                         }
-                    )
-                    let extractDir = extractedPackage.extractDir
-                    log("[HDPIM Pipeline] 解压完成: \(pkg.packageName) → \(extractDir.path)")
-                    log("[HDPIM Pipeline] PIMX 校验通过: \(extractedPackage.validation.pimxURL.path)")
-                    log("[HDPIM Pipeline] 解压恢复统计: symlink=\(extractedPackage.extractionResult.restoredSymlinkCount), permissions=\(extractedPackage.extractionResult.restoredPermissionCount), retries=\(extractedPackage.extractionResult.usedRetryCount)")
-                    if !extractedPackage.extractionResult.diffJSONURLs.isEmpty {
-                        log("[HDPIM Pipeline] 发现 diff.json: \(extractedPackage.extractionResult.diffJSONURLs.map(\.lastPathComponent))")
+
+                    case .databaseOnly:
+                        fatalError("unexpected package execution mode")
                     }
-                    if let contents = try? FileManager.default.contentsOfDirectory(atPath: extractDir.path) {
-                        log("[HDPIM Pipeline] 解压内容 (\(contents.count) 项): \(contents.prefix(20))")
-                    }
-                } catch {
-                    log("[HDPIM Pipeline] 解压失败 \(pkg.packageName): \(error)")
-                    throw HDPIMInstallError.extractionFailed("\(pkg.packageName): \(error.localizedDescription)")
                 }
-
-                progressHandler(baseProgress + 0.02, "正在安装 \(pkg.packageName)...")
-                let helper = HDPIMInstallHelper(propertyTable: propertyTable)
-                helper.logHandler = logHandler
-                let commandState = CommandProgressState()
-
-                let result = try await helper.installPackage(
-                    parsedPackage: pkg.parsed,
-                    extractDir: extractedPackage.extractDir,
-                    sapCode: pkg.sapCode,
-                    version: pkg.version,
-                    platform: pkg.platform,
-                    amtConfigAppID: firstNonEmptyString([
-                        pkg.applicationInfo.amtConfig["AMTConfig.appID"],
-                        pkg.applicationInfo.amtConfig["appID"]
-                    ]),
-                    installDir: installDir,
-                    aliasPackageName: pkg.aliasPackageName,
-                    productInstallDir: pkg.productInstallDir,
-                    validatedExtract: extractedPackage.validation,
-                    progressHandler: { cmdIndex, cmdTotal, cmdName in
-                        let normalizedTotal = max(cmdTotal, 1)
-                        let ratio = Double(cmdIndex + 1) / Double(normalizedTotal)
-                        let cmdProgress = baseProgress + 0.02 + ratio * 0.06
-                        let percent = Int(ratio * 100)
-                        let coarseStep = percent / 2
-
-                        let status: String
-                        if cmdName.contains("正在处理:") {
-                            status = "[\(pkg.packageName)] \(cmdName)"
-                        } else {
-                            status = "正在安装 \(pkg.packageName)... \(percent)%"
-                        }
-
-                        guard commandState.lastReportedStatus != status
-                                || commandState.lastReportedStep != coarseStep
-                                || cmdName.contains("正在处理:")
-                                || percent == 100 else {
-                            return
-                        }
-
-                        commandState.lastReportedStatus = status
-                        commandState.lastReportedStep = coarseStep
-                        progressHandler(cmdProgress, status)
-                    }
-                )
-
-                allExecutedCommands.append(contentsOf: result.executedCommands)
 
                 let installedPackageContext = makePackageDatabaseContext(
                     package: pkg,
-                    installResult: result,
-                    validatedPackage: extractedPackage,
+                    persistenceArtifacts: persistenceArtifacts,
                     installSequenceNumber: index + 1
                 )
                 try HDPIMDatabase.shared.recordInstalledPackage(
@@ -267,11 +417,32 @@ class HDPIMInstallPipeline {
                         : nil
                 )
                 persistedPackageContexts.append(installedPackageContext)
+                if let obsoletePackageContext = obsoletePackageContext(
+                    for: executionMode,
+                    targetPackageVersion: targetPackageVersion
+                ) {
+                    obsoletePackageContexts.append(obsoletePackageContext)
+                }
+                if let obsoleteProductKey = obsoleteProductKey(
+                    for: executionMode,
+                    targetProductVersion: pkg.version,
+                    targetPlatform: pkg.platform
+                ) {
+                    obsoleteProductKeys.append(obsoleteProductKey)
+                }
 
                 installedCount += 1
             }
 
             try HDPIMDatabase.shared.recordInstalledProducts(productContexts)
+            if !obsoletePackageContexts.isEmpty {
+                try HDPIMDatabase.shared.removeInstalledPackages(obsoletePackageContexts)
+            }
+            let uniqueObsoleteProductKeys = Array(Set(obsoleteProductKeys))
+            if !uniqueObsoleteProductKeys.isEmpty {
+                try HDPIMDatabase.shared.removeInstallations(productKeys: uniqueObsoleteProductKeys)
+                try HDPIMDatabase.shared.recordInstalledProducts(productContexts)
+            }
 
             progressHandler(0.95, "正在清理临时文件...")
             do {
@@ -374,6 +545,13 @@ class HDPIMInstallPipeline {
             moduleIds: moduleIds
         )
 
+        if requestInfo["TargetArchitecture"]?.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ?? true {
+            requestInfo["TargetArchitecture"] = HDPIMParityDecisionEngine.shared.requestedTargetArchitecture(
+                requestInfo: requestInfo,
+                productInfo: productInfo
+            ).rawValue
+        }
+
         return (productInfo, requestInfo)
     }
 
@@ -442,19 +620,112 @@ class HDPIMInstallPipeline {
         }
     }
 
-    private func filterPackagesForInstall(_ packages: [PackageToInstall]) throws -> [PackageToInstall] {
-        try packages.filter { package in
-            let packageVersion = package.parsed.packageVersion.isEmpty ? package.version : package.parsed.packageVersion
-            let isInstalled = try HDPIMDatabase.shared.hasValidInstalledPackage(
-                sapCode: package.sapCode,
-                productVersion: package.version,
-                processorFamily: HDPIMProcessorFamily.from(platform: package.platform),
-                packageName: package.packageName,
-                packageVersion: packageVersion,
-                expectedInstallDir: package.productInstallDir
-            )
-            return !isInstalled
+    private func filterPackagesForInstall(
+        _ packages: [PackageToInstall],
+        productInfo: ProductInfoFromDriver,
+        requestInfo: [String: String],
+        propertyTable: HDPIMPropertyTable,
+        databaseAvailable: Bool
+    ) throws -> [PackageToInstall] {
+        let installedProducts = databaseAvailable
+            ? HDPIMParityDecisionEngine.shared.makeInstalledProductSnapshots(databaseAlreadyOpen: true)
+            : []
+
+        return HDPIMParityDecisionEngine.shared.filterInstallPackages(
+            productInfo: productInfo,
+            requestInfo: requestInfo,
+            packages: packages,
+            propertyTable: propertyTable,
+            installedProducts: installedProducts,
+            databaseAvailable: databaseAvailable
+        )
+    }
+
+    private func resolvePackageExecutionMode(for package: PackageToInstall) async -> PackageExecutionMode {
+        let processorFamily = HDPIMProcessorFamily.from(platform: package.platform)
+        let installedPackages = HDPIMDatabase.shared.getInstalledPackageSnapshots(
+            sapCode: package.sapCode,
+            processorFamily: processorFamily,
+            packageName: package.packageName,
+            expectedInstallDir: package.productInstallDir
+        )
+
+        guard let installedPackage = installedPackages.first else {
+            return .full(nil)
         }
+
+        let targetPackageVersion = firstNonEmptyString([
+            package.parsed.packageVersion,
+            package.version
+        ]) ?? package.version
+
+        if installedPackage.packageVersion == targetPackageVersion {
+            return .databaseOnly(installedPackage)
+        }
+
+        let deltaSelection = await HDPIMDeltaSelector.shared.selectDeltaPackage(
+            parsedPackage: package.parsed,
+            installedPackageVersion: installedPackage.packageVersion,
+            sapCode: package.sapCode,
+            codexVersion: package.version,
+            processorFamily: processorFamily
+        )
+
+        switch deltaSelection {
+        case .delta(let deltaInfo, let diffJsonURL):
+            return .delta(installedPackage, deltaInfo, diffJsonURL)
+        case .fullPackage, .skip:
+            return .full(installedPackage)
+        }
+    }
+
+    private func obsoletePackageContext(
+        for executionMode: PackageExecutionMode,
+        targetPackageVersion: String
+    ) -> HDPIMNativePackageContext? {
+        let installedPackage: HDPIMInstalledPackageSnapshot?
+        switch executionMode {
+        case .full(let snapshot):
+            installedPackage = snapshot
+        case .databaseOnly(let snapshot):
+            installedPackage = snapshot
+        case .delta(let snapshot, _, _):
+            installedPackage = snapshot
+        }
+
+        guard let installedPackage,
+              installedPackage.packageVersion != targetPackageVersion else {
+            return nil
+        }
+
+        return makeInstalledPackageContext(from: installedPackage)
+    }
+
+    private func obsoleteProductKey(
+        for executionMode: PackageExecutionMode,
+        targetProductVersion: String,
+        targetPlatform: String
+    ) -> HDPIMNativeProductKey? {
+        let installedPackage: HDPIMInstalledPackageSnapshot?
+        switch executionMode {
+        case .full(let snapshot):
+            installedPackage = snapshot
+        case .databaseOnly(let snapshot):
+            installedPackage = snapshot
+        case .delta(let snapshot, _, _):
+            installedPackage = snapshot
+        }
+
+        guard let installedPackage,
+              installedPackage.productVersion != targetProductVersion else {
+            return nil
+        }
+
+        return HDPIMNativeProductKey(
+            sapCode: installedPackage.sapCode,
+            version: installedPackage.productVersion,
+            platform: targetPlatform
+        )
     }
 
     private func makeProductContextsForPersistence(
@@ -859,11 +1130,9 @@ class HDPIMInstallPipeline {
 
     private func makePackageDatabaseContext(
         package: PackageToInstall,
-        installResult: HDPIMInstallHelper.InstallResult,
-        validatedPackage: ValidatedExtractPackage,
+        persistenceArtifacts: PackagePersistenceArtifacts,
         installSequenceNumber: Int
     ) -> HDPIMNativePackageContext {
-        let targetFolders = makeTargetFolders(from: validatedPackage.validation.packageInfo.assetReferences)
         let moduleValue = makeModuleValue(for: package)
         let packageProcessorFamily = officialPackageProcessorFamily(for: package)
         let extractSizeValue: String = {
@@ -887,18 +1156,75 @@ class HDPIMInstallPipeline {
             packageProcessorFamily: packageProcessorFamily,
             sequenceNumber: package.parsed.installSequenceNumber > 0 ? package.parsed.installSequenceNumber : installSequenceNumber,
             installDir: package.productInstallDir,
+            uninstallPIMXPath: persistenceArtifacts.uninstallPIMXPath,
+            uninstallPIMXHash: persistenceArtifacts.uninstallPIMXHash,
+            uninstallPIMXHash256: persistenceArtifacts.uninstallPIMXHash256,
+            repairPIMXPath: persistenceArtifacts.repairPIMXPath,
+            repairPIMXHash: persistenceArtifacts.repairPIMXHash,
+            repairPIMXHash256: persistenceArtifacts.repairPIMXHash256,
+            installSize: extractSizeValue,
+            targetFolders: persistenceArtifacts.targetFolders,
+            ribsCoexistenceCode: propertyString(package.applicationInfo.properties["RIBSCoexistenceCode"]),
+            module: moduleValue,
+            uwpInfoXML: nil,
+            isShared: package.parsed.isShared
+        )
+    }
+
+    private func makePersistenceArtifacts(
+        from installResult: HDPIMInstallHelper.InstallResult,
+        validatedPackage: ValidatedExtractPackage
+    ) -> PackagePersistenceArtifacts {
+        PackagePersistenceArtifacts(
             uninstallPIMXPath: installResult.uninstallPIMXPath?.path,
             uninstallPIMXHash: installResult.uninstallPIMXHash,
             uninstallPIMXHash256: installResult.uninstallPIMXHash256,
             repairPIMXPath: installResult.repairPIMXPath?.path,
             repairPIMXHash: installResult.repairPIMXHash,
             repairPIMXHash256: installResult.repairPIMXHash256,
-            installSize: extractSizeValue,
-            targetFolders: targetFolders,
-            ribsCoexistenceCode: propertyString(package.applicationInfo.properties["RIBSCoexistenceCode"]),
-            module: moduleValue,
+            targetFolders: makeTargetFolders(from: validatedPackage.validation.packageInfo.assetReferences)
+        )
+    }
+
+    private func makePersistenceArtifacts(
+        from installedPackage: HDPIMInstalledPackageSnapshot
+    ) -> PackagePersistenceArtifacts {
+        PackagePersistenceArtifacts(
+            uninstallPIMXPath: installedPackage.uninstallPIMXPath,
+            uninstallPIMXHash: installedPackage.uninstallPIMXHash,
+            uninstallPIMXHash256: installedPackage.uninstallPIMXHash256,
+            repairPIMXPath: installedPackage.repairPIMXPath,
+            repairPIMXHash: installedPackage.repairPIMXHash,
+            repairPIMXHash256: installedPackage.repairPIMXHash256,
+            targetFolders: installedPackage.targetFolders.sorted(by: targetFolderComesFirst)
+        )
+    }
+
+    private func makeInstalledPackageContext(
+        from installedPackage: HDPIMInstalledPackageSnapshot
+    ) -> HDPIMNativePackageContext {
+        HDPIMNativePackageContext(
+            sapCode: installedPackage.sapCode,
+            productVersion: installedPackage.productVersion,
+            platform: platform(for: installedPackage.processorFamily),
+            packageName: installedPackage.packageName,
+            packageVersion: installedPackage.packageVersion,
+            packageType: "",
+            packageProcessorFamily: "",
+            sequenceNumber: 0,
+            installDir: installedPackage.installDir,
+            uninstallPIMXPath: installedPackage.uninstallPIMXPath,
+            uninstallPIMXHash: installedPackage.uninstallPIMXHash,
+            uninstallPIMXHash256: installedPackage.uninstallPIMXHash256,
+            repairPIMXPath: installedPackage.repairPIMXPath,
+            repairPIMXHash: installedPackage.repairPIMXHash,
+            repairPIMXHash256: installedPackage.repairPIMXHash256,
+            installSize: "0",
+            targetFolders: installedPackage.targetFolders,
+            ribsCoexistenceCode: nil,
+            module: nil,
             uwpInfoXML: nil,
-            isShared: package.parsed.isShared
+            isShared: false
         )
     }
 
@@ -1119,6 +1445,17 @@ class HDPIMInstallPipeline {
             return value.stringValue
         default:
             return nil
+        }
+    }
+
+    private func platform(for processorFamily: HDPIMProcessorFamily) -> String {
+        switch processorFamily {
+        case .bit32:
+            return "OSX10"
+        case .bit64:
+            return "osx10-64"
+        case .arm64Bit:
+            return "macarm64"
         }
     }
 

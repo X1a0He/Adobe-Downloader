@@ -54,6 +54,11 @@ class TaskPersistenceManager: @unchecked Sendable {
                     version: product.version,
                     buildGuid: product.buildGuid,
                     applicationJson: product.applicationJson,
+                    platform: product.platform,
+                    baseVersion: product.baseVersion,
+                    buildVersion: product.buildVersion,
+                    selectedReason: product.selectedReason,
+                    hostValidation: product.hostValidation,
                     packages: product.packages.map { package in
                         PackageData(
                             type: package.type,
@@ -65,7 +70,14 @@ class TaskPersistenceManager: @unchecked Sendable {
                             speed: package.speed,
                             status: package.status,
                             downloaded: package.downloaded,
-                            packageVersion: package.packageVersion
+                            packageVersion: package.packageVersion,
+                            condition: package.condition,
+                            isRequired: package.isRequired,
+                            isDefaultSelected: package.isDefaultSelected,
+                            isOfficiallyEligible: package.isOfficiallyEligible,
+                            officialFilterReasons: package.officialFilterReasons,
+                            isSelected: package.isSelected,
+                            hostValidation: package.hostValidation
                         )
                     }
                 )
@@ -78,7 +90,8 @@ class TaskPersistenceManager: @unchecked Sendable {
             totalSize: task.totalSize,
             totalSpeed: task.totalSpeed,
             displayInstallButton: task.displayInstallButton,
-            platform: task.platform
+            platform: task.platform,
+            targetArchitecture: task.targetArchitecture
         )
         
         do {
@@ -144,7 +157,12 @@ class TaskPersistenceManager: @unchecked Sendable {
                     sapCode: productData.sapCode,
                     version: productData.version,
                     buildGuid: productData.buildGuid,
-                    applicationJson: productData.applicationJson ?? ""
+                    applicationJson: productData.applicationJson ?? "",
+                    platform: productData.platform ?? "",
+                    baseVersion: productData.baseVersion ?? "",
+                    buildVersion: productData.buildVersion ?? "",
+                    selectedReason: productData.selectedReason ?? "",
+                    hostValidation: productData.hostValidation
                 )
                 
                 product.packages = productData.packages.map { packageData -> Package in
@@ -153,8 +171,15 @@ class TaskPersistenceManager: @unchecked Sendable {
                         fullPackageName: packageData.fullPackageName,
                         downloadSize: packageData.downloadSize,
                         downloadURL: packageData.downloadURL,
-                        packageVersion: packageData.packageVersion
+                        packageVersion: packageData.packageVersion,
+                        condition: packageData.condition ?? "",
+                        isRequired: packageData.isRequired ?? false,
+                        isDefaultSelected: packageData.isDefaultSelected ?? false,
+                        isOfficiallyEligible: packageData.isOfficiallyEligible ?? true,
+                        officialFilterReasons: packageData.officialFilterReasons ?? []
                     )
+                    package.isSelected = package.isRequired || (packageData.isSelected ?? false) || package.isDefaultSelected || packageData.downloaded
+                    package.hostValidation = packageData.hostValidation
                     let clampedDownloadedSize = packageData.downloadSize > 0
                         ? min(max(packageData.downloadedSize, 0), packageData.downloadSize)
                         : max(packageData.downloadedSize, 0)
@@ -199,6 +224,10 @@ class TaskPersistenceManager: @unchecked Sendable {
                 ))
             }
             
+            let restoredTargetArchitecture = taskData.targetArchitecture ?? fallbackTargetArchitecture(
+                platforms: products.map(\.platform) + [taskData.platform]
+            )
+
             let task = NewDownloadTask(
                 productId: taskData.sapCode,
                 productVersion: taskData.version,
@@ -214,7 +243,8 @@ class TaskPersistenceManager: @unchecked Sendable {
                 totalSize: taskData.totalSize,
                 totalSpeed: 0,
                 currentPackage: products.first?.packages.first,
-                platform: taskData.platform
+                platform: taskData.platform,
+                targetArchitecture: restoredTargetArchitecture
             )
             task.displayInstallButton = taskData.displayInstallButton
             task.totalPackages = products.reduce(0) { $0 + $1.packages.count }
@@ -280,6 +310,7 @@ class TaskPersistenceManager: @unchecked Sendable {
             downloadURL: "",
             packageVersion: version
         )
+        package.isSelected = true
         package.downloaded = true
         package.progress = 1.0
         package.status = .completed
@@ -305,7 +336,8 @@ class TaskPersistenceManager: @unchecked Sendable {
             totalSize: 0,
             totalSpeed: 0,
             currentPackage: package,
-            platform: platform
+            platform: platform,
+            targetArchitecture: fallbackTargetArchitecture(platform: platform)
         )
         task.displayInstallButton = true
 
@@ -319,6 +351,18 @@ class TaskPersistenceManager: @unchecked Sendable {
         await saveTask(task)
     }
 
+}
+
+private func fallbackTargetArchitecture(platform: String) -> String {
+    fallbackTargetArchitecture(platforms: [platform])
+}
+
+private func fallbackTargetArchitecture(platforms: [String]) -> String {
+    platforms.contains(where: {
+        $0.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == "macarm64"
+    })
+        ? HDPIMParityTargetArchitecture.appleSilicon.rawValue
+        : HDPIMParityTargetArchitecture.intel.rawValue
 }
 
 private struct TaskData: Codable {
@@ -337,6 +381,7 @@ private struct TaskData: Codable {
     let totalSpeed: Double
     let displayInstallButton: Bool
     let platform: String
+    let targetArchitecture: String?
 }
 
 private struct ProductData: Codable {
@@ -344,6 +389,11 @@ private struct ProductData: Codable {
     let version: String
     let buildGuid: String
     let applicationJson: String?
+    let platform: String?
+    let baseVersion: String?
+    let buildVersion: String?
+    let selectedReason: String?
+    let hostValidation: HDPIMHostValidationSnapshot?
     let packages: [PackageData]
 }
 
@@ -358,4 +408,11 @@ private struct PackageData: Codable {
     let status: PackageStatus
     let downloaded: Bool
     let packageVersion: String
+    let condition: String?
+    let isRequired: Bool?
+    let isDefaultSelected: Bool?
+    let isOfficiallyEligible: Bool?
+    let officialFilterReasons: [String]?
+    let isSelected: Bool?
+    let hostValidation: HDPIMHostValidationSnapshot?
 } 

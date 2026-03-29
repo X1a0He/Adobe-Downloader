@@ -107,11 +107,7 @@ final class StorageData: ObservableObject {
     }
     
     var allowedPlatform: [String] {
-        if downloadAppleSilicon {
-            return ["macuniversal", "macarm64"]
-        } else {
-            return ["osx10-64", "osx10"]
-        }
+        HDPIMParityTargetArchitecture.currentSelection.visiblePlatformIds
     }
     
     private init() {

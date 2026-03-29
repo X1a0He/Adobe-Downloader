@@ -88,7 +88,13 @@ class NetworkManager: ObservableObject {
             totalDownloadedSize: 0,
             totalSize: 0,
             totalSpeed: 0,
-            platform: globalProducts.first(where: { $0.id == productId })?.platforms.first?.id ?? "unknown")
+            platform: customDependencies.first(where: { $0.sapCode == productId })?.platform
+                ?? HDPIMParityDecisionEngine.shared.preferredPlatformId(
+                    productId: productId,
+                    version: selectedVersion
+                )
+                ?? "unknown",
+            targetArchitecture: HDPIMParityTargetArchitecture.currentSelection.rawValue)
 
         downloadTasks.append(task)
         updateDockBadge()
@@ -429,7 +435,10 @@ class NetworkManager: ObservableObject {
             !$0.status.isCompleted
         }) { return task.directory }
 
-        let platform = globalProducts.first(where: { $0.id == productId && $0.version == version })?.platforms.first?.id ?? "unknown"
+        let platform = HDPIMParityDecisionEngine.shared.preferredPlatformId(
+            productId: productId,
+            version: version
+        ) ?? "unknown"
         let fileName = productId == "APRO"
             ? "Adobe Downloader \(productId)_\(version)_\(platform).dmg"
             : "Adobe Downloader \(productId)_\(version)-\(language)-\(platform)"

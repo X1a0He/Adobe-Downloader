@@ -135,121 +135,18 @@ struct NavigationCustomDownloadView: View {
         guard let product = findProduct(id: productId, version: version) else {
             throw NetworkError.invalidData("找不到产品信息")
         }
-        
-        var allPackages: [Package] = []
-        var dependenciesToDownload: [DependenciesToDownload] = []
-        
-        let firstPlatform = product.platforms.first
-        let buildGuid = firstPlatform?.languageSet.first?.buildGuid ?? ""
-        
-        var dependencyInfos: [DependenciesToDownload] = []
-        dependencyInfos.append(DependenciesToDownload(sapCode: product.id, version: product.version, buildGuid: buildGuid))
 
-        let dependencies = firstPlatform?.languageSet.first?.dependencies
-        var softDependencySapCodes: Set<String> = []
-        var cachedMainJson: String? = nil
-
-        let mainJsonString = try await globalNetworkService.getApplicationInfo(
-            buildGuid: buildGuid,
-            sapCode: product.id,
+        let decision = try await HDPIMParityDecisionEngine.shared.resolveDownloadDecision(
+            productId: product.id,
             version: product.version,
-            platform: firstPlatform?.id
-        )
-        cachedMainJson = mainJsonString
-        if let mainAppInfo = try? ApplicationJSONParser.parse(jsonString: mainJsonString) {
-            softDependencySapCodes = Set(mainAppInfo.softDependencies)
-        }
-
-        if let dependencies = dependencies {
-            for dependency in dependencies {
-                let isSoft = softDependencySapCodes.contains(dependency.sapCode)
-                dependencyInfos.append(DependenciesToDownload(sapCode: dependency.sapCode, version: dependency.productVersion, buildGuid: dependency.buildGuid, isSoftDependency: isSoft))
+            requestedLanguage: StorageData.shared.defaultLanguage
+        ) { message in
+            Task { @MainActor in
+                loadingState.currentTask = message
             }
         }
 
-        for dependencyInfo in dependencyInfos {
-            await MainActor.run {
-                loadingState.currentTask = String(localized: "正在处理 \(dependencyInfo.sapCode) 的包信息...")
-            }
-            let jsonString: String
-            if dependencyInfo.sapCode == product.id, let cached = cachedMainJson {
-                jsonString = cached
-            } else {
-                jsonString = try await globalNetworkService.getApplicationInfo(
-                    buildGuid: dependencyInfo.buildGuid,
-                    sapCode: dependencyInfo.sapCode,
-                    version: dependencyInfo.version,
-                    platform: firstPlatform?.id
-                )
-            }
-            dependencyInfo.applicationJson = jsonString
-
-            let appInfo: ApplicationInfo
-            do {
-                appInfo = try ApplicationJSONParser.parse(jsonString: jsonString)
-            } catch {
-                throw NetworkError.invalidData("无法解析产品 \(dependencyInfo.sapCode) 的 Application.json: \(error.localizedDescription)")
-            }
-
-            if !appInfo.sapCode.isEmpty && appInfo.sapCode != dependencyInfo.sapCode {
-                print("[SapCode Sanity Check] SapCode '\(dependencyInfo.sapCode)' is passed but in Application.JSON it is '\(appInfo.sapCode)'")
-            }
-
-            for parsedPkg in appInfo.packages {
-                guard !parsedPkg.path.isEmpty else { continue }
-                guard !parsedPkg.fullPackageName.isEmpty else { continue }
-
-                let packageType = parsedPkg.type
-                let condition = parsedPkg.condition
-
-                let isCore = packageType == "core"
-                let targetArchitecture = StorageData.shared.downloadAppleSilicon ? "arm64" : "x64"
-                let language = StorageData.shared.defaultLanguage
-                let installLanguage = "[installLanguage]==\(language)"
-
-                var shouldDefaultSelect = false
-                var isRequired = false
-
-                if dependencyInfo.sapCode == product.id {
-                    if isCore {
-                        shouldDefaultSelect = condition.isEmpty ||
-                                            condition.contains("[OSArchitecture]==\(targetArchitecture)") ||
-                                            condition.contains(installLanguage) || language == "ALL"
-                        isRequired = shouldDefaultSelect
-                    } else {
-                        shouldDefaultSelect = condition.contains(installLanguage) || language == "ALL"
-                    }
-                } else {
-                    shouldDefaultSelect = condition.isEmpty ||
-                                        (condition.contains("[OSVersion]") && checkOSVersionCondition(condition)) ||
-                                        condition.contains(installLanguage) || language == "ALL"
-                }
-
-                if parsedPkg.fullPackageName.contains("SuperCafModels") {
-                    shouldDefaultSelect = true
-                }
-
-                let packageObj = Package(
-                    type: packageType,
-                    fullPackageName: parsedPkg.fullPackageName,
-                    downloadSize: parsedPkg.downloadSize,
-                    downloadURL: parsedPkg.path,
-                    packageVersion: parsedPkg.packageVersion,
-                    condition: condition,
-                    isRequired: isRequired,
-                    validationURL: parsedPkg.validationURLType2
-                )
-
-                packageObj.isSelected = shouldDefaultSelect
-
-                dependencyInfo.packages.append(packageObj)
-                allPackages.append(packageObj)
-            }
-
-            dependenciesToDownload.append(dependencyInfo)
-        }
-
-        return (allPackages, dependenciesToDownload)
+        return HDPIMParityDecisionEngine.shared.makeDownloadPresentation(from: decision)
     }
     
     private func createCompletedCustomTask(path: URL, dependencies: [DependenciesToDownload]) async {
@@ -264,7 +161,12 @@ struct NavigationCustomDownloadView: View {
             return
         }
         
-        let platform = globalProducts.first(where: { $0.id == productId && $0.version == version })?.platforms.first?.id ?? "unknown"
+        let platform = dependencies.first(where: { $0.sapCode == productId })?.platform
+            ?? HDPIMParityDecisionEngine.shared.preferredPlatformId(
+                productId: productId,
+                version: version
+            )
+            ?? "unknown"
 
         let task = NewDownloadTask(
             productId: productId,
@@ -276,7 +178,8 @@ struct NavigationCustomDownloadView: View {
             retryCount: 0,
             createAt: Date(),
             totalProgress: 1.0,
-            platform: platform
+            platform: platform,
+            targetArchitecture: HDPIMParityTargetArchitecture.currentSelection.rawValue
         )
 
         task.dependenciesToDownload = dependencies
@@ -321,7 +224,8 @@ struct NavigationCustomDownloadView: View {
                 destinationURL = try await getDestinationURL(
                     productId: productId,
                     version: version,
-                    language: StorageData.shared.defaultLanguage
+                    language: StorageData.shared.defaultLanguage,
+                    mainPlatform: dependencies.first(where: { $0.sapCode == productId })?.platform
                 )
             } catch {
                 await MainActor.run { onDismiss() }
@@ -346,8 +250,13 @@ struct NavigationCustomDownloadView: View {
         }
     }
     
-    private func getDestinationURL(productId: String, version: String, language: String) async throws -> URL {
-        let platform = globalProducts.first(where: { $0.id == productId && $0.version == version })?.platforms.first?.id ?? "unknown"
+    private func getDestinationURL(productId: String, version: String, language: String, mainPlatform: String?) async throws -> URL {
+        let platform = mainPlatform
+            ?? HDPIMParityDecisionEngine.shared.preferredPlatformId(
+                productId: productId,
+                version: version
+            )
+            ?? "unknown"
         let installerName = productId == "APRO"
             ? "Adobe Downloader \(productId)_\(version)_\(platform).dmg"
             : "Adobe Downloader \(productId)_\(version)-\(language)-\(platform)"
@@ -400,47 +309,6 @@ struct NavigationCustomDownloadView: View {
         }
     }
     
-    private func checkOSVersionCondition(_ condition: String) -> Bool {
-        let osVersion = ProcessInfo.processInfo.operatingSystemVersion
-        let currentVersion = Double("\(osVersion.majorVersion).\(osVersion.minorVersion)") ?? 0.0
-        
-        let versionPattern = #"\[OSVersion\](>=|<=|<|>|==)([\d.]+)"#
-        guard let regex = try? NSRegularExpression(pattern: versionPattern) else { return false }
-        
-        let nsRange = NSRange(condition.startIndex..<condition.endIndex, in: condition)
-        let matches = regex.matches(in: condition, range: nsRange)
-        
-        for match in matches {
-            guard match.numberOfRanges >= 3,
-                  let operatorRange = Range(match.range(at: 1), in: condition),
-                  let versionRange = Range(match.range(at: 2), in: condition),
-                  let requiredVersion = Double(condition[versionRange]) else { continue }
-            
-            let operatorSymbol = String(condition[operatorRange])
-            if !compareVersions(current: currentVersion, required: requiredVersion, operator: operatorSymbol) {
-                return false
-            }
-        }
-        
-        return !matches.isEmpty
-    }
-    
-    private func compareVersions(current: Double, required: Double, operator: String) -> Bool {
-        switch `operator` {
-        case ">=":
-            return current >= required
-        case "<=":
-            return current <= required
-        case ">":
-            return current > required
-        case "<":
-            return current < required
-        case "==":
-            return current == required
-        default:
-            return false
-        }
-    }
 }
 
 private struct NavigationCustomDownloadLoadingView: View {
@@ -598,12 +466,13 @@ private struct NavigationCustomPackageSelectorView: View {
                                     package: package,
                                     isSelected: selectedPackages.contains(package.id),
                                     onToggle: { isSelected in
-                                        if !requiredPackages.contains(package.id) {
-                                            if isSelected {
-                                                selectedPackages.insert(package.id)
-                                            } else {
-                                                selectedPackages.remove(package.id)
-                                            }
+                                        guard !requiredPackages.contains(package.id) else {
+                                            return
+                                        }
+                                        if isSelected {
+                                            selectedPackages.insert(package.id)
+                                        } else {
+                                            selectedPackages.remove(package.id)
                                         }
                                     },
                                     onCopyPackageInfo: {
@@ -690,9 +559,14 @@ private struct NavigationCustomPackageSelectorView: View {
         requiredPackages.removeAll()
         
         for package in packages {
-            if package.isRequired || package.isSelected {
-                selectedPackages.insert(package.id)
+            if package.isRequired {
                 requiredPackages.insert(package.id)
+                selectedPackages.insert(package.id)
+                continue
+            }
+
+            if package.isSelected {
+                selectedPackages.insert(package.id)
             }
         }
     }
@@ -712,7 +586,7 @@ private struct NavigationCustomPackageSelectorView: View {
         
         for dependency in dependenciesToDownload {
             for package in dependency.packages {
-                package.isSelected = selectedPackages.contains(package.id)
+                package.isSelected = package.isRequired || selectedPackages.contains(package.id)
             }
         }
 
@@ -782,18 +656,19 @@ private struct NavigationEnhancedPackageRow: View {
     let onCopyPackageInfo: () -> Void
 
     private var isRequiredPackage: Bool {
-        package.isRequired || package.isSelected
+        package.isRequired
     }
     
     var body: some View {
         HStack(spacing: 8) {
-            Button(action: { 
-                if !isRequiredPackage {
-                    onToggle(!isSelected)
+            Button(action: {
+                guard !isRequiredPackage else {
+                    return
                 }
+                onToggle(!isSelected)
             }) {
                 Image(systemName: isSelected ? "checkmark.square.fill" : "square")
-                    .foregroundColor(isRequiredPackage ? .secondary : .blue)
+                    .foregroundColor(isRequiredPackage ? .secondary : (isSelected ? .blue : .secondary))
             }
             .buttonStyle(PlainButtonStyle())
             .disabled(isRequiredPackage)
@@ -817,12 +692,30 @@ private struct NavigationEnhancedPackageRow: View {
                         .foregroundColor(package.type == "core" ? .blue : .orange)
                     
                     if isRequiredPackage {
-                        Text(package.isRequired ? "必需" : "默认")
+                        Text("必需")
                             .font(.caption)
                             .foregroundColor(.white)
                             .padding(.horizontal, 6)
                             .padding(.vertical, 2)
-                            .background(package.isRequired ? Color.red.opacity(0.8) : Color.purple.opacity(0.8))
+                            .background(Color.red.opacity(0.85))
+                            .cornerRadius(4)
+                    } else if package.isDefaultSelected {
+                        Text("官方默认")
+                            .font(.caption)
+                            .foregroundColor(.white)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(Color.blue.opacity(0.8))
+                            .cornerRadius(4)
+                    }
+
+                    if !package.isOfficiallyEligible {
+                        Text("可选")
+                            .font(.caption)
+                            .foregroundColor(.white)
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 2)
+                            .background(Color.orange.opacity(0.85))
                             .cornerRadius(4)
                     }
                     
@@ -849,6 +742,13 @@ private struct NavigationEnhancedPackageRow: View {
                         .textSelection(.enabled)
                 }
                 #endif
+
+                if !package.isOfficiallyEligible, !package.officialFilterReasonText.isEmpty {
+                    Text("\(package.officialFilterReasonText)")
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundColor(.orange.opacity(0.9))
+                        .textSelection(.enabled)
+                }
             }
         }
         .padding(.horizontal)

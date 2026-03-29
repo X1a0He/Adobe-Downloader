@@ -127,7 +127,10 @@ final class AppCardViewModel: ObservableObject {
     }
     
     func getDestinationURL(version: String, language: String) async throws -> URL {
-        let platform = globalProducts.first(where: { $0.id == uniqueProduct.id && $0.version == version })?.platforms.first?.id ?? "unknown"
+        let platform = HDPIMParityDecisionEngine.shared.preferredPlatformId(
+            productId: uniqueProduct.id,
+            version: version
+        ) ?? "unknown"
         let installerName = uniqueProduct.id == "APRO"
             ? "Adobe Downloader \(uniqueProduct.id)_\(version)_\(platform).dmg"
             : "Adobe Downloader \(uniqueProduct.id)_\(version)-\(language)-\(platform)"
@@ -273,7 +276,10 @@ final class AppCardViewModel: ObservableObject {
             version: pendingVersion,
             language: pendingLanguage,
             displayName: uniqueProduct.displayName,
-            platform: globalProducts.first(where: { $0.id == uniqueProduct.id })?.platforms.first?.id ?? "unknown",
+            platform: HDPIMParityDecisionEngine.shared.preferredPlatformId(
+                productId: uniqueProduct.id,
+                version: pendingVersion
+            ) ?? "unknown",
             directory: path
         )
         
@@ -286,7 +292,8 @@ final class AppCardViewModel: ObservableObject {
     }
     
     var dependenciesCount: Int {
-        return globalProducts.first(where: { $0.id == uniqueProduct.id })?.platforms.first?.languageSet.first?.dependencies.count ?? 0
+        let latestVisible = HDPIMParityDecisionEngine.shared.visibleVersions(productId: uniqueProduct.id).first
+        return latestVisible?.value.languageSet.first?.dependencies.count ?? 0
     }
     
     var hasValidIcon: Bool {
@@ -421,18 +428,22 @@ private struct ProductInfoView: View {
                 .multilineTextAlignment(.center)
                 .fixedSize(horizontal: false, vertical: true)
             
-            let products = findProducts(id: viewModel.uniqueProduct.id)
-            let versions = products.compactMap { product -> String? in
-                let platforms = product.platforms.filter { platform in
-                    StorageData.shared.allowedPlatform.contains(platform.id)
+            let products = globalCcmResult.products.filter { $0.id == viewModel.uniqueProduct.id }
+            let visibleMatches = products.compactMap { product -> (Product, Product.Platform)? in
+                guard let platform = HDPIMParityDecisionEngine.shared.preferredPlatform(for: product) else {
+                    return nil
                 }
-                return platforms.isEmpty ? nil : product.version
+                return (product, platform)
             }
+            let versions = visibleMatches.map(\.0.version)
             let uniqueVersions = Set(versions)
             
-            let dependenciesCount = products.first?.platforms.first?.languageSet.first?.dependencies.count ?? 0
-            let minOSVersion = products.first?.platforms.first?.range.first?.min ?? ""
-            let modulesCount = products.first?.platforms.first?.modules.count ?? 0
+            let latestVisibleMatch = visibleMatches.sorted {
+                AppStatics.compareVersions($0.0.version, $1.0.version) > 0
+            }.first
+            let dependenciesCount = latestVisibleMatch?.1.languageSet.first?.dependencies.count ?? 0
+            let minOSVersion = latestVisibleMatch?.1.range.first?.min ?? ""
+            let modulesCount = latestVisibleMatch?.1.modules.count ?? 0
             
             HStack(spacing: 12) {
                 MetricView(icon: "tag", value: "\(uniqueVersions.count)")

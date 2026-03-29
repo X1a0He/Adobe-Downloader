@@ -19,6 +19,7 @@ class NewDownloadTask: Identifiable, ObservableObject, @unchecked Sendable  {
     var displayInstallButton: Bool
 
     var platform: String
+    var targetArchitecture: String
 
     @Published var totalStatus: DownloadStatus?
     @Published var totalProgress: Double
@@ -76,7 +77,7 @@ class NewDownloadTask: Identifiable, ObservableObject, @unchecked Sendable  {
         }
     }
 
-    init(productId: String, productVersion: String, language: String, displayName: String, directory: URL, dependenciesToDownload: [DependenciesToDownload] = [], retryCount: Int = 0, createAt: Date, totalStatus: DownloadStatus? = nil, totalProgress: Double, totalDownloadedSize: Int64 = 0, totalSize: Int64 = 0, totalSpeed: Double = 0, currentPackage: Package? = nil, platform: String) {
+    init(productId: String, productVersion: String, language: String, displayName: String, directory: URL, dependenciesToDownload: [DependenciesToDownload] = [], retryCount: Int = 0, createAt: Date, totalStatus: DownloadStatus? = nil, totalProgress: Double, totalDownloadedSize: Int64 = 0, totalSize: Int64 = 0, totalSpeed: Double = 0, currentPackage: Package? = nil, platform: String, targetArchitecture: String) {
         self.productId = productId
         self.productVersion = productVersion
         self.language = language
@@ -93,6 +94,7 @@ class NewDownloadTask: Identifiable, ObservableObject, @unchecked Sendable  {
         self.currentPackage = currentPackage
         self.displayInstallButton = productId != "APRO"
         self.platform = platform
+        self.targetArchitecture = targetArchitecture
     }
 
     

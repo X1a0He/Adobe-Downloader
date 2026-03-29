@@ -118,7 +118,10 @@ struct NavigationVersionPickerView: View {
     }
     
     private func getDestinationURL(productId: String, version: String, language: String) async throws -> URL {
-        let platform = globalProducts.first(where: { $0.id == productId && $0.version == version })?.platforms.first?.id ?? "unknown"
+        let platform = HDPIMParityDecisionEngine.shared.preferredPlatformId(
+            productId: productId,
+            version: version
+        ) ?? "unknown"
         let installerName = productId == "APRO"
             ? "Adobe Downloader \(productId)_\(version)_\(platform).dmg"
             : "Adobe Downloader \(productId)_\(version)-\(language)-\(platform)"
@@ -284,7 +287,7 @@ private struct NavigationVersionPickerHeaderView: View {
     }
     
     private var platformText: String {
-        StorageData.shared.allowedPlatform.joined(separator: ", ")
+        HDPIMParityDecisionEngine.shared.visiblePlatformText()
     }
 }
 
@@ -353,27 +356,7 @@ private struct NavigationVersionListView: View {
     }
     
     private func loadFilteredVersions() -> [(key: String, value: Product.Platform)] {
-        let products = findProducts(id: productId)
-        if products.isEmpty {
-            return []
-        }
-
-        var versionPlatformMap: [String: Product.Platform] = [:]
-        
-        for product in products {
-            let platforms = product.platforms.filter { platform in
-                StorageData.shared.allowedPlatform.contains(platform.id)
-            }
-            
-            if let firstPlatform = platforms.first {
-                versionPlatformMap[product.version] = firstPlatform
-            }
-        }
-
-        return versionPlatformMap.map { (key: $0.key, value: $0.value) }
-            .sorted { pair1, pair2 in
-                AppStatics.compareVersions(pair1.key, pair2.key) > 0
-            }
+        HDPIMParityDecisionEngine.shared.visibleVersions(productId: productId)
     }
     
     private func handleVersionSelect(_ version: String) {
@@ -494,19 +477,27 @@ private struct NavigationVersionDetails: View {
     let onSelect: (String) -> Void
     let onCustomDownload: (String) -> Void
     
-    private var hasDependencies: Bool {
+    private var hasRawDependencies: Bool {
         !(info.languageSet.first?.dependencies.isEmpty ?? true)
+    }
+
+    private var shouldShowDependencySection: Bool {
+        hasRawDependencies
     }
     
     private var hasModules: Bool {
         !(info.modules.isEmpty)
     }
+
+    private var displayedDependencies: [Product.Platform.LanguageSet.Dependency] {
+        info.languageSet.first?.dependencies ?? []
+    }
     
     var body: some View {
         VStack(alignment: .leading, spacing: NavigationVersionPickerConstants.verticalSpacing) {
-            if hasDependencies || hasModules {
+            if shouldShowDependencySection || hasModules {
                 VStack(alignment: .leading, spacing: 8) {
-                    if hasDependencies {
+                    if shouldShowDependencySection {
                         HStack(spacing: 5) {
                             Image(systemName: "shippingbox.fill")
                                 .font(.system(size: 11))
@@ -514,7 +505,7 @@ private struct NavigationVersionDetails: View {
                             Text("依赖组件")
                                 .font(.system(size: 12, weight: .medium))
                                 .foregroundColor(.secondary)
-                            Text("(\(info.languageSet.first?.dependencies.count ?? 0))")
+                            Text("(\(displayedDependencies.count))")
                                 .font(.system(size: 11))
                                 .padding(.horizontal, 5)
                                 .padding(.vertical, 1)
@@ -525,12 +516,12 @@ private struct NavigationVersionDetails: View {
                                 .foregroundColor(.blue.opacity(0.8))
                         }
                         .padding(.vertical, 4)
-                        DependenciesList(dependencies: info.languageSet.first?.dependencies ?? [])
+                        DependenciesList(dependencies: displayedDependencies)
                             .padding(.leading, 8)
                     }
                     #if DEBUG
                     if hasModules {
-                        if hasDependencies {
+                        if shouldShowDependencySection {
                             Divider()
                                 .padding(.vertical, 4)
                         }
@@ -766,7 +757,7 @@ private struct DependencyRow: View, Equatable {
             #if DEBUG
             VStack(alignment: .leading, spacing: 2) {
                 HStack(spacing: 4) {
-                    Text("Match:")
+                    Text("Target Match:")
                         .font(.caption2)
                         .foregroundColor(.secondary)
                     Text(dependency.isMatchPlatform ? "✅" : "❌")
@@ -786,7 +777,7 @@ private struct DependencyRow: View, Equatable {
                 
                 if !dependency.selectedReason.isEmpty {
                     HStack(spacing: 4) {
-                        Text("Reason:")
+                        Text("Target Reason:")
                             .font(.caption2)
                             .foregroundColor(.secondary)
                         Text(dependency.selectedReason)
@@ -794,6 +785,7 @@ private struct DependencyRow: View, Equatable {
                             .foregroundColor(.orange)
                     }
                 }
+
             }
             .padding(.leading, 22)
             #endif

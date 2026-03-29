@@ -159,7 +159,7 @@ class HDPIMInstallHelper {
             let appJsonName = parsedPackage.packageName
             let pimxName = packageInfo.packageName
             if appJsonName != pimxName {
-                print("Warning: 包名不完全匹配 - Application.json: '\(appJsonName)', PIMX: '\(pimxName)'")
+                throw HDPIMInstallError.packageNameMismatch(expected: appJsonName, actual: pimxName)
             }
         }
 
@@ -237,6 +237,78 @@ class HDPIMInstallHelper {
         )
     }
 
+    func preparePackageArtifacts(
+        parsedPackage: ParsedPackage,
+        validatedExtract: ExtractedPackageValidationResult,
+        sapCode: String,
+        version: String,
+        platform: String,
+        amtConfigAppID: String?
+    ) throws -> InstallResult {
+        let packageInfo = validatedExtract.packageInfo
+        let commands = HDPIMCommandEngine(propertyTable: propertyTable).generateCommands(from: packageInfo.commands)
+        let deleteEntries = makeAssetDeleteEntries(from: packageInfo.assetReferences)
+        let pimxFragments = commands.flatMap { $0.getPimxCommandFragments() }
+
+        let pimxFileName = makePIMXFileName(
+            sapCode: sapCode,
+            version: version,
+            platform: platform,
+            amtConfigAppID: amtConfigAppID,
+            packageName: parsedPackage.packageName,
+            packageVersion: parsedPackage.packageVersion.isEmpty ? version : parsedPackage.packageVersion
+        )
+
+        let uninstallFragments = pimxFragments
+            .filter { $0.kind == .uninstall }
+            .map(\.xml)
+        let repairFragments = pimxFragments
+            .filter { $0.kind == .repair }
+            .map(\.xml)
+        let deleteFragments = makeDeleteCommandFragments(
+            from: deleteEntries,
+            assetReferences: packageInfo.assetReferences
+        )
+
+        var uninstallPath: URL?
+        var sha1Hash: String?
+        var sha256Hash: String?
+        if !deleteFragments.isEmpty || !uninstallFragments.isEmpty {
+            let uninstallGenerator = UninstallPIMXGenerator()
+            uninstallGenerator.addReverseCommands(deleteFragments)
+            uninstallGenerator.addReverseCommands(uninstallFragments)
+
+            let uninstallDir = URL(fileURLWithPath: "/Library/Application Support/Adobe/Installers/uninstallXml")
+            let result = try uninstallGenerator.writeAndHash(
+                to: uninstallDir,
+                fileName: pimxFileName
+            )
+            uninstallPath = result.path
+            sha1Hash = result.sha1
+            sha256Hash = result.sha256
+        }
+
+        let repairDir = URL(fileURLWithPath: "/Library/Application Support/Adobe/Installers/repairXml")
+        let repairGenerator = UninstallPIMXGenerator()
+        repairGenerator.addReverseCommands(repairFragments)
+        let repairResult = try repairGenerator.writeAndHash(
+            to: repairDir,
+            fileName: pimxFileName
+        )
+
+        return InstallResult(
+            executedCommands: [],
+            deleteEntries: deleteEntries,
+            pimxFragments: pimxFragments,
+            uninstallPIMXPath: uninstallPath,
+            uninstallPIMXHash: sha1Hash,
+            uninstallPIMXHash256: sha256Hash,
+            repairPIMXPath: repairResult.path,
+            repairPIMXHash: repairResult.sha1,
+            repairPIMXHash256: repairResult.sha256
+        )
+    }
+
     private func makePIMXFileName(
         sapCode: String,
         version: String,
@@ -277,6 +349,40 @@ class HDPIMInstallHelper {
             return "\(sapCode)_\(version)_arm64"
         }
         return "\(sapCode)_\(version)"
+    }
+
+    private func makeAssetDeleteEntries(from assetReferences: [PIMXAssetReference]) -> [HDPIMDeleteEntry] {
+        var seen: Set<String> = []
+
+        return assetReferences.compactMap { asset in
+            let rawTarget = asset.targetTemplate.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !rawTarget.isEmpty, !shouldSkipDeleteEntry(rawTarget) else {
+                return nil
+            }
+
+            let normalizedTarget = asset.isDirectoryLike
+                ? normalizeDirectoryPIMXPath(rawTarget)
+                : rawTarget
+            guard !normalizedTarget.isEmpty else {
+                return nil
+            }
+
+            let lowercasedTarget = normalizedTarget.lowercased()
+            let isUserPreferences = lowercasedTarget.hasPrefix("[userpreferences]/")
+                || lowercasedTarget.hasPrefix("[usercommon]/")
+
+            let entry = HDPIMDeleteEntry(
+                targetPath: normalizedTarget,
+                isDirectory: asset.isDirectoryLike,
+                isRecursiveDelete: isUserPreferences,
+                isUserPreferences: isUserPreferences
+            )
+            let identity = "\(asset.isDirectoryLike ? "D" : "F")|\(entry.normalizedTargetPath)"
+            guard seen.insert(identity).inserted else {
+                return nil
+            }
+            return entry
+        }
     }
 
     private func makeDeleteCommandFragments(

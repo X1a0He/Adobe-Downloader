@@ -301,7 +301,13 @@ class NewDownloadUtils {
                 sapCode: dependency.sapCode,
                 version: dependency.version,
                 buildGuid: dependency.buildGuid,
-                applicationJson: dependency.applicationJson ?? ""
+                applicationJson: dependency.applicationJson ?? "",
+                isSoftDependency: dependency.isSoftDependency,
+                platform: dependency.platform,
+                baseVersion: dependency.baseVersion,
+                buildVersion: dependency.buildVersion,
+                selectedReason: dependency.selectedReason,
+                hostValidation: nil
             )
             filteredDependency.packages = selectedPackages
             return filteredDependency
@@ -493,7 +499,8 @@ class NewDownloadUtils {
                     version: task.productVersion,
                     language: task.language,
                     productInfo: productInfo,
-                    displayName: task.displayName,
+                    dependencies: task.dependenciesToDownload,
+                    targetArchitecture: task.targetArchitecture,
                     modules: selectedModules
                 )
                 do {
@@ -782,7 +789,8 @@ class NewDownloadUtils {
                     version: task.productVersion,
                     language: task.language,
                     productInfo: productInfo,
-                    displayName: task.displayName,
+                    dependencies: task.dependenciesToDownload,
+                    targetArchitecture: task.targetArchitecture,
                     modules: selectedModules
                 )
                 do {
@@ -1140,39 +1148,42 @@ class NewDownloadUtils {
         }
     }
 
-    func generateDriverXML(version: String, language: String, productInfo: Product, displayName: String, modules: [[String: Any]] = []) -> String {
-        // 获取匹配的 platform 和 languageSet
-        guard let matchedProduct = globalProducts.first(where: { $0.id == productInfo.id && $0.version == version }),
-              let firstPlatform = matchedProduct.platforms.first,
-              let firstLanguageSet = firstPlatform.languageSet.first else {
+    func generateDriverXML(version: String, language: String, productInfo: Product, dependencies: [DependenciesToDownload], targetArchitecture: String, modules: [[String: Any]] = []) -> String {
+        guard let mainDependency = dependencies.first(where: { $0.sapCode == productInfo.id }) else {
             return ""
         }
 
-        let platform = firstPlatform.id
-        let buildGuid = firstLanguageSet.buildGuid
-        let buildVersion = firstLanguageSet.productVersion
-        let baseVersion = firstLanguageSet.baseVersion
+        let fallbackPlatform = globalProducts
+            .first(where: { $0.id == productInfo.id && $0.version == version })?
+            .platforms
+            .first?
+            .id
+            ?? "unknown"
 
-        let dependencies = firstLanguageSet.dependencies.map { dependency in
-            let depCodexVersion: String = {
-                if let stiProduct = globalStiResult.products.first(where: { $0.id == dependency.sapCode }) {
-                    return stiProduct.version
-                }
-                return dependency.baseVersion
-            }()
+        let platform = mainDependency.platform.isEmpty ? fallbackPlatform : mainDependency.platform
+        let buildGuid = mainDependency.buildGuid
+        let buildVersion = mainDependency.buildVersion.isEmpty ? version : mainDependency.buildVersion
+        let baseVersion = mainDependency.baseVersion.isEmpty ? version : mainDependency.baseVersion
 
-            return """
+        let dependencyXML = dependencies
+            .filter { $0.sapCode != productInfo.id }
+            .map { dependency in
+                let dependencyBuildVersion = dependency.buildVersion.isEmpty ? dependency.version : dependency.buildVersion
+                let dependencyBaseVersion = dependency.baseVersion.isEmpty ? dependency.version : dependency.baseVersion
+
+                return """
                 <Dependency>
                     <SapCode>\(dependency.sapCode)</SapCode>
-                    <CodexVersion>\(depCodexVersion)</CodexVersion>
-                    <BaseVersion>\(dependency.baseVersion)</BaseVersion>
-                    <BuildVersion>\(dependency.productVersion)</BuildVersion>
+                    <CodexVersion>\(dependency.version)</CodexVersion>
+                    <BaseVersion>\(dependencyBaseVersion)</BaseVersion>
+                    <BuildVersion>\(dependencyBuildVersion)</BuildVersion>
                     <EsdDirectory>\(dependency.sapCode)</EsdDirectory>
-                    <Platform>\(dependency.selectedPlatform)</Platform>
+                    <Platform>\(dependency.platform)</Platform>
                     <BuildGuid>\(dependency.buildGuid)</BuildGuid>
                 </Dependency>
-            """
-        }.joined(separator: "\n")
+                """
+            }
+            .joined(separator: "\n")
 
         let moduleXml = modules.compactMap { module in
             if let moduleId = module["Id"] as? String {
@@ -1197,7 +1208,7 @@ class NewDownloadUtils {
                 <Platform>\(platform)</Platform>
                 <BuildGuid>\(buildGuid)</BuildGuid>
                 <Dependencies>
-                    \(dependencies)
+                    \(dependencyXML)
                 </Dependencies>
                 <Modules>
                     \(moduleXml.isEmpty ? "" : moduleXml)
@@ -1206,14 +1217,18 @@ class NewDownloadUtils {
             <RequestInfo>
                 <InstallDir>/Applications</InstallDir>
                 <InstallLanguage>\(language)</InstallLanguage>
+                <TargetArchitecture>\(targetArchitecture)</TargetArchitecture>
             </RequestInfo>
         </DriverInfo>
         """
     }
 
     func downloadAPRO(task: NewDownloadTask, productInfo: Product) async throws {
-        let firstPlatform = productInfo.platforms.first
-        let productManifestURL = firstPlatform?.languageSet.first?.manifestURL ?? ""
+        guard let selectedPlatform = HDPIMParityDecisionEngine.shared.preferredPlatform(for: productInfo),
+              let selectedLanguageSet = selectedPlatform.languageSet.first else {
+            throw NetworkError.unsupportedPlatform("APRO 没有可用平台")
+        }
+        let productManifestURL = selectedLanguageSet.manifestURL
 
         let manifestURL = globalCdn + productManifestURL
         print("manifestURL")
@@ -1247,16 +1262,22 @@ class NewDownloadUtils {
 
         let aproPackage = Package(
             type: "dmg",
-            fullPackageName: "Adobe Downloader \(task.productId)_\(firstPlatform?.languageSet.first?.productVersion ?? "unknown")_\(firstPlatform?.id ?? "unknown").dmg",
+            fullPackageName: "Adobe Downloader \(task.productId)_\(selectedLanguageSet.productVersion.isEmpty ? task.productVersion : selectedLanguageSet.productVersion)_\(selectedPlatform.id).dmg",
             downloadSize: assetSize,
             downloadURL: downloadPath,
             packageVersion: ""
         )
+        aproPackage.isSelected = true
 
         print(aproPackage)
 
         await MainActor.run {
-            let product = DependenciesToDownload(sapCode: task.productId, version: firstPlatform?.languageSet.first?.productVersion ?? "unknown", buildGuid: "")
+            let product = DependenciesToDownload(
+                sapCode: task.productId,
+                version: selectedLanguageSet.productVersion.isEmpty ? task.productVersion : selectedLanguageSet.productVersion,
+                buildGuid: "",
+                platform: selectedPlatform.id
+            )
             product.packages = [aproPackage]
             task.dependenciesToDownload = [product]
             task.totalSize = assetSize
