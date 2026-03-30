@@ -20,9 +20,8 @@ private enum AppCardConstants {
     static let shadowRadius: CGFloat = 4
     static let strokeOpacity: Double = 0.15
     static let strokeWidth: CGFloat = 1
-    static let backgroundOpacity: Double = 0.05
     static let hoverScale: CGFloat = 1.02
-    
+
     static let iconPlaceholderOpacity: Double = 0.6
     static let iconLoadingDuration: Double = 0.3
 }
@@ -291,11 +290,42 @@ final class AppCardViewModel: ObservableObject {
         }
     }
     
-    var dependenciesCount: Int {
-        let latestVisible = HDPIMParityDecisionEngine.shared.visibleVersions(productId: uniqueProduct.id).first
-        return latestVisible?.value.languageSet.first?.dependencies.count ?? 0
+    private var latestVisibleMatch: (Product, Product.Platform)? {
+        let products = globalCcmResult.products.filter { $0.id == uniqueProduct.id }
+        return products.compactMap { product -> (Product, Product.Platform)? in
+            guard let platform = HDPIMParityDecisionEngine.shared.preferredPlatform(for: product) else {
+                return nil
+            }
+            return (product, platform)
+        }.sorted {
+            AppStatics.compareVersions($0.0.version, $1.0.version) > 0
+        }.first
     }
-    
+
+    var uniqueVersionCount: Int {
+        let products = globalCcmResult.products.filter { $0.id == uniqueProduct.id }
+        let versions = products.compactMap { product -> String? in
+            guard HDPIMParityDecisionEngine.shared.preferredPlatform(for: product) != nil else {
+                return nil
+            }
+            return product.version
+        }
+        return Set(versions).count
+    }
+
+    var latestDependenciesCount: Int {
+        latestVisibleMatch?.1.languageSet.first?.dependencies.count ?? 0
+    }
+
+    var latestMinOSVersion: String {
+        let raw = latestVisibleMatch?.1.range.first?.min ?? ""
+        return raw.replacingOccurrences(of: "-", with: "")
+    }
+
+    var latestModulesCount: Int {
+        latestVisibleMatch?.1.modules.count ?? 0
+    }
+
     var hasValidIcon: Bool {
         iconImage != nil
     }
@@ -334,26 +364,28 @@ struct AppCardView: View {
             .drawingGroup()
         }
         .background(
-            RoundedRectangle(cornerRadius: 12)
+            RoundedRectangle(cornerRadius: AppCardConstants.cornerRadius)
                 .fill(isHovered ? Color(.controlBackgroundColor) : Color(.windowBackgroundColor).opacity(0.5))
-                .animation(.easeInOut(duration: 0.2), value: isHovered)
         )
         .overlay(
-            RoundedRectangle(cornerRadius: 12)
-                .stroke(isHovered ? Color.blue.opacity(0.5) : Color.gray.opacity(0.1), lineWidth: isHovered ? 2 : 1)
-                .animation(.easeInOut(duration: 0.2), value: isHovered)
+            RoundedRectangle(cornerRadius: AppCardConstants.cornerRadius)
+                .stroke(
+                    isHovered ? Color.blue.opacity(0.5) : Color.gray.opacity(AppCardConstants.strokeOpacity),
+                    lineWidth: isHovered ? 2 : AppCardConstants.strokeWidth
+                )
         )
-        .shadow(color: isHovered ? Color.black.opacity(0.1) : Color.black.opacity(0.05),
-                radius: isHovered ? 4 : 2,
-                x: 0,
-                y: isHovered ? 2 : 1)
+        .shadow(
+            color: Color.primary.opacity(isHovered ? AppCardConstants.shadowOpacity * 2 : AppCardConstants.shadowOpacity),
+            radius: isHovered ? AppCardConstants.shadowRadius * 1.5 : AppCardConstants.shadowRadius,
+            x: 0,
+            y: isHovered ? 4 : 2
+        )
+        .scaleEffect(isHovered ? AppCardConstants.hoverScale : 1.0)
         .animation(.easeInOut(duration: 0.2), value: isHovered)
         .onHover { hovering in
             self.isHovered = hovering
         }
-        .animation(.spring(response: 0.3, dampingFraction: 0.7), value: isHovered)
         .contentShape(Rectangle())
-        .modifier(CardModifier())
         .modifier(SheetModifier(viewModel: viewModel))
         .modifier(AlertModifier(viewModel: viewModel, confirmRedownload: true))
         .onAppear(perform: setupViewModel)
@@ -418,7 +450,7 @@ private struct IconView: View {
 
 private struct ProductInfoView: View {
     @ObservedObject var viewModel: AppCardViewModel
-    
+
     var body: some View {
         VStack(spacing: 8) {
             Text(viewModel.uniqueProduct.displayName)
@@ -427,50 +459,35 @@ private struct ProductInfoView: View {
                 .lineLimit(2)
                 .multilineTextAlignment(.center)
                 .fixedSize(horizontal: false, vertical: true)
-            
-            let products = globalCcmResult.products.filter { $0.id == viewModel.uniqueProduct.id }
-            let visibleMatches = products.compactMap { product -> (Product, Product.Platform)? in
-                guard let platform = HDPIMParityDecisionEngine.shared.preferredPlatform(for: product) else {
-                    return nil
-                }
-                return (product, platform)
-            }
-            let versions = visibleMatches.map(\.0.version)
-            let uniqueVersions = Set(versions)
-            
-            let latestVisibleMatch = visibleMatches.sorted {
-                AppStatics.compareVersions($0.0.version, $1.0.version) > 0
-            }.first
-            let dependenciesCount = latestVisibleMatch?.1.languageSet.first?.dependencies.count ?? 0
-            let minOSVersion = latestVisibleMatch?.1.range.first?.min ?? ""
-            let modulesCount = latestVisibleMatch?.1.modules.count ?? 0
-            
+
             HStack(spacing: 12) {
-                MetricView(icon: "tag", value: "\(uniqueVersions.count)")
+                MetricView(icon: "tag", value: "\(viewModel.uniqueVersionCount)")
+                    .help("可用版本数")
 
-                if dependenciesCount > 0 {
+                if viewModel.latestDependenciesCount > 0 {
                     Divider()
                         .frame(height: 12)
-                    MetricView(icon: "shippingbox", value: "\(dependenciesCount)")
+                    MetricView(icon: "shippingbox", value: "\(viewModel.latestDependenciesCount)")
+                        .help("依赖组件数")
                 }
 
-                if !minOSVersion.isEmpty {
+                if !viewModel.latestMinOSVersion.isEmpty {
                     Divider()
                         .frame(height: 12)
-                    MetricView(icon: "macwindow", value: minOSVersion.replacingOccurrences(of: "-", with: ""))
+                    MetricView(icon: "macwindow", value: viewModel.latestMinOSVersion)
+                        .help("最低系统版本")
                 }
-                
-                if modulesCount > 0 {
+
+                if viewModel.latestModulesCount > 0 {
                     Divider()
                         .frame(height: 12)
-                    MetricView(icon: "square.stack.3d.up", value: "\(modulesCount)")
+                    MetricView(icon: "square.stack.3d.up", value: "\(viewModel.latestModulesCount)")
+                        .help("模块数")
                 }
             }
-            .background(Color(.clear))
             .font(.caption)
             .foregroundColor(.secondary)
         }
-        .background(Color(.clear))
     }
 }
 
@@ -490,8 +507,7 @@ private struct MetricView: View {
 
 private struct DownloadButtonView: View {
     @ObservedObject var viewModel: AppCardViewModel
-    @State private var isHovered = false
-    
+
     var body: some View {
         Button(action: { viewModel.showVersionPicker = true }) {
             Label(viewModel.downloadButtonTitle,
@@ -504,35 +520,6 @@ private struct DownloadButtonView: View {
         }
         .buttonStyle(BeautifulButtonStyle(baseColor: viewModel.isDownloading ? Color.gray : Color.blue))
         .disabled(!viewModel.canDownload)
-        .animation(.easeInOut(duration: 0.2), value: isHovered)
-        .onHover { hovering in
-            isHovered = hovering
-        }
-    }
-}
-
-private struct CardModifier: ViewModifier {
-    @State private var isHovered = false
-    
-    func body(content: Content) -> some View {
-        content
-            .background(Color(NSColor.clear))
-            .overlay(
-                RoundedRectangle(cornerRadius: AppCardConstants.cornerRadius)
-                    .stroke(Color.gray.opacity(AppCardConstants.strokeOpacity), 
-                           lineWidth: AppCardConstants.strokeWidth)
-            )
-            .shadow(
-                color: Color.primary.opacity(isHovered ? AppCardConstants.shadowOpacity * 2 : AppCardConstants.shadowOpacity),
-                radius: isHovered ? AppCardConstants.shadowRadius * 1.5 : AppCardConstants.shadowRadius,
-                x: 0,
-                y: isHovered ? 4 : 2
-            )
-            .scaleEffect(isHovered ? AppCardConstants.hoverScale : 1.0)
-            .animation(.easeInOut(duration: 0.2), value: isHovered)
-            .onHover { hovering in
-                isHovered = hovering
-            }
     }
 }
 

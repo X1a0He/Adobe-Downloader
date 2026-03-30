@@ -7,7 +7,7 @@
 
 import SwiftUI
 
-private enum NavigationVersionPickerConstants {
+private enum VersionPickerConstants {
     static let headerPadding: CGFloat = 5
     static let viewWidth: CGFloat = 500
     static let viewHeight: CGFloat = 600
@@ -71,12 +71,12 @@ struct NavigationVersionPickerView: View {
     var body: some View {
         NavigationStack(path: $navigationPath) {
             VStack(spacing: 0) {
-                NavigationVersionPickerHeaderView(
+                VersionPickerHeaderView(
                     productId: productId, 
                     downloadAppleSilicon: downloadAppleSilicon,
                     onDismiss: { dismiss() }
                 )
-                NavigationVersionListView(
+                VersionListView(
                     productId: productId,
                     expandedVersions: $expandedVersions,
                     onSelect: onSelect,
@@ -86,7 +86,7 @@ struct NavigationVersionPickerView: View {
                     }
                 )
             }
-            .frame(width: NavigationVersionPickerConstants.viewWidth, height: NavigationVersionPickerConstants.viewHeight)
+            .frame(width: VersionPickerConstants.viewWidth, height: VersionPickerConstants.viewHeight)
             .navigationDestination(for: VersionPickerDestination.self) { destination in
                 switch destination {
                 case .customDownload(let productId, let version):
@@ -229,7 +229,7 @@ struct NavigationVersionPickerView: View {
     }
 }
 
-private struct NavigationVersionPickerHeaderView: View {
+private struct VersionPickerHeaderView: View {
     let productId: String
     let downloadAppleSilicon: Bool
     let onDismiss: () -> Void
@@ -264,7 +264,7 @@ private struct NavigationVersionPickerHeaderView: View {
                 }
                 .buttonStyle(BeautifulButtonStyle(baseColor: Color.gray.opacity(0.2)))
             }
-            .padding(.bottom, NavigationVersionPickerConstants.headerPadding)
+            .padding(.bottom, VersionPickerConstants.headerPadding)
             
             HStack(spacing: 6) {
                 Image(systemName: downloadAppleSilicon ? "m.square" : "x.square")
@@ -291,7 +291,7 @@ private struct NavigationVersionPickerHeaderView: View {
     }
 }
 
-private struct NavigationVersionListView: View {
+private struct VersionListView: View {
     let productId: String
     @Binding var expandedVersions: Set<String>
     let onSelect: (String) -> Void
@@ -304,9 +304,9 @@ private struct NavigationVersionListView: View {
         ScrollViewReader { proxy in
             ScrollView(showsIndicators: false) {
                 VStack(spacing: 0) {
-                    LazyVStack(spacing: NavigationVersionPickerConstants.verticalSpacing) {
+                    LazyVStack(spacing: VersionPickerConstants.verticalSpacing) {
                         ForEach(getFilteredVersions(), id: \.key) { version, info in
-                            NavigationVersionRow(
+                            VersionRow(
                                 productId: productId,
                                 version: version,
                                 info: info,
@@ -379,7 +379,7 @@ private struct NavigationVersionListView: View {
     }
 }
 
-private struct NavigationVersionRow: View, Equatable {
+private struct VersionRow: View, Equatable {
     @StorageValue(\.defaultLanguage) private var defaultLanguage
     
     let productId: String
@@ -390,21 +390,22 @@ private struct NavigationVersionRow: View, Equatable {
     let onToggle: (String) -> Void
     let onCustomDownload: (String) -> Void
     
-    static func == (lhs: NavigationVersionRow, rhs: NavigationVersionRow) -> Bool {
+    static func == (lhs: VersionRow, rhs: VersionRow) -> Bool {
         lhs.productId == rhs.productId &&
         lhs.version == rhs.version &&
         lhs.isExpanded == rhs.isExpanded
     }
     
     @State private var cachedExistingPath: URL? = nil
-    
+    @State private var isHovered = false
+
     private var existingPath: URL? {
         cachedExistingPath
     }
-    
+
     var body: some View {
         VStack(spacing: 0) {
-            NavigationVersionHeader(
+            VersionHeader(
                 version: version,
                 info: info,
                 isExpanded: isExpanded,
@@ -412,9 +413,12 @@ private struct NavigationVersionRow: View, Equatable {
                 onSelect: { onToggle(version) },
                 onToggle: { onToggle(version) }
             )
-            
+
             if isExpanded {
-                NavigationVersionDetails(
+                Divider()
+                    .padding(.horizontal, 4)
+
+                VersionDetails(
                     productId: productId,
                     info: info,
                     version: version,
@@ -424,9 +428,14 @@ private struct NavigationVersionRow: View, Equatable {
             }
         }
         .padding(.horizontal)
-        .background(Color(NSColor.controlBackgroundColor))
-        .cornerRadius(NavigationVersionPickerConstants.cornerRadius)
+        .background(
+            RoundedRectangle(cornerRadius: VersionPickerConstants.cornerRadius)
+                .fill(isHovered ? Color(.controlBackgroundColor).opacity(0.8) : Color(.controlBackgroundColor))
+        )
+        .cornerRadius(VersionPickerConstants.cornerRadius)
         .animation(.easeInOut(duration: 0.2), value: isExpanded)
+        .animation(.easeInOut(duration: 0.15), value: isHovered)
+        .onHover { isHovered = $0 }
         .onAppear {
             if cachedExistingPath == nil {
                 cachedExistingPath = globalNetworkManager.isVersionDownloaded(
@@ -439,7 +448,7 @@ private struct NavigationVersionRow: View, Equatable {
     }
 }
 
-private struct NavigationVersionHeader: View {
+private struct VersionHeader: View {
     let version: String
     let info: Product.Platform
     let isExpanded: Bool
@@ -463,14 +472,14 @@ private struct NavigationVersionHeader: View {
                     hasDependencies: hasDependencies
                 )
             }
-            .padding(.vertical, NavigationVersionPickerConstants.buttonPadding)
+            .padding(.vertical, VersionPickerConstants.buttonPadding)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
     }
 }
 
-private struct NavigationVersionDetails: View {
+private struct VersionDetails: View {
     let productId: String
     let info: Product.Platform
     let version: String
@@ -494,7 +503,7 @@ private struct NavigationVersionDetails: View {
     }
     
     var body: some View {
-        VStack(alignment: .leading, spacing: NavigationVersionPickerConstants.verticalSpacing) {
+        VStack(alignment: .leading, spacing: VersionPickerConstants.verticalSpacing) {
             if shouldShowDependencySection || hasModules {
                 VStack(alignment: .leading, spacing: 8) {
                     if shouldShowDependencySection {
@@ -553,7 +562,7 @@ private struct NavigationVersionDetails: View {
                 .cornerRadius(6)
             }
             
-            NavigationDownloadButton(
+            VersionDownloadButton(
                 productId: productId,
                 version: version, 
                 onSelect: onSelect,
@@ -567,27 +576,32 @@ private struct NavigationVersionDetails: View {
     }
 }
 
-private struct NavigationDownloadButton: View {
+private struct VersionDownloadButton: View {
     let productId: String
     let version: String
     let onSelect: (String) -> Void
     let onCustomDownload: (String) -> Void
-    
+
     var body: some View {
-        Button("下载") {
+        Button(action: {
             if productId == "APRO" {
                 onSelect(version)
             } else {
                 onCustomDownload(version)
             }
+        }) {
+            Text("下载")
+                .font(.system(size: 14, weight: .medium))
+                .frame(maxWidth: .infinity)
+                .frame(height: 24)
+                .foregroundColor(.white)
         }
-        .foregroundColor(.white)
         .buttonStyle(BeautifulButtonStyle(baseColor: Color.blue))
         .padding(.top, 8)
     }
 }
 
-private struct VersionInfo: View {
+struct VersionInfo: View {
     let version: String
     let platform: String
     let info: Product.Platform
@@ -641,7 +655,7 @@ private struct VersionInfo: View {
     }
 }
 
-private struct ExistingPathButton: View {
+struct ExistingPathButton: View {
     let isVisible: Bool
     
     var body: some View {
@@ -663,20 +677,22 @@ private struct ExistingPathButton: View {
     }
 }
 
-private struct ExpandButton: View {
+struct ExpandButton: View {
     let isExpanded: Bool
     let onToggle: () -> Void
     let hasDependencies: Bool
-    
+
     var body: some View {
-        Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
+        Image(systemName: "chevron.right")
+            .rotationEffect(.degrees(isExpanded ? 90 : 0))
+            .animation(.easeInOut(duration: 0.2), value: isExpanded)
             .foregroundColor(.secondary)
             .contentShape(Rectangle())
             .onTapGesture(perform: onToggle)
     }
 }
 
-private struct DependenciesList: View {
+struct DependenciesList: View {
     let dependencies: [Product.Platform.LanguageSet.Dependency]
 
     var body: some View {
@@ -689,7 +705,7 @@ private struct DependenciesList: View {
     }
 }
 
-private struct DependencyRow: View, Equatable {
+struct DependencyRow: View, Equatable {
     let dependency: Product.Platform.LanguageSet.Dependency
     
     static func == (lhs: DependencyRow, rhs: DependencyRow) -> Bool {
@@ -806,7 +822,7 @@ private struct DependencyRow: View, Equatable {
     }
 }
 
-private struct ModulesList: View {
+struct ModulesList: View {
     let modules: [Product.Platform.Module]
     
     var body: some View {
