@@ -37,7 +37,9 @@ struct ContentView: View {
             MainContentView(
                 loadingState: networkManager.loadingState,
                 filteredProducts: filteredProducts,
-                onRetry: { networkManager.retryFetchData() }
+                searchText: searchText,
+                onRetry: { networkManager.retryFetchData() },
+                onOpenDownloadManager: { showDownloadManager = true }
             )
             .background(Color(.clear))
             .animation(.easeInOut, value: networkManager.loadingState)
