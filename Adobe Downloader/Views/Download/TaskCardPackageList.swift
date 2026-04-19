@@ -1,8 +1,40 @@
 import SwiftUI
 
+private enum PackageListFilter: String, CaseIterable, Identifiable {
+    case all, waiting, downloading, completed, other
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .all: return String(localized: "全部")
+        case .waiting: return String(localized: "等待")
+        case .downloading: return String(localized: "下载中")
+        case .completed: return String(localized: "已完成")
+        case .other: return String(localized: "其他")
+        }
+    }
+
+    var icon: String {
+        switch self {
+        case .all: return "square.grid.2x2"
+        case .waiting: return "hourglass"
+        case .downloading: return "arrow.down.circle"
+        case .completed: return "checkmark.circle"
+        case .other: return "ellipsis.circle"
+        }
+    }
+}
+
 struct TaskCardPackageList: View {
     let task: NewDownloadTask
     @State private var expandedProducts: Set<String> = []
+    @State private var searchText: String = ""
+    @State private var activeFilter: PackageListFilter = .all
+
+    private var hasLotsOfPackages: Bool {
+        task.totalPackages > 8
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -22,34 +54,116 @@ struct TaskCardPackageList: View {
             }
             #endif
 
+            if hasLotsOfPackages {
+                packageFilterBar
+            }
+
             ScrollView(showsIndicators: false) {
                 VStack(alignment: .leading, spacing: 6) {
                     ForEach(task.dependenciesToDownload, id: \.sapCode) { product in
-                        PackageProductRow(
-                            product: product,
-                            isExpanded: expandedProducts.contains(product.sapCode),
-                            onToggle: {
-                                withAnimation(.easeInOut(duration: 0.2)) {
-                                    if expandedProducts.contains(product.sapCode) {
-                                        expandedProducts.remove(product.sapCode)
-                                    } else {
-                                        expandedProducts.insert(product.sapCode)
+                        let visible = visiblePackages(in: product)
+                        if !visible.isEmpty || !isFilteringActive {
+                            PackageProductRow(
+                                product: product,
+                                visiblePackages: visible,
+                                isExpanded: expandedProducts.contains(product.sapCode),
+                                isMainProduct: product.sapCode == task.productId,
+                                isForceExpanded: isFilteringActive,
+                                onToggle: {
+                                    withAnimation(.easeInOut(duration: 0.2)) {
+                                        if expandedProducts.contains(product.sapCode) {
+                                            expandedProducts.remove(product.sapCode)
+                                        } else {
+                                            expandedProducts.insert(product.sapCode)
+                                        }
                                     }
                                 }
-                            }
-                        )
+                            )
+                        }
                     }
                 }
                 .padding(.horizontal, 2)
                 .padding(.vertical, 4)
             }
-            .frame(maxHeight: 280)
+            .frame(maxHeight: 320)
             .background(.ultraThinMaterial)
             .clipShape(RoundedRectangle(cornerRadius: 8))
             .overlay(
                 RoundedRectangle(cornerRadius: 8)
                     .strokeBorder(.white.opacity(0.1), lineWidth: 0.5)
             )
+        }
+    }
+
+    private var isFilteringActive: Bool {
+        activeFilter != .all || !searchText.isEmpty
+    }
+
+    private func visiblePackages(in product: DependenciesToDownload) -> [Package] {
+        product.packages.filter { pkg in
+            passesSearch(pkg) && passesFilter(pkg)
+        }
+    }
+
+    private func passesSearch(_ pkg: Package) -> Bool {
+        let q = searchText.trimmingCharacters(in: .whitespaces).lowercased()
+        guard !q.isEmpty else { return true }
+        return pkg.fullPackageName.lowercased().contains(q)
+            || pkg.packageVersion.lowercased().contains(q)
+            || pkg.type.lowercased().contains(q)
+    }
+
+    private func passesFilter(_ pkg: Package) -> Bool {
+        switch activeFilter {
+        case .all: return true
+        case .waiting: return pkg.status == .waiting
+        case .downloading: return pkg.status == .downloading
+        case .completed: return pkg.status == .completed
+        case .other:
+            switch pkg.status {
+            case .waiting, .downloading, .completed: return false
+            default: return true
+            }
+        }
+    }
+
+    private var packageFilterBar: some View {
+        VStack(spacing: 6) {
+            HStack(spacing: 6) {
+                Image(systemName: "magnifyingglass")
+                    .font(.system(size: 11))
+                    .foregroundColor(.secondary.opacity(0.7))
+                TextField(String(localized: "搜索包名"), text: $searchText)
+                    .textFieldStyle(PlainTextFieldStyle())
+                    .font(.system(size: 11))
+                if !searchText.isEmpty {
+                    Button(action: { searchText = "" }) {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.system(size: 11))
+                            .foregroundColor(.secondary.opacity(0.7))
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(.horizontal, 8)
+            .padding(.vertical, 5)
+            .background(.ultraThinMaterial)
+            .clipShape(RoundedRectangle(cornerRadius: 6))
+
+            HStack(spacing: 4) {
+                ForEach(PackageListFilter.allCases) { filter in
+                    PackageFilterChip(
+                        filter: filter,
+                        isActive: filter == activeFilter,
+                        onTap: {
+                            withAnimation(.easeInOut(duration: 0.15)) {
+                                activeFilter = filter
+                            }
+                        }
+                    )
+                }
+                Spacer(minLength: 0)
+            }
         }
     }
 
@@ -157,23 +271,82 @@ struct TaskCardPackageList: View {
     }
 }
 
+private struct PackageFilterChip: View {
+    let filter: PackageListFilter
+    let isActive: Bool
+    let onTap: () -> Void
+
+    var body: some View {
+        Button(action: onTap) {
+            HStack(spacing: 3) {
+                Image(systemName: filter.icon)
+                    .font(.system(size: 9))
+                Text(filter.title)
+                    .font(.system(size: 10, weight: isActive ? .semibold : .regular))
+            }
+            .foregroundColor(isActive ? .blue : .secondary)
+            .padding(.horizontal, 7)
+            .padding(.vertical, 3)
+            .background(
+                RoundedRectangle(cornerRadius: 5)
+                    .fill(isActive ? Color.blue.opacity(0.12) : Color.secondary.opacity(0.06))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 5)
+                    .stroke(isActive ? Color.blue.opacity(0.3) : Color.secondary.opacity(0.1), lineWidth: 0.5)
+            )
+        }
+        .buttonStyle(.plain)
+    }
+}
+
 private struct PackageProductRow: View {
     @ObservedObject var product: DependenciesToDownload
+    let visiblePackages: [Package]
     let isExpanded: Bool
+    let isMainProduct: Bool
+    let isForceExpanded: Bool
     let onToggle: () -> Void
     @State private var showCopiedAlert = false
+
+    private var effectivelyExpanded: Bool {
+        isForceExpanded || isExpanded
+    }
+
+    private var aggregatedSize: Int64 {
+        product.packages.reduce(Int64(0)) { $0 + $1.downloadSize }
+    }
+
+    private var aggregatedSizeText: String {
+        ByteCountFormatter.string(fromByteCount: aggregatedSize, countStyle: .file)
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             Button(action: onToggle) {
                 HStack(spacing: 8) {
-                    Image(systemName: "cube.box.fill")
+                    Image(systemName: isMainProduct ? "app.badge.fill" : "cube.box.fill")
                         .font(.system(size: 12))
-                        .foregroundColor(.blue.opacity(0.8))
+                        .foregroundColor(isMainProduct ? .blue : .blue.opacity(0.7))
 
                     Text("\(product.sapCode) \(product.version)\(product.sapCode != "APRO" ? " - (\(product.buildGuid))" : "")")
                         .font(.system(size: 12, weight: .semibold))
-                        .foregroundColor(.primary.opacity(0.8))
+                        .foregroundColor(.primary.opacity(0.85))
+                        .textSelection(.enabled)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+
+                    if isMainProduct {
+                        Text(String(localized: "主产品"))
+                            .font(.system(size: 9, weight: .semibold))
+                            .foregroundColor(.blue)
+                            .padding(.horizontal, 5)
+                            .padding(.vertical, 1)
+                            .background(
+                                RoundedRectangle(cornerRadius: 3)
+                                    .fill(Color.blue.opacity(0.12))
+                            )
+                    }
 
                     if product.sapCode != "APRO" {
                         Button(action: {
@@ -200,15 +373,24 @@ private struct PackageProductRow: View {
 
                     Spacer()
 
-                    Text("\(product.completedPackages)/\(product.totalPackages)")
-                        .font(.system(size: 11))
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 2)
-                        .background(Color.secondary.opacity(0.08))
-                        .cornerRadius(4)
-                        .foregroundColor(.primary.opacity(0.7))
+                    HStack(spacing: 6) {
+                        Text("\(product.completedPackages)/\(product.totalPackages)")
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundColor(.primary.opacity(0.75))
+                            .monospacedDigit()
+                        Text("·")
+                            .foregroundColor(.secondary.opacity(0.4))
+                        Text(aggregatedSizeText)
+                            .font(.system(size: 11))
+                            .foregroundColor(.secondary.opacity(0.85))
+                            .monospacedDigit()
+                    }
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 2)
+                    .background(Color.secondary.opacity(0.06))
+                    .cornerRadius(4)
 
-                    Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
+                    Image(systemName: effectivelyExpanded ? "chevron.down" : "chevron.right")
                         .font(.system(size: 10))
                         .foregroundColor(.secondary)
                 }
@@ -218,14 +400,15 @@ private struct PackageProductRow: View {
                 .clipShape(RoundedRectangle(cornerRadius: 8))
                 .overlay(
                     RoundedRectangle(cornerRadius: 8)
-                        .strokeBorder(.white.opacity(0.1), lineWidth: 0.5)
+                        .strokeBorder(isMainProduct ? Color.blue.opacity(0.25) : Color.white.opacity(0.1), lineWidth: isMainProduct ? 1 : 0.5)
                 )
             }
             .buttonStyle(.plain)
+            .disabled(isForceExpanded)
 
-            if isExpanded {
+            if effectivelyExpanded {
                 VStack(spacing: 4) {
-                    ForEach(product.packages) { package in
+                    ForEach(visiblePackages) { package in
                         PackageItemRow(package: package)
                     }
                 }
@@ -249,6 +432,7 @@ private struct PackageItemRow: View {
                     .font(.system(size: 11, weight: .medium))
                     .foregroundColor(.primary.opacity(0.8))
                     .lineLimit(1)
+                    .truncationMode(.middle)
 
                 Text(package.type)
                     .font(.system(size: 9, weight: .medium))

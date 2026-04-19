@@ -1,5 +1,13 @@
 import SwiftUI
 
+private func formatDurationLocal(_ seconds: TimeInterval) -> String {
+    let total = max(Int(seconds), 0)
+    let hours = total / 3600
+    let minutes = (total % 3600) / 60
+    let secs = total % 60
+    return String(format: "%02d:%02d:%02d", hours, minutes, secs)
+}
+
 struct TaskCard: View {
     @ObservedObject var task: NewDownloadTask
     let onAction: (TaskAction) -> Void
@@ -8,6 +16,7 @@ struct TaskCard: View {
     @State private var confirmAction: TaskAction? = nil
     @State private var isInstalling = false
     @State private var showHelperAlert = false
+    @State private var showCopiedToast = false
     @StateObject private var iconLoader = AsyncImageLoader()
 
     private var clampedTotalProgress: Double {
@@ -16,34 +25,42 @@ struct TaskCard: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            headerRow
-                .padding(.horizontal, 16)
-                .padding(.top, 14)
-                .padding(.bottom, 10)
+            CardHeaderView(
+                task: task,
+                iconImage: iconLoader.image,
+                statusBadgeContent: { statusBadge },
+                actionButtons: { actionButtons }
+            )
+            .padding(.horizontal, 16)
+            .padding(.top, 14)
+            .padding(.bottom, 10)
 
             switch task.status {
             case .downloading, .preparing, .waiting:
-                progressSection
+                CardProgressView(task: task, tint: task.status.progressBarColor, isIndeterminate: false)
                     .padding(.horizontal, 16)
                     .padding(.bottom, 10)
 
-            case .paused:
-                pausedSection
+            case .paused(let info):
+                CardProgressView(task: task, tint: .orange, isIndeterminate: false)
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 6)
+                PausedInfoView(info: info)
                     .padding(.horizontal, 16)
                     .padding(.bottom, 10)
 
             case .failed(let info):
-                failedSection(info)
+                FailedInfoView(info: info, progressAtFailure: clampedTotalProgress)
                     .padding(.horizontal, 16)
                     .padding(.bottom, 10)
 
-            case .completed:
-                completedSection
+            case .completed(let info):
+                CompletedInfoView(task: task, info: info, onOpenInFinder: openInFinder)
                     .padding(.horizontal, 16)
                     .padding(.bottom, 10)
 
             case .retrying(let info):
-                retryingSection(info)
+                RetryingInfoView(info: info)
                     .padding(.horizontal, 16)
                     .padding(.bottom, 10)
             }
@@ -70,6 +87,8 @@ struct TaskCard: View {
                 .strokeBorder(.white.opacity(0.15), lineWidth: 0.5)
         )
         .shadow(color: .black.opacity(0.08), radius: 8, x: 0, y: 4)
+        .animation(.easeInOut(duration: 0.2), value: task.totalStatus)
+        .contextMenu { contextMenuItems }
         .alert(
             confirmAction?.confirmTitle ?? "",
             isPresented: Binding(
@@ -111,77 +130,24 @@ struct TaskCard: View {
             .frame(minWidth: 760, minHeight: 420)
             .background(Color(NSColor.windowBackgroundColor))
         }
-        .onAppear { iconLoader.load(productId: task.productId) }
-    }
-
-    private var headerRow: some View {
-        HStack(spacing: 12) {
-            iconView
-                .frame(width: 40, height: 40)
-
-            VStack(alignment: .leading, spacing: 3) {
+        .overlay(alignment: .top) {
+            if showCopiedToast {
                 HStack(spacing: 6) {
-                    Text(task.displayName)
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundColor(.primary)
-
-                    Text(task.productVersion)
-                        .font(.system(size: 11))
-                        .foregroundColor(.secondary)
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 2)
-                        .background(.ultraThinMaterial)
-                        .clipShape(RoundedRectangle(cornerRadius: 4))
+                    Image(systemName: "checkmark.circle.fill")
+                        .foregroundColor(.green)
+                    Text("已复制任务信息")
+                        .font(.system(size: 12, weight: .medium))
                 }
-
-                HStack(spacing: 3) {
-                    Image(systemName: "folder")
-                        .font(.system(size: 9))
-                        .foregroundColor(.blue.opacity(0.6))
-                    Text(DownloadFormatters.shortenedPath(task.directory.path))
-                        .font(.system(size: 10))
-                        .foregroundColor(.primary.opacity(0.5))
-                        .lineLimit(1)
-                        .truncationMode(.middle)
-                }
-                .onTapGesture {
-                    NSWorkspace.shared.selectFile(
-                        URL(fileURLWithPath: task.directory.path).path,
-                        inFileViewerRootedAtPath: URL(fileURLWithPath: task.directory.path).deletingLastPathComponent().path
-                    )
-                }
-                .help(task.directory.path)
-            }
-
-            Spacer()
-
-            statusBadge
-
-            actionButtons
-        }
-    }
-
-    private var iconView: some View {
-        Group {
-            if let image = iconLoader.image {
-                Image(nsImage: image)
-                    .resizable()
-                    .interpolation(.high)
-                    .aspectRatio(contentMode: .fit)
-            } else {
-                Image(systemName: "app.fill")
-                    .resizable()
-                    .aspectRatio(contentMode: .fit)
-                    .foregroundColor(.secondary.opacity(0.5))
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
+                .background(.ultraThinMaterial)
+                .clipShape(Capsule())
+                .overlay(Capsule().strokeBorder(.white.opacity(0.2), lineWidth: 0.5))
+                .padding(.top, 6)
+                .transition(.move(edge: .top).combined(with: .opacity))
             }
         }
-        .padding(4)
-        .background(.ultraThinMaterial)
-        .clipShape(RoundedRectangle(cornerRadius: 10))
-        .overlay(
-            RoundedRectangle(cornerRadius: 10)
-                .strokeBorder(.white.opacity(0.2), lineWidth: 0.5)
-        )
+        .onAppear { iconLoader.load(productId: task.productId) }
     }
 
     private var statusBadge: some View {
@@ -190,6 +156,8 @@ struct TaskCard: View {
                 .font(.system(size: 9))
             Text(task.status.description)
                 .font(.system(size: 10, weight: .medium))
+                .lineLimit(1)
+                .truncationMode(.middle)
         }
         .foregroundColor(task.status.badgeColor)
         .padding(.vertical, 4)
@@ -206,40 +174,55 @@ struct TaskCard: View {
         .clipShape(RoundedRectangle(cornerRadius: 6))
     }
 
+    @ViewBuilder
     private var actionButtons: some View {
         HStack(spacing: 6) {
             switch task.status {
             case .downloading, .preparing, .waiting:
-                actionButton(.pause)
-                actionButton(.cancel)
+                iconActionButton(.pause)
+                iconActionButton(.cancel)
 
             case .paused:
-                actionButton(.resume)
-                actionButton(.cancel)
+                primaryActionButton(.resume)
+                iconActionButton(.cancel)
 
             case .failed(let info):
                 if info.recoverable {
-                    actionButton(.retry)
+                    primaryActionButton(.retry)
                 }
-                actionButton(.remove)
+                iconActionButton(.remove)
 
             case .completed:
                 if task.displayInstallButton {
-                    actionButton(.install)
+                    primaryActionButton(.install)
                 }
-                actionButton(.remove)
+                iconActionButton(.remove)
 
             case .retrying:
-                actionButton(.cancel)
+                iconActionButton(.cancel)
             }
         }
     }
 
-    private func actionButton(_ action: TaskAction) -> some View {
+    private func iconActionButton(_ action: TaskAction) -> some View {
         Button(action: { handleAction(action) }) {
             Image(systemName: action.buttonIcon)
         }
         .buttonStyle(GlassIconButtonStyle(tint: action.buttonColor))
+        .help(action.buttonLabel)
+    }
+
+    private func primaryActionButton(_ action: TaskAction) -> some View {
+        Button(action: { handleAction(action) }) {
+            HStack(spacing: 4) {
+                Image(systemName: action.buttonIcon)
+                    .font(.system(size: 10, weight: .semibold))
+                Text(action.buttonLabel)
+                    .font(.system(size: 11, weight: .semibold))
+            }
+            .foregroundColor(.white)
+        }
+        .buttonStyle(BeautifulButtonStyle(baseColor: action.buttonColor))
         .help(action.buttonLabel)
     }
 
@@ -259,147 +242,6 @@ struct TaskCard: View {
             confirmAction = action
         } else {
             onAction(action)
-        }
-    }
-
-    private var progressSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            GeometryReader { geometry in
-                ZStack(alignment: .leading) {
-                    Capsule()
-                        .fill(.primary.opacity(0.06))
-                        .frame(height: 8)
-
-                    Capsule()
-                        .fill(
-                            LinearGradient(
-                                colors: [
-                                    task.status.progressBarColor.opacity(0.6),
-                                    task.status.progressBarColor
-                                ],
-                                startPoint: .leading,
-                                endPoint: .trailing
-                            )
-                        )
-                        .frame(width: CGFloat(clampedTotalProgress) * geometry.size.width, height: 8)
-                        .shadow(color: task.status.progressBarColor.opacity(0.4), radius: 4, x: 0, y: 0)
-                        .animation(.linear(duration: 0.3), value: clampedTotalProgress)
-                }
-            }
-            .frame(height: 8)
-
-            HStack {
-                HStack(spacing: 4) {
-                    Text(task.formattedDownloadedSize)
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundColor(.primary.opacity(0.8))
-                    Text("/")
-                        .font(.system(size: 11))
-                        .foregroundColor(.secondary.opacity(0.4))
-                    Text(task.formattedTotalSize)
-                        .font(.system(size: 11))
-                        .foregroundColor(.secondary)
-                }
-
-                Spacer()
-
-                Text("\(Int(clampedTotalProgress * 100))%")
-                    .font(.system(size: 11, weight: .bold))
-                    .foregroundColor(task.status.progressBarColor)
-
-                if task.totalSpeed > 0 {
-                    Text("·").foregroundColor(.secondary.opacity(0.3))
-                    HStack(spacing: 2) {
-                        Image(systemName: "arrow.down").font(.system(size: 8))
-                        Text(DownloadFormatters.speed(task.totalSpeed)).font(.system(size: 11))
-                    }
-                    .foregroundColor(.secondary)
-
-                    let remaining = DownloadFormatters.remainingTime(
-                        total: task.totalSize,
-                        downloaded: task.totalDownloadedSize,
-                        speed: task.totalSpeed
-                    )
-                    if !remaining.isEmpty {
-                        Text("·").foregroundColor(.secondary.opacity(0.3))
-                        HStack(spacing: 2) {
-                            Image(systemName: "clock").font(.system(size: 8))
-                            Text(remaining).font(.system(size: 11))
-                        }
-                        .foregroundColor(.secondary)
-                    }
-                }
-            }
-            .animation(.easeInOut(duration: 0.2), value: task.totalSpeed > 0)
-        }
-    }
-
-    private var pausedSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            GeometryReader { geometry in
-                ZStack(alignment: .leading) {
-                    Capsule()
-                        .fill(.primary.opacity(0.06))
-                        .frame(height: 8)
-
-                    Capsule()
-                        .fill(Color.orange.opacity(0.5))
-                        .frame(width: CGFloat(clampedTotalProgress) * geometry.size.width, height: 8)
-                }
-            }
-            .frame(height: 8)
-
-            HStack {
-                Text("\(task.formattedDownloadedSize) / \(task.formattedTotalSize)")
-                    .font(.system(size: 11))
-                    .foregroundColor(.secondary)
-                Spacer()
-                Text("\(Int(clampedTotalProgress * 100))%")
-                    .font(.system(size: 11, weight: .bold))
-                    .foregroundColor(.orange)
-            }
-        }
-    }
-
-    private func failedSection(_ info: DownloadStatus.FailureInfo) -> some View {
-        HStack(spacing: 6) {
-            Image(systemName: "exclamationmark.triangle.fill")
-                .font(.system(size: 11))
-                .foregroundColor(.red.opacity(0.8))
-            Text(info.message)
-                .font(.system(size: 11))
-                .foregroundColor(.red.opacity(0.8))
-                .lineLimit(2)
-            Spacer()
-        }
-        .padding(.vertical, 6)
-        .padding(.horizontal, 10)
-        .background(.ultraThinMaterial)
-        .overlay(
-            RoundedRectangle(cornerRadius: 8)
-                .fill(Color.red.opacity(0.06))
-        )
-        .clipShape(RoundedRectangle(cornerRadius: 8))
-    }
-
-    private var completedSection: some View {
-        HStack {
-            Text(task.formattedTotalSize)
-                .font(.system(size: 11))
-                .foregroundColor(.secondary)
-            Spacer()
-        }
-    }
-
-    private func retryingSection(_ info: DownloadStatus.RetryInfo) -> some View {
-        HStack(spacing: 6) {
-            ProgressView()
-                .scaleEffect(0.6)
-                .frame(width: 14, height: 14)
-            Text(String(localized: "重试中 (\(info.attempt)/\(info.maxAttempts))"))
-                .font(.system(size: 11))
-                .foregroundColor(.secondary)
-            Spacer()
         }
     }
 
@@ -424,6 +266,424 @@ struct TaskCard: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+    }
+
+    @ViewBuilder
+    private var contextMenuItems: some View {
+        Button(action: openInFinder) {
+            Label(String(localized: "在 Finder 中显示"), systemImage: "folder")
+        }
+        Button(action: copyTaskInfo) {
+            Label(String(localized: "复制任务信息"), systemImage: "doc.on.doc")
+        }
+        if case .completed = task.status {
+            Button(action: openProduct) {
+                Label(String(localized: "打开产品"), systemImage: "arrow.up.forward.app")
+            }
+        }
+        Divider()
+        Button(role: .destructive, action: {
+            confirmAction = .remove
+        }) {
+            Label(String(localized: "删除任务"), systemImage: "trash")
+        }
+    }
+
+    private func openInFinder() {
+        let url = URL(fileURLWithPath: task.directory.path)
+        NSWorkspace.shared.selectFile(
+            url.path,
+            inFileViewerRootedAtPath: url.deletingLastPathComponent().path
+        )
+    }
+
+    private func openProduct() {
+        if task.productId == "APRO" {
+            NSWorkspace.shared.open(task.directory)
+        } else {
+            NSWorkspace.shared.open(task.directory)
+        }
+    }
+
+    private func copyTaskInfo() {
+        var lines: [String] = []
+        lines.append("\(task.displayName) \(task.productVersion)")
+        lines.append("产品: \(task.productId)")
+        lines.append("平台: \(task.platform)")
+        if !task.language.isEmpty {
+            lines.append("语言: \(task.language)")
+        }
+        lines.append("路径: \(task.directory.path)")
+        lines.append("状态: \(task.status.description)")
+        lines.append("大小: \(task.formattedTotalSize)")
+        let text = lines.joined(separator: "\n")
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(text, forType: .string)
+        withAnimation(.easeInOut(duration: 0.2)) {
+            showCopiedToast = true
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.8) {
+            withAnimation(.easeInOut(duration: 0.2)) {
+                showCopiedToast = false
+            }
+        }
+    }
+}
+
+private struct CardHeaderView<Badge: View, Actions: View>: View {
+    @ObservedObject var task: NewDownloadTask
+    let iconImage: NSImage?
+    @ViewBuilder let statusBadgeContent: () -> Badge
+    @ViewBuilder let actionButtons: () -> Actions
+
+    var body: some View {
+        HStack(spacing: 12) {
+            iconView
+                .frame(width: 40, height: 40)
+
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(spacing: 6) {
+                    Text(task.displayName)
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundColor(.primary)
+                        .lineLimit(1)
+
+                    Text(task.productVersion)
+                        .font(.system(size: 11))
+                        .foregroundColor(.secondary)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(.ultraThinMaterial)
+                        .clipShape(RoundedRectangle(cornerRadius: 4))
+                }
+
+                HStack(spacing: 3) {
+                    Image(systemName: "folder")
+                        .font(.system(size: 9))
+                        .foregroundColor(.blue.opacity(0.6))
+                    Text(DownloadFormatters.shortenedPath(task.directory.path))
+                        .font(.system(size: 10))
+                        .foregroundColor(.primary.opacity(0.5))
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
+                .onTapGesture {
+                    let url = URL(fileURLWithPath: task.directory.path)
+                    NSWorkspace.shared.selectFile(
+                        url.path,
+                        inFileViewerRootedAtPath: url.deletingLastPathComponent().path
+                    )
+                }
+                .help(task.directory.path)
+            }
+
+            Spacer()
+
+            statusBadgeContent()
+
+            actionButtons()
+        }
+    }
+
+    private var iconView: some View {
+        Group {
+            if let image = iconImage {
+                Image(nsImage: image)
+                    .resizable()
+                    .interpolation(.high)
+                    .aspectRatio(contentMode: .fit)
+            } else {
+                Image(systemName: "app.fill")
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+                    .foregroundColor(.secondary.opacity(0.5))
+            }
+        }
+        .padding(4)
+        .background(.ultraThinMaterial)
+        .clipShape(RoundedRectangle(cornerRadius: 10))
+        .overlay(
+            RoundedRectangle(cornerRadius: 10)
+                .strokeBorder(.white.opacity(0.2), lineWidth: 0.5)
+        )
+    }
+}
+
+private struct CardProgressView: View {
+    @ObservedObject var task: NewDownloadTask
+    let tint: Color
+    let isIndeterminate: Bool
+
+    private var clampedProgress: Double {
+        min(max(task.totalProgress, 0), 1)
+    }
+
+    private var currentFileInfo: (name: String, index: Int, total: Int)? {
+        if case .downloading(let info) = task.status {
+            return (info.fileName, info.currentPackageIndex + 1, info.totalPackages)
+        }
+        if let current = task.currentPackage {
+            return (current.fullPackageName, task.completedPackages + 1, max(task.totalPackages, 1))
+        }
+        return nil
+    }
+
+    private var stageText: String? {
+        if case .preparing(let info) = task.status {
+            return info.stage.title
+        }
+        return nil
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            GeometryReader { geometry in
+                ZStack(alignment: .leading) {
+                    Capsule()
+                        .fill(.primary.opacity(0.06))
+                        .frame(height: 8)
+
+                    Capsule()
+                        .fill(
+                            LinearGradient(
+                                colors: [tint.opacity(0.6), tint],
+                                startPoint: .leading,
+                                endPoint: .trailing
+                            )
+                        )
+                        .frame(width: CGFloat(clampedProgress) * geometry.size.width, height: 8)
+                        .shadow(color: tint.opacity(0.4), radius: 4, x: 0, y: 0)
+                        .animation(.linear(duration: 0.3), value: clampedProgress)
+                }
+            }
+            .frame(height: 8)
+
+            HStack(spacing: 6) {
+                HStack(spacing: 4) {
+                    Text(task.formattedDownloadedSize)
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundColor(.primary.opacity(0.8))
+                    Text("/")
+                        .font(.system(size: 11))
+                        .foregroundColor(.secondary.opacity(0.4))
+                    Text(task.formattedTotalSize)
+                        .font(.system(size: 11))
+                        .foregroundColor(.secondary)
+                }
+
+                if let stageText = stageText {
+                    Text("·")
+                        .foregroundColor(.secondary.opacity(0.3))
+                    HStack(spacing: 3) {
+                        Image(systemName: "gear.circle")
+                            .font(.system(size: 9))
+                        Text(stageText)
+                            .font(.system(size: 11))
+                    }
+                    .foregroundColor(.purple.opacity(0.85))
+                }
+
+                Spacer()
+
+                Text("\(Int(clampedProgress * 100))%")
+                    .font(.system(size: 11, weight: .bold))
+                    .foregroundColor(tint)
+
+                if task.totalSpeed > 0 {
+                    Text("·")
+                        .foregroundColor(.secondary.opacity(0.3))
+                    HStack(spacing: 2) {
+                        Image(systemName: "arrow.down").font(.system(size: 8))
+                        Text(DownloadFormatters.speed(task.totalSpeed)).font(.system(size: 11))
+                    }
+                    .foregroundColor(.secondary)
+
+                    let remaining = DownloadFormatters.remainingTime(
+                        total: task.totalSize,
+                        downloaded: task.totalDownloadedSize,
+                        speed: task.totalSpeed
+                    )
+                    if !remaining.isEmpty {
+                        Text("·").foregroundColor(.secondary.opacity(0.3))
+                        HStack(spacing: 2) {
+                            Image(systemName: "clock").font(.system(size: 8))
+                            Text(remaining).font(.system(size: 11))
+                        }
+                        .foregroundColor(.secondary)
+                    }
+                }
+            }
+
+            if let info = currentFileInfo {
+                HStack(spacing: 4) {
+                    Image(systemName: "arrow.down.to.line")
+                        .font(.system(size: 9))
+                        .foregroundColor(.blue.opacity(0.7))
+                    Text(info.name)
+                        .font(.system(size: 11))
+                        .foregroundColor(.primary.opacity(0.75))
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                    Text("(\(info.index)/\(info.total))")
+                        .font(.system(size: 10))
+                        .foregroundColor(.secondary.opacity(0.8))
+                        .monospacedDigit()
+                }
+            }
+        }
+    }
+}
+
+private struct PausedInfoView: View {
+    let info: DownloadStatus.PauseInfo
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "pause.circle.fill")
+                .font(.system(size: 11))
+                .foregroundColor(.orange.opacity(0.85))
+            Text(info.reason.localizedText)
+                .font(.system(size: 11, weight: .medium))
+                .foregroundColor(.orange.opacity(0.9))
+            if !info.resumable {
+                Text("·")
+                    .foregroundColor(.secondary.opacity(0.3))
+                Text(String(localized: "不可恢复"))
+                    .font(.system(size: 10))
+                    .foregroundColor(.red.opacity(0.7))
+            }
+            Spacer()
+            Text(info.timestamp.formatted(date: .omitted, time: .shortened))
+                .font(.system(size: 10))
+                .foregroundColor(.secondary.opacity(0.7))
+        }
+    }
+}
+
+private struct FailedInfoView: View {
+    let info: DownloadStatus.FailureInfo
+    let progressAtFailure: Double
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(alignment: .top, spacing: 6) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .font(.system(size: 11))
+                    .foregroundColor(.red.opacity(0.85))
+                Text(info.message)
+                    .font(.system(size: 11))
+                    .foregroundColor(.red.opacity(0.9))
+                    .lineLimit(3)
+                    .textSelection(.enabled)
+                Spacer()
+            }
+            HStack(spacing: 8) {
+                if progressAtFailure > 0 {
+                    Text("中断于 \(Int(progressAtFailure * 100))%")
+                        .foregroundColor(.secondary.opacity(0.8))
+                }
+                if info.recoverable {
+                    Text("·").foregroundColor(.secondary.opacity(0.3))
+                    Text(String(localized: "可重试"))
+                        .foregroundColor(.blue.opacity(0.85))
+                } else {
+                    Text("·").foregroundColor(.secondary.opacity(0.3))
+                    Text(String(localized: "不可恢复"))
+                        .foregroundColor(.red.opacity(0.75))
+                }
+                Spacer()
+                Text(info.timestamp.formatted(date: .omitted, time: .shortened))
+                    .foregroundColor(.secondary.opacity(0.7))
+            }
+            .font(.system(size: 10, weight: .medium))
+        }
+        .padding(.vertical, 6)
+        .padding(.horizontal, 10)
+        .background(.ultraThinMaterial)
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .fill(Color.red.opacity(0.06))
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+    }
+}
+
+private struct CompletedInfoView: View {
+    @ObservedObject var task: NewDownloadTask
+    let info: DownloadStatus.CompletionInfo
+    let onOpenInFinder: () -> Void
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "checkmark.circle.fill")
+                .font(.system(size: 11))
+                .foregroundColor(.green.opacity(0.85))
+            Text(task.formattedTotalSize)
+                .font(.system(size: 11, weight: .medium))
+                .foregroundColor(.primary.opacity(0.8))
+            if info.totalTime > 0 {
+                Text("·")
+                    .foregroundColor(.secondary.opacity(0.3))
+                Text(String(format: String(localized: "用时 %@"), formatDurationLocal(info.totalTime)))
+                    .font(.system(size: 11))
+                    .foregroundColor(.secondary)
+            }
+            Text("·")
+                .foregroundColor(.secondary.opacity(0.3))
+            Text(info.timestamp.formatted(date: .omitted, time: .shortened))
+                .font(.system(size: 11))
+                .foregroundColor(.secondary)
+            Spacer()
+            Button(action: onOpenInFinder) {
+                HStack(spacing: 4) {
+                    Image(systemName: "folder")
+                        .font(.system(size: 10))
+                    Text(String(localized: "打开目录"))
+                        .font(.system(size: 11, weight: .medium))
+                }
+            }
+            .buttonStyle(GlassButtonStyle(tint: .green))
+        }
+    }
+}
+
+private struct RetryingInfoView: View {
+    let info: DownloadStatus.RetryInfo
+    @State private var now = Date()
+    private let timer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
+
+    private var remainingSeconds: Int {
+        max(0, Int(info.nextRetryDate.timeIntervalSince(now)))
+    }
+
+    var body: some View {
+        HStack(spacing: 6) {
+            ProgressView()
+                .scaleEffect(0.6)
+                .frame(width: 14, height: 14)
+            Text(String(localized: "重试 \(info.attempt)/\(info.maxAttempts)"))
+                .font(.system(size: 11, weight: .medium))
+                .foregroundColor(.yellow.opacity(0.95))
+            if !info.reason.isEmpty {
+                Text("·")
+                    .foregroundColor(.secondary.opacity(0.3))
+                Text(info.reason)
+                    .font(.system(size: 11))
+                    .foregroundColor(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+            }
+            if remainingSeconds > 0 {
+                Text("·")
+                    .foregroundColor(.secondary.opacity(0.3))
+                Text(String(format: String(localized: "%02d:%02d 后重试"), remainingSeconds / 60, remainingSeconds % 60))
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundColor(.orange)
+                    .monospacedDigit()
+            }
+            Spacer()
+        }
+        .onReceive(timer) { now = $0 }
     }
 }
 
