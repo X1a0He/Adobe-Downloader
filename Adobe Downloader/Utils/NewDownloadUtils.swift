@@ -51,6 +51,35 @@ actor AsyncSemaphore {
     }
 }
 
+actor TaskProgressPublishLimiter {
+    private var lastPublishTimes: [UUID: Date] = [:]
+
+    func shouldPublish(taskId: UUID, force: Bool) -> Bool {
+        let now = Date()
+
+        if force {
+            lastPublishTimes[taskId] = now
+            return true
+        }
+
+        guard let lastPublishTime = lastPublishTimes[taskId] else {
+            lastPublishTimes[taskId] = now
+            return true
+        }
+
+        guard now.timeIntervalSince(lastPublishTime) >= NetworkConstants.progressUpdateInterval else {
+            return false
+        }
+
+        lastPublishTimes[taskId] = now
+        return true
+    }
+
+    func reset(taskId: UUID) {
+        lastPublishTimes.removeValue(forKey: taskId)
+    }
+}
+
 actor ConcurrentDownloadProgressManager {
     private var packageProgresses: [String: Double] = [:]
     private var packageSizes: [String: Int64] = [:]
@@ -111,6 +140,8 @@ actor ConcurrentDownloadProgressManager {
 }
 
 class NewDownloadUtils {
+    private let taskProgressPublishLimiter = TaskProgressPublishLimiter()
+
     private class DownloadDelegate: NSObject, URLSessionDownloadDelegate {
         var completionHandler: (URL?, URLResponse?, Error?) -> Void
         var progressHandler: ((Int64, Int64, Int64) -> Void)?
@@ -360,6 +391,10 @@ class NewDownloadUtils {
                 )))
             }
             await globalNetworkManager.saveTask(task)
+            await MainActor.run {
+                globalNetworkManager.updateDockBadge()
+            }
+            await taskProgressPublishLimiter.reset(taskId: task.id)
             cleanupCompletedPackageMetadata(task: task)
             return
         }
@@ -436,7 +471,7 @@ class NewDownloadUtils {
                             dependency.objectWillChange.send()
                             task.completedPackages = task.dependenciesToDownload.reduce(0) { $0 + $1.completedPackages }
                         }
-                        await self.updateTaskProgressDirect(task: task)
+                        await self.updateTaskProgressDirect(task: task, force: true)
                         await globalNetworkManager.saveTask(task)
                         self.cleanupCompletedPackageMetadata(task: task)
 
@@ -445,18 +480,21 @@ class NewDownloadUtils {
                             package.speed = 0
                             package.status = .paused
                         }
+                        await self.updateTaskProgressDirect(task: task, force: true)
 
                     case .cancelled:
                         await MainActor.run {
                             package.speed = 0
                             package.status = .waiting
                         }
+                        await self.updateTaskProgressDirect(task: task, force: true)
 
                     case .error(let err):
                         await MainActor.run {
                             package.speed = 0
                             package.status = .failed(err.localizedDescription ?? "Download error")
                         }
+                        await self.updateTaskProgressDirect(task: task, force: true)
                     }
                 }
             }
@@ -472,6 +510,10 @@ class NewDownloadUtils {
                 )))
             }
             await globalNetworkManager.saveTask(task)
+            await MainActor.run {
+                globalNetworkManager.updateDockBadge()
+            }
+            await taskProgressPublishLimiter.reset(taskId: task.id)
             cleanupCompletedPackageMetadata(task: task)
         }
     }
@@ -631,7 +673,7 @@ class NewDownloadUtils {
             task.objectWillChange.send()
         }
 
-        await updateTaskProgressDirect(task: task)
+        await updateTaskProgressDirect(task: task, force: true)
     }
 
     private func cleanupCompletedPackageMetadata(task: NewDownloadTask) {
@@ -711,7 +753,10 @@ class NewDownloadUtils {
         return result
     }
 
-    private func updateTaskProgressDirect(task: NewDownloadTask) async {
+    private func updateTaskProgressDirect(task: NewDownloadTask, force: Bool = false) async {
+        let shouldPublish = await taskProgressPublishLimiter.shouldPublish(taskId: task.id, force: force)
+        guard shouldPublish else { return }
+
         let allPackages = task.dependenciesToDownload.flatMap { $0.packages }
         let totalSize = allPackages.reduce(Int64(0)) { $0 + $1.downloadSize }
         let totalDownloaded = allPackages.reduce(Int64(0)) { partialResult, package in
@@ -730,6 +775,8 @@ class NewDownloadUtils {
             task.totalProgress = totalProgress
             task.totalSpeed = totalSpeed
             task.objectWillChange.send()
+            globalNetworkManager.updateDockBadge()
+            globalNetworkManager.objectWillChange.send()
         }
     }
 
@@ -853,6 +900,10 @@ class NewDownloadUtils {
                 )))
             }
             await globalNetworkManager.saveTask(task)
+            await MainActor.run {
+                globalNetworkManager.updateDockBadge()
+            }
+            await taskProgressPublishLimiter.reset(taskId: task.id)
         }
     }
 
@@ -902,6 +953,7 @@ class NewDownloadUtils {
                 globalNetworkManager.updateDockBadge()
                 globalNetworkManager.objectWillChange.send()
             }
+            await taskProgressPublishLimiter.reset(taskId: task.id)
         }
     }
 
@@ -928,6 +980,10 @@ class NewDownloadUtils {
                 )))
             }
             await globalNetworkManager.saveTask(task)
+            await MainActor.run {
+                globalNetworkManager.updateDockBadge()
+            }
+            await taskProgressPublishLimiter.reset(taskId: task.id)
             cleanupCompletedPackageMetadata(task: task)
             return
         }
@@ -1055,6 +1111,7 @@ class NewDownloadUtils {
 
                         product.updateCompletedPackages()
                         await globalNetworkManager?.saveTask(task)
+                        globalNetworkManager?.updateDockBadge()
                         globalNetworkManager?.objectWillChange.send()
                         continuation.resume()
                     }
@@ -1097,6 +1154,7 @@ class NewDownloadUtils {
                             lastUpdateTime = now
                             lastBytes = totalBytesWritten
 
+                            globalNetworkManager?.updateDockBadge()
                             globalNetworkManager?.objectWillChange.send()
                         }
                     }
@@ -1395,6 +1453,7 @@ class NewDownloadUtils {
                             lastBytes = totalBytesWritten
 
                             task.objectWillChange.send()
+                            globalNetworkManager?.updateDockBadge()
                             globalNetworkManager?.objectWillChange.send()
 
                             Task {
@@ -1448,8 +1507,10 @@ class NewDownloadUtils {
                 resumable: true
             )))
 
+            globalNetworkManager.updateDockBadge()
             globalNetworkManager.objectWillChange.send()
         }
+        await taskProgressPublishLimiter.reset(taskId: task.id)
         await globalNetworkManager.saveTask(task)
     }
 
@@ -1718,6 +1779,7 @@ class NewDownloadUtils {
                 globalNetworkManager.updateDockBadge()
                 globalNetworkManager.objectWillChange.send()
             }
+            await taskProgressPublishLimiter.reset(taskId: task.id)
         }
     }
 

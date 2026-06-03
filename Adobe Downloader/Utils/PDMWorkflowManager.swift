@@ -14,8 +14,8 @@ enum PDMState: Int, CaseIterable, CustomStringConvertible {
     case startOverlappedExtraction = 5  // State 5: 开始边下载边解压
     case downloadAssetBits = 6          // State 6: 下载资产文件
     case closeOverlappedExtraction = 7  // State 7: 关闭交叉解压
-    case assetSignatureValidation = 8   // State 8: 签名验证
-    case executeAsset = 9               // State 9: 执行资产
+    case assetSignatureValidation = 8   // State 8: 签名验证（官方IDA核验）
+    case executeAsset = 9               // State 9: 执行资产（官方IDA核验）
     case workflowCompletion = 10        // State 10: 完成
 
     var description: String {
@@ -146,10 +146,10 @@ class PDMWorkflowManager {
             try await handleCloseOverlappedExtraction()
 
         case .assetSignatureValidation:
-            await moveToNextState()
+            try await handleAssetSignatureValidation()
 
         case .executeAsset:
-            await moveToNextState()
+            try await handleExecutionOfAsset(destinationDirectory: destinationDirectory)
 
         case .workflowCompletion:
             break
@@ -405,6 +405,70 @@ class PDMWorkflowManager {
         }
 
         progressHandler?(.closeOverlappedExtraction, 1.0)
+        await moveToNextState()
+    }
+
+    private func handleExecutionOfAsset(destinationDirectory: URL) async throws {
+        progressHandler?(.executeAsset, 0)
+
+        let fileName = globalData.downloadFileName.isEmpty ?
+            URL(string: globalData.downloadURL)?.lastPathComponent ?? "asset" :
+            globalData.downloadFileName
+        let assetURL = destinationDirectory.appendingPathComponent(fileName)
+
+        if fileName.lowercased().hasSuffix(".dmg") {
+            let extractor = HDPIMDMGExtractor()
+            let result = try await extractor.extract(
+                request: HDPIMExtractionRequest(
+                    sourceURL: assetURL,
+                    destinationURL: destinationDirectory,
+                    compressionType: "dmg",
+                    packageName: fileName,
+                    validationURL: nil,
+                    isDMG: true,
+                    allowOverlap: false
+                ),
+                cancellationCheck: { [weak self] in !(self?.isRunning ?? false) }
+            )
+            destinationURL = result.extractRoot
+        } else if let extractionResult = overlappedExtractionResult {
+            destinationURL = extractionResult.extractRoot
+        } else {
+            destinationURL = assetURL
+        }
+
+        progressHandler?(.executeAsset, 1.0)
+        await moveToNextState()
+    }
+
+    private func handleAssetSignatureValidation() async throws {
+        progressHandler?(.assetSignatureValidation, 0)
+
+        guard let destination = destinationURL else {
+            await moveToNextState()
+            return
+        }
+
+        if destination.pathExtension.lowercased() == "dmg" ||
+           destination.pathExtension.lowercased() == "pkg" {
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: "/usr/bin/codesign")
+            process.arguments = ["--verify", "--deep", "--strict", destination.path]
+
+            let pipe = Pipe()
+            process.standardError = pipe
+
+            try process.run()
+            process.waitUntilExit()
+
+            if process.terminationStatus != 0 {
+                let data = pipe.fileHandleForReading.readDataToEndOfFile()
+                let output = String(data: data, encoding: .utf8) ?? ""
+                throw PDMError(code: 134, message: "Signature validation failed: \(output)")
+            }
+        }
+
+        progressHandler?(.assetSignatureValidation, 1.0)
         await moveToNextState()
     }
 

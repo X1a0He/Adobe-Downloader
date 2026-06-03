@@ -16,7 +16,7 @@ actor PDMProgressTracker {
     private var lastSpeedSampleBytes: Int64 = 0
     private var currentSpeed: Double = 0
 
-    private let reportInterval: TimeInterval = 0.3
+    private let reportInterval = NetworkConstants.progressUpdateInterval
 
     typealias ProgressCallback = (Int64, Int64, Double) -> Void
     private var callback: ProgressCallback?

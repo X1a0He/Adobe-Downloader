@@ -464,18 +464,21 @@ class NetworkManager: ObservableObject {
     }
 
     func updateDockBadge() {
-        let activeCount = downloadTasks.filter { task in
-            if case .completed = task.totalStatus {
-                return false
-            }
-            return true
-        }.count
-
-        if activeCount > 0 {
-            NSApplication.shared.dockTile.badgeLabel = "\(activeCount)"
-        } else {
-            NSApplication.shared.dockTile.badgeLabel = nil
+        let activeTasks = downloadTasks.filter { $0.status.isActive }
+        let totalSize = activeTasks.reduce(Int64(0)) { $0 + max($1.totalSize, 0) }
+        let downloadedSize = activeTasks.reduce(Int64(0)) {
+            $0 + min(max($1.totalDownloadedSize, 0), max($1.totalSize, 0))
         }
+        let totalSpeed = activeTasks.reduce(0.0) { $0 + max($1.totalSpeed, 0) }
+        let progress = totalSize > 0 ? Double(downloadedSize) / Double(totalSize) : 0
+        let hasCompletedTask = downloadTasks.contains { $0.status.isCompleted }
+
+        DockProgressIndicator.shared.update(
+            progress: progress,
+            taskCount: activeTasks.count,
+            speed: totalSpeed,
+            isCompleted: hasCompletedTask
+        )
     }
 
     func retryFetchData() {

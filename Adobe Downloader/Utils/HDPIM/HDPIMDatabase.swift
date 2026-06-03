@@ -335,9 +335,18 @@ final class HDPIMDatabase {
             throw HDPIMDatabaseError.queryFailed("数据库未打开")
         }
 
+        let legacySnapshot = getInstalledPackageSnapshots(
+            sapCode: package.sapCode,
+            processorFamily: package.processorFamily,
+            packageName: package.packageName,
+            expectedInstallDir: package.installDir
+        ).first
+
+        let packageWithInheritedData = package.withInheritedLegacyData(from: legacySnapshot)
+
         try beginTransaction(name: "HDPIMDatabase-recordInstalledPackage")
         do {
-            try writePackage(package)
+            try writePackage(packageWithInheritedData)
             if let product {
                 try writeProductInstallLocation(
                     sapCode: product.sapCode,
@@ -348,6 +357,16 @@ final class HDPIMDatabase {
                 )
             }
             try commitTransaction(name: "HDPIMDatabase-recordInstalledPackage")
+
+            if let ribsCode = packageWithInheritedData.ribsCoexistenceCode, !ribsCode.isEmpty,
+               let product = product {
+                _ = HDPIMRIBSHelper.addRIBSDependency(
+                    ribsCode: ribsCode,
+                    sapCode: product.sapCode,
+                    baseVersion: product.baseVersion,
+                    productName: product.productName
+                )
+            }
         } catch {
             try? rollbackTransaction(name: "HDPIMDatabase-recordInstalledPackage")
             throw error
@@ -506,6 +525,16 @@ final class HDPIMDatabase {
                 )
             }
             try commitTransaction(name: "HDPIMDatabase-removeInstalledPackages")
+
+            for package in uniquePackages {
+                if let ribsCode = package.ribsCoexistenceCode, !ribsCode.isEmpty {
+                    _ = HDPIMRIBSHelper.removeRIBSDependency(
+                        ribsCode: ribsCode,
+                        sapCode: package.sapCode,
+                        baseVersion: package.productVersion
+                    )
+                }
+            }
         } catch {
             try? rollbackTransaction(name: "HDPIMDatabase-removeInstalledPackages")
             throw error
@@ -1986,5 +2015,31 @@ enum HDPIMDatabaseError: Error, LocalizedError {
         case .queryFailed(let msg):
             return "数据库查询失败: \(msg)"
         }
+    }
+}
+
+extension HDPIMNativePackageContext {
+    func withInheritedLegacyData(from legacy: HDPIMInstalledPackageSnapshot?) -> HDPIMNativePackageContext {
+        guard let legacy = legacy else { return self }
+
+        let newUninstallPath = legacy.uninstallPIMXPath?.isEmpty == false ? legacy.uninstallPIMXPath : uninstallPIMXPath
+        let newUninstallHash = legacy.uninstallPIMXHash256?.isEmpty == false ? nil : (legacy.uninstallPIMXHash?.isEmpty == false ? legacy.uninstallPIMXHash : uninstallPIMXHash)
+        let newUninstallHash256 = legacy.uninstallPIMXHash256?.isEmpty == false ? legacy.uninstallPIMXHash256 : uninstallPIMXHash256
+        let newRepairPath = legacy.repairPIMXPath?.isEmpty == false ? legacy.repairPIMXPath : repairPIMXPath
+        let newRepairHash = legacy.repairPIMXHash256?.isEmpty == false ? nil : (legacy.repairPIMXHash?.isEmpty == false ? legacy.repairPIMXHash : repairPIMXHash)
+        let newRepairHash256 = legacy.repairPIMXHash256?.isEmpty == false ? legacy.repairPIMXHash256 : repairPIMXHash256
+        let mergedFolders = Array(Set(targetFolders + legacy.targetFolders))
+
+        return HDPIMNativePackageContext(
+            sapCode: sapCode, productVersion: productVersion, platform: platform,
+            packageName: packageName, packageVersion: packageVersion, packageType: packageType,
+            packageProcessorFamily: packageProcessorFamily, sequenceNumber: sequenceNumber,
+            installDir: installDir, uninstallPIMXPath: newUninstallPath,
+            uninstallPIMXHash: newUninstallHash, uninstallPIMXHash256: newUninstallHash256,
+            repairPIMXPath: newRepairPath, repairPIMXHash: newRepairHash,
+            repairPIMXHash256: newRepairHash256, installSize: installSize,
+            targetFolders: mergedFolders, ribsCoexistenceCode: ribsCoexistenceCode,
+            module: module, uwpInfoXML: uwpInfoXML, isShared: isShared
+        )
     }
 }
