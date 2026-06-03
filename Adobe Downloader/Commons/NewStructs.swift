@@ -259,6 +259,7 @@ class Package: Identifiable, ObservableObject, Codable {
     @Published var isSelected: Bool = false
     var isRequired: Bool = false
     var isDefaultSelected: Bool = false
+    var isAdobeDownloaderPreselected: Bool = false
     var isOfficiallyEligible: Bool = true
     var officialFilterReasons: [String] = []
     var condition: String = ""
@@ -304,6 +305,7 @@ class Package: Identifiable, ObservableObject, Codable {
         condition: String = "",
         isRequired: Bool = false,
         isDefaultSelected: Bool = false,
+        isAdobeDownloaderPreselected: Bool = false,
         isOfficiallyEligible: Bool = true,
         officialFilterReasons: [String] = [],
         validationURL: String? = nil
@@ -316,7 +318,8 @@ class Package: Identifiable, ObservableObject, Codable {
         self.validationURL = validationURL
         self.condition = condition
         self.isRequired = isRequired
-        self.isDefaultSelected = isDefaultSelected || isRequired
+        self.isDefaultSelected = isDefaultSelected || isAdobeDownloaderPreselected || isRequired
+        self.isAdobeDownloaderPreselected = isAdobeDownloaderPreselected
         self.isOfficiallyEligible = isOfficiallyEligible
         self.officialFilterReasons = officialFilterReasons
         self.isSelected = self.isDefaultSelected
@@ -371,7 +374,7 @@ class Package: Identifiable, ObservableObject, Codable {
     }
 
     enum CodingKeys: String, CodingKey {
-        case id, type, fullPackageName, downloadSize, downloadURL, packageVersion, validationURL, condition, isRequired, isDefaultSelected, isOfficiallyEligible, officialFilterReasons, isSelected, hostValidation
+        case id, type, fullPackageName, downloadSize, downloadURL, packageVersion, validationURL, condition, isRequired, isDefaultSelected, isAdobeDownloaderPreselected, isOfficiallyEligible, officialFilterReasons, isSelected, hostValidation
     }
 
     func encode(to encoder: Encoder) throws {
@@ -386,6 +389,7 @@ class Package: Identifiable, ObservableObject, Codable {
         try container.encode(condition, forKey: .condition)
         try container.encode(isRequired, forKey: .isRequired)
         try container.encode(isDefaultSelected, forKey: .isDefaultSelected)
+        try container.encode(isAdobeDownloaderPreselected, forKey: .isAdobeDownloaderPreselected)
         try container.encode(isOfficiallyEligible, forKey: .isOfficiallyEligible)
         try container.encode(officialFilterReasons, forKey: .officialFilterReasons)
         try container.encode(isSelected, forKey: .isSelected)
@@ -403,7 +407,8 @@ class Package: Identifiable, ObservableObject, Codable {
         validationURL = try container.decodeIfPresent(String.self, forKey: .validationURL)
         condition = try container.decodeIfPresent(String.self, forKey: .condition) ?? ""
         isRequired = try container.decodeIfPresent(Bool.self, forKey: .isRequired) ?? false
-        isDefaultSelected = (try container.decodeIfPresent(Bool.self, forKey: .isDefaultSelected) ?? false) || isRequired
+        isAdobeDownloaderPreselected = try container.decodeIfPresent(Bool.self, forKey: .isAdobeDownloaderPreselected) ?? false
+        isDefaultSelected = (try container.decodeIfPresent(Bool.self, forKey: .isDefaultSelected) ?? false) || isAdobeDownloaderPreselected || isRequired
         isOfficiallyEligible = try container.decodeIfPresent(Bool.self, forKey: .isOfficiallyEligible) ?? true
         officialFilterReasons = try container.decodeIfPresent([String].self, forKey: .officialFilterReasons) ?? []
         isSelected = (try container.decodeIfPresent(Bool.self, forKey: .isSelected) ?? false) || isRequired || isDefaultSelected

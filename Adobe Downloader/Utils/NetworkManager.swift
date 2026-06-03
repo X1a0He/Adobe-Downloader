@@ -454,6 +454,15 @@ class NetworkManager: ObservableObject {
         return nil
     }
 
+    func isProductInstalled(productId: String, version: String, platform: String) -> Bool {
+        return HDPIMDatabase.shared.isProductReallyInstalled(
+            sapCode: productId,
+            version: version,
+            platform: platform,
+            validateFiles: true
+        )
+    }
+
     func updateDockBadge() {
         let activeCount = downloadTasks.filter { task in
             if case .completed = task.totalStatus {

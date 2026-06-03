@@ -31,62 +31,62 @@ struct TaskCard: View {
                 statusBadgeContent: { statusBadge },
                 actionButtons: { actionButtons }
             )
-            .padding(.horizontal, 16)
-            .padding(.top, 14)
-            .padding(.bottom, 10)
+            .padding(.horizontal, 24)
+            .padding(.top, 20)
+            .padding(.bottom, 16)
 
             switch task.status {
             case .downloading, .preparing, .waiting:
                 CardProgressView(task: task, tint: task.status.progressBarColor, isIndeterminate: false)
-                    .padding(.horizontal, 16)
-                    .padding(.bottom, 10)
+                    .padding(.horizontal, 24)
+                    .padding(.bottom, 16)
 
             case .paused(let info):
                 CardProgressView(task: task, tint: .orange, isIndeterminate: false)
-                    .padding(.horizontal, 16)
-                    .padding(.bottom, 6)
+                    .padding(.horizontal, 24)
+                    .padding(.bottom, 12)
                 PausedInfoView(info: info)
-                    .padding(.horizontal, 16)
-                    .padding(.bottom, 10)
+                    .padding(.horizontal, 24)
+                    .padding(.bottom, 16)
 
             case .failed(let info):
                 FailedInfoView(info: info, progressAtFailure: clampedTotalProgress)
-                    .padding(.horizontal, 16)
-                    .padding(.bottom, 10)
+                    .padding(.horizontal, 24)
+                    .padding(.bottom, 16)
 
             case .completed(let info):
                 CompletedInfoView(task: task, info: info, onOpenInFinder: openInFinder)
-                    .padding(.horizontal, 16)
-                    .padding(.bottom, 10)
+                    .padding(.horizontal, 24)
+                    .padding(.bottom, 16)
 
             case .retrying(let info):
                 RetryingInfoView(info: info)
-                    .padding(.horizontal, 16)
-                    .padding(.bottom, 10)
+                    .padding(.horizontal, 24)
+                    .padding(.bottom, 16)
             }
 
             if !task.dependenciesToDownload.isEmpty {
                 Divider()
-                    .opacity(0.5)
-                    .padding(.horizontal, 16)
+                    .opacity(0.3)
+                    .padding(.horizontal, 24)
+                    .padding(.vertical, 4)
                 packageToggle
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 8)
+                    .padding(.horizontal, 24)
+                    .padding(.vertical, 12)
 
                 if isExpanded {
                     TaskCardPackageList(task: task)
-                        .padding(.horizontal, 16)
-                        .padding(.bottom, 12)
+                        .padding(.horizontal, 24)
+                        .padding(.bottom, 16)
                 }
             }
         }
-        .background(.regularMaterial)
-        .clipShape(RoundedRectangle(cornerRadius: 14))
+        .background(Color(.windowBackgroundColor).opacity(0.5))
+        .clipShape(RoundedRectangle(cornerRadius: 16))
         .overlay(
-            RoundedRectangle(cornerRadius: 14)
-                .strokeBorder(.white.opacity(0.15), lineWidth: 0.5)
+            RoundedRectangle(cornerRadius: 16)
+                .strokeBorder(Color.secondary.opacity(0.2), lineWidth: 1)
         )
-        .shadow(color: .black.opacity(0.08), radius: 8, x: 0, y: 4)
         .animation(.easeInOut(duration: 0.2), value: task.totalStatus)
         .contextMenu { contextMenuItems }
         .alert(
@@ -228,11 +228,10 @@ struct TaskCard: View {
 
     private func handleAction(_ action: TaskAction) {
         if action == .install {
-            do {
-                _ = try PrivilegedHelperAdapter.shared.getHelperProxy()
+            if HelperManager.shared.isInstalled {
                 isInstalling = true
                 Task { await globalNetworkManager.installProduct(at: task.directory) }
-            } catch {
+            } else {
                 showHelperAlert = true
             }
             return

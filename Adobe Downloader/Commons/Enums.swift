@@ -191,7 +191,6 @@ enum DownloadStatus: Equatable, Codable {
             case creatingInstaller
             case signingApp
             case fetchingInfo
-            case validatingSetup
         }
     }
     

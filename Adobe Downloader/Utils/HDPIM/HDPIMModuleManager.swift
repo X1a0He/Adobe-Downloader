@@ -4,8 +4,10 @@ struct HDPIMModule {
     let id: String
     let displayName: String
     let referencePackages: [String]
+    let properties: [String: String]
     var isInstalled: Bool = false
     var isSelected: Bool = true
+    var isBaseline: Bool = false
 }
 
 enum ModuleAction {
@@ -23,7 +25,8 @@ final class HDPIMModuleManager {
             HDPIMModule(
                 id: parsed.id,
                 displayName: parsed.id,
-                referencePackages: parsed.referencePackages
+                referencePackages: parsed.referencePackages,
+                properties: parsed.properties
             )
         }
     }
@@ -85,8 +88,31 @@ final class HDPIMModuleManager {
         )
     }
 
-    func evaluateModuleConfiguration(package: ParsedPackage, installType: String) -> Bool {
+    func evaluateModuleConfiguration(package: ParsedPackage, installType: String, modules: [HDPIMModule]) -> Bool {
         if installType == "complete" { return true }
-        return package.type.lowercased() == "baseline"
+        if package.type.lowercased() == "core" { return true }
+
+        for module in modules where module.isSelected {
+            for refPkg in module.referencePackages {
+                if refPkg == package.packageName || refPkg == package.fullPackageName {
+                    return true
+                }
+            }
+        }
+        return false
+    }
+
+    func validateModuleReferences(modules: [HDPIMModule], packages: [ParsedPackage]) -> [String] {
+        let packageNames = Set(packages.map(\.packageName) + packages.map(\.fullPackageName))
+        var missingPackages: [String] = []
+
+        for module in modules {
+            for refPkg in module.referencePackages {
+                if !packageNames.contains(refPkg) {
+                    missingPackages.append("Module \(module.id): missing package \(refPkg)")
+                }
+            }
+        }
+        return missingPackages
     }
 }

@@ -17,39 +17,6 @@ private enum GridMetrics {
     }
 }
 
-private enum ProductFilter: String, CaseIterable, Identifiable, Hashable {
-    case all, downloaded, downloading, failed
-
-    var id: String { rawValue }
-
-    var title: String {
-        switch self {
-        case .all:         return String(localized: "全部")
-        case .downloaded:  return String(localized: "已下载")
-        case .downloading: return String(localized: "下载中")
-        case .failed:      return String(localized: "失败")
-        }
-    }
-
-    var icon: String {
-        switch self {
-        case .all:         return "square.grid.2x2"
-        case .downloaded:  return "checkmark.circle"
-        case .downloading: return "arrow.down.circle"
-        case .failed:      return "xmark.circle"
-        }
-    }
-
-    var tint: Color {
-        switch self {
-        case .all:         return .blue
-        case .downloaded:  return .green
-        case .downloading: return .blue
-        case .failed:      return .red
-        }
-    }
-}
-
 struct MainContentView: View {
     let loadingState: LoadingState
     let filteredProducts: [UniqueProduct]
@@ -58,22 +25,9 @@ struct MainContentView: View {
     let onOpenDownloadManager: () -> Void
 
     @ObservedObject private var networkManager = globalNetworkManager
-    @State private var activeFilter: ProductFilter = .all
 
     var body: some View {
         VStack(spacing: 0) {
-            StatusChipStrip(activeFilter: $activeFilter, counts: statusCounts)
-                .background(
-                    Rectangle()
-                        .fill(.ultraThinMaterial)
-                        .overlay(
-                            Rectangle()
-                                .frame(height: 0.5)
-                                .foregroundColor(.secondary.opacity(0.15)),
-                            alignment: .bottom
-                        )
-                )
-
             ActiveDownloadsBanner(
                 tasks: networkManager.downloadTasks,
                 onTap: onOpenDownloadManager
@@ -88,14 +42,12 @@ struct MainContentView: View {
                     LoadingFailedView(error: error, onRetry: onRetry)
 
                 case .success:
-                    let visible = applyStatusFilter(filteredProducts)
-                    if visible.isEmpty {
-                        EmptyStateView(searchText: searchText, filter: activeFilter)
+                    if filteredProducts.isEmpty {
+                        EmptyStateView(searchText: searchText)
                     } else {
                         FeedLayout(
-                            products: visible,
-                            searchText: searchText,
-                            activeFilter: activeFilter
+                            products: filteredProducts,
+                            searchText: searchText
                         )
                     }
                 }
@@ -104,66 +56,10 @@ struct MainContentView: View {
         }
         .background(Color(.clear))
     }
-
-    private var statusCounts: [ProductFilter: Int] {
-        var result: [ProductFilter: Int] = [.all: filteredProducts.count]
-        var downloaded = Set<String>()
-        var downloading = Set<String>()
-        var failed = Set<String>()
-
-        for task in networkManager.downloadTasks {
-            switch task.status {
-            case .completed:
-                downloaded.insert(task.productId)
-            case .downloading, .preparing, .waiting, .retrying, .paused:
-                downloading.insert(task.productId)
-            case .failed:
-                failed.insert(task.productId)
-            }
-        }
-
-        let ids = Set(filteredProducts.map(\.id))
-        result[.downloaded] = downloaded.intersection(ids).count
-        result[.downloading] = downloading.intersection(ids).count
-        result[.failed] = failed.intersection(ids).count
-        return result
-    }
-
-    private func applyStatusFilter(_ products: [UniqueProduct]) -> [UniqueProduct] {
-        guard activeFilter != .all else { return products }
-        let tasks = networkManager.downloadTasks
-        switch activeFilter {
-        case .all:
-            return products
-        case .downloaded:
-            let ids = Set(tasks.compactMap { task -> String? in
-                if case .completed = task.status { return task.productId }
-                return nil
-            })
-            return products.filter { ids.contains($0.id) }
-        case .downloading:
-            let ids = Set(tasks.compactMap { task -> String? in
-                switch task.status {
-                case .downloading, .preparing, .waiting, .retrying, .paused:
-                    return task.productId
-                default:
-                    return nil
-                }
-            })
-            return products.filter { ids.contains($0.id) }
-        case .failed:
-            let ids = Set(tasks.compactMap { task -> String? in
-                if case .failed = task.status { return task.productId }
-                return nil
-            })
-            return products.filter { ids.contains($0.id) }
-        }
-    }
 }
 
 struct EmptyStateView: View {
     let searchText: String
-    fileprivate var filter: ProductFilter = .all
 
     var body: some View {
         VStack(spacing: 14) {
@@ -189,123 +85,30 @@ struct EmptyStateView: View {
         .padding(40)
     }
 
-    init(searchText: String) {
-        self.searchText = searchText
-        self.filter = .all
-    }
-
-    fileprivate init(searchText: String, filter: ProductFilter) {
-        self.searchText = searchText
-        self.filter = filter
-    }
-
     private var iconName: String {
-        if !searchText.isEmpty { return "magnifyingglass" }
-        switch filter {
-        case .all:         return "tray"
-        case .downloaded:  return "checkmark.circle"
-        case .downloading: return "arrow.down.circle"
-        case .failed:      return "xmark.circle"
-        }
+        searchText.isEmpty ? "tray" : "magnifyingglass"
     }
 
     private var primaryMessage: String {
-        if !searchText.isEmpty {
-            return String(localized: "未找到 \"\(searchText)\" 相关产品")
-        }
-        switch filter {
-        case .all:         return String(localized: "暂无产品")
-        case .downloaded:  return String(localized: "尚无已下载的产品")
-        case .downloading: return String(localized: "当前没有下载中的任务")
-        case .failed:      return String(localized: "没有失败的任务")
-        }
+        searchText.isEmpty
+            ? String(localized: "暂无产品")
+            : String(localized: "未找到 \"\(searchText)\" 相关产品")
     }
 
     private var secondaryMessage: String {
-        if !searchText.isEmpty {
-            return String(localized: "尝试换一个关键词，或清空搜索查看全部")
-        }
-        switch filter {
-        case .all:         return String(localized: "请稍后再试，或到设置中切换 API 版本")
-        case .downloaded:  return String(localized: "从全部产品中选择并下载，完成后会在这里展示")
-        case .downloading: return String(localized: "选择一款产品开始下载任务")
-        case .failed:      return String(localized: "一切就绪，没有需要处理的任务")
-        }
-    }
-}
-
-private struct StatusChipStrip: View {
-    @Binding var activeFilter: ProductFilter
-    let counts: [ProductFilter: Int]
-
-    var body: some View {
-        HStack(spacing: 8) {
-            ForEach(ProductFilter.allCases) { filter in
-                StatusChip(
-                    filter: filter,
-                    count: counts[filter] ?? 0,
-                    isActive: filter == activeFilter,
-                    onTap: {
-                        withAnimation(.easeInOut(duration: 0.18)) {
-                            activeFilter = filter
-                        }
-                    }
-                )
-            }
-            Spacer(minLength: 0)
-        }
-        .padding(.horizontal, 20)
-        .padding(.vertical, 10)
-    }
-}
-
-private struct StatusChip: View {
-    let filter: ProductFilter
-    let count: Int
-    let isActive: Bool
-    let onTap: () -> Void
-
-    var body: some View {
-        Button(action: onTap) {
-            HStack(spacing: 5) {
-                Image(systemName: filter.icon)
-                    .font(.system(size: 11, weight: .medium))
-                Text(filter.title)
-                    .font(.system(size: 12, weight: isActive ? .semibold : .medium))
-                if count > 0 {
-                    Text("\(count)")
-                        .font(.system(size: 10, weight: .semibold))
-                        .monospacedDigit()
-                        .padding(.horizontal, 4)
-                        .padding(.vertical, 1)
-                        .background(
-                            Capsule()
-                                .fill(isActive ? filter.tint.opacity(0.25) : Color.secondary.opacity(0.12))
-                        )
-                }
-            }
-            .foregroundColor(isActive ? filter.tint : .primary.opacity(0.8))
-            .padding(.horizontal, 12)
-            .padding(.vertical, 6)
-            .background(
-                RoundedRectangle(cornerRadius: 8)
-                    .fill(isActive ? filter.tint.opacity(0.12) : Color.clear)
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 8)
-                    .strokeBorder(
-                        isActive ? filter.tint.opacity(0.25) : Color.secondary.opacity(0.15),
-                        lineWidth: 0.5
-                    )
-            )
-        }
-        .buttonStyle(.plain)
+        searchText.isEmpty
+            ? String(localized: "请稍后再试，或到设置中切换 API 版本")
+            : String(localized: "尝试换一个关键词，或清空搜索查看全部")
     }
 }
 
 private struct ActiveDownloadsBanner: View {
     let tasks: [NewDownloadTask]
     let onTap: () -> Void
+
+    @State private var displaySpeed: Double = 0
+    @State private var displayRemaining: Int64 = 0
+    @State private var displayCount: Int = 0
 
     private var activeTasks: [NewDownloadTask] {
         tasks.filter { $0.status.isActive }
@@ -335,25 +138,25 @@ private struct ActiveDownloadsBanner: View {
                     }
 
                     VStack(alignment: .leading, spacing: 2) {
-                        Text("\(activeTasks.count) 个下载任务进行中")
+                        Text("\(displayCount) 个下载任务进行中")
                             .font(.system(size: 12, weight: .semibold))
                             .foregroundColor(.primary.opacity(0.9))
 
                         HStack(spacing: 6) {
-                            if totalSpeed > 0 {
+                            if displaySpeed > 0 {
                                 HStack(spacing: 2) {
                                     Image(systemName: "arrow.down").font(.system(size: 9))
-                                    Text(DownloadFormatters.speed(totalSpeed))
+                                    Text(DownloadFormatters.speed(displaySpeed))
                                         .font(.system(size: 11))
                                         .monospacedDigit()
                                 }
                                 .foregroundColor(.blue.opacity(0.85))
 
-                                if remainingBytes > 0 {
+                                if displayRemaining > 0 {
                                     let remaining = DownloadFormatters.remainingTime(
-                                        total: remainingBytes,
+                                        total: displayRemaining,
                                         downloaded: 0,
-                                        speed: totalSpeed
+                                        speed: displaySpeed
                                     )
                                     if !remaining.isEmpty {
                                         Text("·")
@@ -390,12 +193,7 @@ private struct ActiveDownloadsBanner: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .background(
-                ZStack {
-                    Rectangle().fill(.ultraThinMaterial)
-                    Color.blue.opacity(0.04)
-                }
-            )
+            .background(Color(.windowBackgroundColor).opacity(0.95))
             .overlay(
                 Rectangle()
                     .frame(height: 0.5)
@@ -403,14 +201,30 @@ private struct ActiveDownloadsBanner: View {
                 alignment: .bottom
             )
             .transition(.move(edge: .top).combined(with: .opacity))
+            .onAppear {
+                updateDisplayValues()
+            }
+            .onChange(of: tasks.count) { _ in
+                updateDisplayValues()
+            }
+            .onReceive(Timer.publish(every: 0.5, on: .main, in: .common).autoconnect()) { _ in
+                if !activeTasks.isEmpty {
+                    updateDisplayValues()
+                }
+            }
         }
+    }
+
+    private func updateDisplayValues() {
+        displayCount = activeTasks.count
+        displaySpeed = totalSpeed
+        displayRemaining = remainingBytes
     }
 }
 
 private struct FeedLayout: View {
     let products: [UniqueProduct]
     let searchText: String
-    fileprivate let activeFilter: ProductFilter
 
     var body: some View {
         GeometryReader { geo in
@@ -424,7 +238,6 @@ private struct FeedLayout: View {
                         ForEach(Array(products.enumerated()), id: \.element.id) { index, product in
                             AppCardView(uniqueProduct: product)
                                 .id(product.id)
-                                .modifier(AppearAnimationModifier(delay: min(Double(index) * 0.02, 0.24)))
                         }
                     }
                     .padding(.horizontal, 16)
@@ -438,15 +251,9 @@ private struct FeedLayout: View {
     }
 
     private var sectionTitle: String {
-        if !searchText.isEmpty {
-            return String(localized: "搜索结果")
-        }
-        switch activeFilter {
-        case .all:         return String(localized: "全部产品")
-        case .downloaded:  return String(localized: "已下载")
-        case .downloading: return String(localized: "下载中")
-        case .failed:      return String(localized: "失败任务")
-        }
+        searchText.isEmpty
+            ? String(localized: "全部产品")
+            : String(localized: "搜索结果")
     }
 }
 
@@ -506,12 +313,7 @@ private struct FeedFooterView: View {
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 8)
-        .background(
-            ZStack {
-                Rectangle().fill(.ultraThinMaterial)
-                Color(.windowBackgroundColor).opacity(0.3)
-            }
-        )
+        .background(Color(.windowBackgroundColor).opacity(0.95))
         .overlay(
             Rectangle()
                 .frame(height: 0.5)

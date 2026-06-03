@@ -95,15 +95,7 @@ enum HDPIMCommandExecutor {
             return try await executeLocalShell(command)
         }
 
-        return try await withCheckedThrowingContinuation { continuation in
-            PrivilegedHelperAdapter.shared.executeCommand(command) { result in
-                if result.lowercased().contains("error") && !result.lowercased().contains("stderr") {
-                    continuation.resume(returning: result)
-                } else {
-                    continuation.resume(returning: result)
-                }
-            }
-        }
+        return try await HelperManager.shared.executeShell(command)
     }
 
     static func executeShellChecked(

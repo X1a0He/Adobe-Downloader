@@ -7,7 +7,6 @@ extension DownloadStatus.PrepareInfo.PrepareStage {
         case .creatingInstaller: return String(localized: "创建安装器")
         case .signingApp:        return String(localized: "签名应用")
         case .fetchingInfo:      return String(localized: "获取清单")
-        case .validatingSetup:   return String(localized: "验证设置")
         }
     }
 }

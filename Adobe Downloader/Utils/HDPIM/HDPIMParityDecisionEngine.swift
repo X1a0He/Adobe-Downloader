@@ -71,6 +71,7 @@ struct HDPIMResolvedPackageDecision {
     let packageVersion: String
     let isRequired: Bool
     let isSelectedByDefault: Bool
+    let isAdobeDownloaderPreselected: Bool
     let isOfficiallyEligible: Bool
     let officialFilterReasons: [String]
     let moduleIds: [String]
@@ -492,6 +493,11 @@ final class HDPIMParityDecisionEngine {
                 installedProducts: installedProducts
             )
             let skipReason = shouldSkipProduct ? "已安装同版本或更高版本依赖" : nil
+            let selectedModuleIds = defaultSelectedModuleIds(
+                sapCode: dependencySeed.sapCode,
+                applicationInfo: applicationInfo,
+                requestedLanguage: requestedLanguage
+            )
             let packageDecisions = shouldSkipProduct ? [] : buildPackageDecisions(
                 workflow: .download,
                 sapCode: dependencySeed.sapCode,
@@ -500,7 +506,7 @@ final class HDPIMParityDecisionEngine {
                 applicationInfo: applicationInfo,
                 requestedLanguage: requestedLanguage,
                 targetArchitecture: targetArchitecture,
-                selectedModuleIds: Set(),
+                selectedModuleIds: selectedModuleIds,
                 expectedInstallDir: expandedInstallDirectory(for: applicationInfo),
                 databaseAvailable: databaseAvailable
             )
@@ -637,6 +643,7 @@ final class HDPIMParityDecisionEngine {
                     condition: packageDecision.parsedPackage.condition,
                     isRequired: packageDecision.isRequired,
                     isDefaultSelected: packageDecision.isSelectedByDefault,
+                    isAdobeDownloaderPreselected: packageDecision.isAdobeDownloaderPreselected,
                     isOfficiallyEligible: packageDecision.isOfficiallyEligible,
                     officialFilterReasons: packageDecision.officialFilterReasons,
                     validationURL: packageDecision.parsedPackage.validationURLType2
@@ -719,6 +726,7 @@ final class HDPIMParityDecisionEngine {
                     packageVersion: packageDecision.packageVersion,
                     isRequired: packageDecision.isRequired,
                     isSelectedByDefault: packageDecision.isSelectedByDefault,
+                    isAdobeDownloaderPreselected: packageDecision.isAdobeDownloaderPreselected,
                     isOfficiallyEligible: packageDecision.isOfficiallyEligible,
                     officialFilterReasons: packageDecision.officialFilterReasons,
                     moduleIds: packageDecision.moduleIds,
@@ -1469,8 +1477,13 @@ final class HDPIMParityDecisionEngine {
 
             if workflow == .download {
                 var officialFilterReasons: [String] = []
+                let isAdobeDownloaderPreselected = sapCode.uppercased() == "PHSP"
+                    && (
+                        parsedPackage.packageName.localizedCaseInsensitiveContains("CafModels")
+                        || parsedPackage.fullPackageName.localizedCaseInsensitiveContains("CafModels")
+                    )
 
-                if !passesModuleSelection {
+                if !passesModuleSelection && !isAdobeDownloaderPreselected {
                     officialFilterReasons.append("模块配置不匹配")
                 }
 
@@ -1487,12 +1500,15 @@ final class HDPIMParityDecisionEngine {
                 }
 
                 let isOfficiallyEligible = officialFilterReasons.isEmpty
-                let isLanguageScopedPackage = parsedPackage.condition.localizedCaseInsensitiveContains("[installLanguage]")
-                let isRuleRequiredPackage = parsedPackage.fullPackageName.localizedCaseInsensitiveContains("SuperCafModels")
                 let isRequired = isOfficiallyEligible && (
                     isCorePackage
-                    || isLanguageScopedPackage
-                    || isRuleRequiredPackage
+                )
+                let hasModuleCatalog = !applicationInfo.modules.isEmpty
+                let isSelectedByDefault = isOfficiallyEligible && (
+                    isRequired
+                    || isAdobeDownloaderPreselected
+                    || (!hasModuleCatalog && passesModuleSelection)
+                    || (hasModuleCatalog && !moduleIds.isEmpty && passesModuleSelection)
                 )
                 let skipReason = isOfficiallyEligible ? nil : officialFilterReasons.joined(separator: "；")
 
@@ -1505,7 +1521,8 @@ final class HDPIMParityDecisionEngine {
                         parsedPackage: parsedPackage,
                         packageVersion: packageVersion,
                         isRequired: isRequired,
-                        isSelectedByDefault: isOfficiallyEligible && !isRequired,
+                        isSelectedByDefault: isSelectedByDefault && !isRequired,
+                        isAdobeDownloaderPreselected: isOfficiallyEligible && isAdobeDownloaderPreselected && !isRequired,
                         isOfficiallyEligible: isOfficiallyEligible,
                         officialFilterReasons: officialFilterReasons,
                         moduleIds: Array(Set(moduleIds)).sorted(),
@@ -1560,6 +1577,7 @@ final class HDPIMParityDecisionEngine {
                     packageVersion: packageVersion,
                     isRequired: isRequired,
                     isSelectedByDefault: true,
+                    isAdobeDownloaderPreselected: false,
                     isOfficiallyEligible: true,
                     officialFilterReasons: [],
                     moduleIds: Array(Set(moduleIds)).sorted(),
@@ -1580,12 +1598,16 @@ final class HDPIMParityDecisionEngine {
         selectedModuleIds: Set<String>,
         workflow: HDPIMParityWorkflow
     ) -> Bool {
-        if applicationInfo.modules.isEmpty || selectedModuleIds.isEmpty {
+        if applicationInfo.modules.isEmpty {
             return true
         }
 
         if package.type.lowercased() == "core" {
             return true
+        }
+
+        if selectedModuleIds.isEmpty {
+            return workflow == .install
         }
 
         let selectedModules = applicationInfo.modules.filter { selectedModuleIds.contains($0.id) }
@@ -1598,6 +1620,80 @@ final class HDPIMParityDecisionEngine {
                 || module.referencePackages.contains(package.fullPackageName)
                 || (!package.aliasPackageName.isEmpty && module.referencePackages.contains(package.aliasPackageName))
         }
+    }
+
+    private func defaultSelectedModuleIds(
+        sapCode: String,
+        applicationInfo: ApplicationInfo,
+        requestedLanguage: String
+    ) -> Set<String> {
+        guard !applicationInfo.modules.isEmpty else {
+            return []
+        }
+
+        let languageTokens = languageModuleTokens(requestedLanguage)
+        guard !languageTokens.isEmpty else {
+            return []
+        }
+
+        let normalizedSapCode = sapCode.lowercased()
+        let selectedIds = applicationInfo.modules.compactMap { module -> String? in
+            let normalizedId = module.id.lowercased()
+            guard languageTokens.contains(where: { normalizedId.hasSuffix("-esl_lp_\($0)") }) else {
+                return nil
+            }
+            if normalizedId.hasPrefix("\(normalizedSapCode)-") || normalizedId.contains("-esl_lp_") {
+                return module.id
+            }
+            return nil
+        }
+
+        return Set(selectedIds)
+    }
+
+    private func languageModuleTokens(_ requestedLanguage: String) -> [String] {
+        let locale = firstInstallLanguageToken(requestedLanguage)
+            .replacingOccurrences(of: "-", with: "_")
+            .lowercased()
+        guard !locale.isEmpty, locale != "all" else {
+            return []
+        }
+
+        let languageCode = locale.split(separator: "_").first.map(String.init) ?? locale
+        var tokens: [String] = []
+
+        func append(_ token: String) {
+            if !token.isEmpty, !tokens.contains(token) {
+                tokens.append(token)
+            }
+        }
+
+        switch locale {
+        case "zh_cn", "zh_sg", "zh_hans":
+            append("cmn")
+        case "zh_tw", "zh_hk", "zh_mo", "zh_hant":
+            append("yue")
+        case "pt_br", "pt_pt":
+            append("pt")
+        case "nb_no", "nn_no", "no_no":
+            append("no")
+        default:
+            break
+        }
+
+        switch languageCode {
+        case "zh":
+            append("cmn")
+            append("yue")
+        case "pt":
+            append("pt")
+        case "nb", "nn", "no":
+            append("no")
+        default:
+            append(languageCode)
+        }
+
+        return tokens
     }
 
     private func evaluateCondition(_ condition: String, context: HDPIMParityConditionContext) -> Bool {

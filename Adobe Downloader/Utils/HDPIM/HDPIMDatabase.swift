@@ -258,6 +258,8 @@ final class HDPIMDatabase {
     private var db: OpaquePointer?
     private let dbPath: URL
 
+    var dbHandle: OpaquePointer? { db }
+
     private init() {
         let appSupport = URL(fileURLWithPath: "/Library/Application Support", isDirectory: true)
         let capsDir = appSupport
@@ -284,6 +286,13 @@ final class HDPIMDatabase {
             close()
             throw error
         }
+    }
+
+    func openReadOnly() throws {
+        if sqlite3_open_v2(dbPath.path, &db, SQLITE_OPEN_READONLY, nil) != SQLITE_OK {
+            throw HDPIMDatabaseError.openFailed(lastErrorMessage())
+        }
+        sqlite3_busy_timeout(db, 1000)
     }
 
     func close() {
@@ -528,6 +537,13 @@ final class HDPIMDatabase {
             return sqlite3_column_int(stmt, 0) > 0
         }
         return false
+    }
+
+    func isProductReallyInstalled(sapCode: String, version: String, platform: String, validateFiles: Bool = false) -> Bool {
+        if db == nil {
+            try? openReadOnly()
+        }
+        return isInstalled(sapCode: sapCode, version: version)
     }
 
     func getInstalledPackages(sapCode: String, version: String) -> [HDPIMInstallRecord] {

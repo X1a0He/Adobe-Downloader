@@ -58,18 +58,21 @@ actor InstallManager {
             throw InstallError.installationFailed("找不到 driver.xml 文件")
         }
 
-        let encodedProductDir = Data(preparedSource.url.path.utf8).base64EncodedString()
-        let encodedUserHome = Data(NSHomeDirectory().utf8).base64EncodedString()
+        let productDir = preparedSource.url.path
+        let userHome = NSHomeDirectory()
         let executablePath = Bundle.main.executableURL?.path ?? CommandLine.arguments[0]
-        let encodedExecutablePath = Data(executablePath.utf8).base64EncodedString()
-        let command = HelperSpecialCommand.hdpimInstallPrefix + encodedProductDir + "|" + encodedUserHome + "|" + encodedExecutablePath
+
         isInstalling = true
         defer { isInstalling = false }
 
         do {
             let outputState = InstallOutputState()
 
-            try await PrivilegedHelperAdapter.shared.executeInstallation(command) { output in
+            try await HelperManager.shared.executeHDPIMInstall(
+                productDir: productDir,
+                userHome: userHome,
+                executablePath: executablePath
+            ) { output in
                 Self.consumeHelperOutput(
                     output,
                     state: outputState,
@@ -101,7 +104,9 @@ actor InstallManager {
 
     func cancel() {
         guard isInstalling else { return }
-        PrivilegedHelperAdapter.shared.executeCommand(HelperSpecialCommand.hdpimCancel) { _ in }
+        Task {
+            _ = try? await HelperManager.shared.executeShell("__HDPIM_CANCEL__")
+        }
         isInstalling = false
     }
 

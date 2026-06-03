@@ -37,13 +37,10 @@ struct TaskCardPackageList: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
+        VStack(alignment: .leading, spacing: 12) {
             #if DEBUG
             HStack(spacing: 8) {
                 debugPersistenceButton
-                if case .completed = task.status, task.productId != "APRO" {
-                    commandLineInstallButton
-                }
                 Spacer()
                 copyAllButton
             }
@@ -59,7 +56,7 @@ struct TaskCardPackageList: View {
             }
 
             ScrollView(showsIndicators: false) {
-                VStack(alignment: .leading, spacing: 6) {
+                VStack(alignment: .leading, spacing: 12) {
                     ForEach(task.dependenciesToDownload, id: \.sapCode) { product in
                         let visible = visiblePackages(in: product)
                         if !visible.isEmpty || !isFilteringActive {
@@ -82,15 +79,15 @@ struct TaskCardPackageList: View {
                         }
                     }
                 }
-                .padding(.horizontal, 2)
-                .padding(.vertical, 4)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 12)
             }
             .frame(maxHeight: 320)
-            .background(.ultraThinMaterial)
-            .clipShape(RoundedRectangle(cornerRadius: 8))
+            .background(Color(.controlBackgroundColor).opacity(0.3))
+            .clipShape(RoundedRectangle(cornerRadius: 12))
             .overlay(
-                RoundedRectangle(cornerRadius: 8)
-                    .strokeBorder(.white.opacity(0.1), lineWidth: 0.5)
+                RoundedRectangle(cornerRadius: 12)
+                    .strokeBorder(Color.secondary.opacity(0.15), lineWidth: 1)
             )
         }
     }
@@ -207,46 +204,6 @@ struct TaskCardPackageList: View {
         .buttonStyle(GlassButtonStyle(tint: .blue))
     }
 
-    @State private var showCommandLineInstall = false
-    @State private var showCommandCopied = false
-
-    private var commandLineInstallButton: some View {
-        Button(action: { showCommandLineInstall.toggle() }) {
-            Label(String(localized: "命令行安装"), systemImage: "terminal")
-                .font(.system(size: 12, weight: .medium))
-                .foregroundColor(.white)
-        }
-        .buttonStyle(GlassButtonStyle(tint: .purple))
-        .popover(isPresented: $showCommandLineInstall, arrowEdge: .bottom) {
-            let setupPath = "/Library/Application Support/Adobe/Adobe Desktop Common/HDBox/Setup"
-            let driverPath = "\(task.directory.path)/driver.xml"
-            let command = "sudo \"\(setupPath)\" --install=1 --driverXML=\"\(driverPath)\""
-            VStack(alignment: .leading, spacing: 8) {
-                Button(String(localized: "复制命令")) {
-                    NSPasteboard.general.clearContents()
-                    NSPasteboard.general.setString(command, forType: .string)
-                    showCommandCopied = true
-                    DispatchQueue.main.asyncAfter(deadline: .now() + 2) { showCommandCopied = false }
-                }
-                .buttonStyle(GlassButtonStyle(tint: .purple))
-                .foregroundColor(.white)
-
-                if showCommandCopied {
-                    Text("已复制").font(.caption).foregroundColor(.green)
-                }
-
-                Text(command)
-                    .font(.system(.caption, design: .monospaced))
-                    .foregroundColor(.secondary)
-                    .textSelection(.enabled)
-                    .padding(8)
-                    .background(Color.secondary.opacity(0.1))
-                    .cornerRadius(6)
-            }
-            .padding()
-            .frame(width: 400)
-        }
-    }
     #endif
 
     private func generateAllProductsInfo() -> String {

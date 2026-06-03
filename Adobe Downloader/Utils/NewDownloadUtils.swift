@@ -480,20 +480,7 @@ class NewDownloadUtils {
         let driverPath = task.directory.appendingPathComponent("driver.xml")
         if !FileManager.default.fileExists(atPath: driverPath.path) {
             if let productInfo = globalCcmResult.products.first(where: { $0.id == task.productId && $0.version == task.productVersion }) {
-                
-                var selectedModules: [[String: Any]] = []
-                if let mainDependency = task.dependenciesToDownload.first(where: { $0.sapCode == task.productId }) {
-                    let productDir = task.directory.appendingPathComponent(mainDependency.sapCode)
-                    let jsonURL = productDir.appendingPathComponent("application.json")
-                    
-                    if let jsonString = try? String(contentsOf: jsonURL, encoding: .utf8),
-                       let jsonData = jsonString.data(using: .utf8),
-                       let appInfo = try? JSONSerialization.jsonObject(with: jsonData) as? [String: Any],
-                       let modules = appInfo["Modules"] as? [String: Any],
-                       let moduleArray = modules["Module"] as? [[String: Any]] {
-                        selectedModules = moduleArray
-                    }
-                }
+                let selectedModules = selectedDriverModules(for: task)
                 
                 let driverXml = generateDriverXML(
                     version: task.productVersion,
@@ -770,20 +757,7 @@ class NewDownloadUtils {
         let driverPath = task.directory.appendingPathComponent("driver.xml")
         if !FileManager.default.fileExists(atPath: driverPath.path) {
             if let productInfo = globalCcmResult.products.first(where: { $0.id == task.productId && $0.version == task.productVersion }) {
-
-                var selectedModules: [[String: Any]] = []
-                if let mainDependency = task.dependenciesToDownload.first(where: { $0.sapCode == task.productId }) {
-                    let productDir = task.directory.appendingPathComponent(mainDependency.sapCode)
-                    let jsonURL = productDir.appendingPathComponent("application.json")
-                    
-                    if let jsonString = try? String(contentsOf: jsonURL, encoding: .utf8),
-                       let jsonData = jsonString.data(using: .utf8),
-                       let appInfo = try? JSONSerialization.jsonObject(with: jsonData) as? [String: Any],
-                       let modules = appInfo["Modules"] as? [String: Any],
-                       let moduleArray = modules["Module"] as? [[String: Any]] {
-                        selectedModules = moduleArray
-                    }
-                }
+                let selectedModules = selectedDriverModules(for: task)
                 
                 let driverXml = generateDriverXML(
                     version: task.productVersion,
@@ -1148,6 +1122,63 @@ class NewDownloadUtils {
         }
     }
 
+    private func selectedDriverModules(for task: NewDownloadTask) -> [[String: Any]] {
+        guard let mainDependency = task.dependenciesToDownload.first(where: { $0.sapCode == task.productId }) else {
+            return []
+        }
+
+        let productDir = task.directory.appendingPathComponent(mainDependency.sapCode)
+        let jsonURL = productDir.appendingPathComponent("application.json")
+        let jsonString = (try? String(contentsOf: jsonURL, encoding: .utf8)) ?? mainDependency.applicationJson ?? ""
+        guard let jsonData = jsonString.data(using: .utf8),
+              let appInfo = try? JSONSerialization.jsonObject(with: jsonData) as? [String: Any],
+              let modules = appInfo["Modules"] as? [String: Any],
+              let moduleArray = modules["Module"] as? [[String: Any]] else {
+            return []
+        }
+
+        let selectedPackageNames = Set(mainDependency.packages.filter { $0.isSelected || $0.downloaded }.flatMap { package in
+            packageReferenceNames(package.fullPackageName)
+        })
+
+        guard !selectedPackageNames.isEmpty else {
+            return []
+        }
+
+        return moduleArray.filter { module in
+            guard let referencePackages = module["ReferencePackages"] as? [String: Any],
+                  let referencePackageArray = referencePackageValues(referencePackages["ReferencePackage"]) else {
+                return false
+            }
+            return referencePackageArray.contains { selectedPackageNames.contains($0) }
+        }
+    }
+
+    private func packageReferenceNames(_ fullPackageName: String) -> [String] {
+        let trimmed = fullPackageName.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else {
+            return []
+        }
+
+        var names = [trimmed]
+        if trimmed.hasSuffix(".zip") {
+            names.append(String(trimmed.dropLast(4)))
+        } else {
+            names.append("\(trimmed).zip")
+        }
+        return Array(Set(names))
+    }
+
+    private func referencePackageValues(_ value: Any?) -> [String]? {
+        if let array = value as? [String] {
+            return array
+        }
+        if let single = value as? String {
+            return [single]
+        }
+        return nil
+    }
+
     func generateDriverXML(version: String, language: String, productInfo: Product, dependencies: [DependenciesToDownload], targetArchitecture: String, modules: [[String: Any]] = []) -> String {
         guard let mainDependency = dependencies.first(where: { $0.sapCode == productInfo.id }) else {
             return ""
@@ -1470,21 +1501,24 @@ class NewDownloadUtils {
     }
 
     private func executePrivilegedCommand(_ command: String) async -> String {
-        return await withCheckedContinuation { continuation in
-            PrivilegedHelperAdapter.shared.executeCommand(command) { result in
-                if result.starts(with: "Error:") {
-                    print("命令执行失败: \(command)")
-                    print("错误信息: \(result)")
-                }
-                continuation.resume(returning: result)
+        do {
+            let result = try await HelperManager.shared.executeShell(command)
+            if result.starts(with: "Error:") {
+                print("命令执行失败: \(command)")
+                print("错误信息: \(result)")
             }
+            return result
+        } catch {
+            let result = "Error: \(error.localizedDescription)"
+            print("命令执行失败: \(command)")
+            print("错误信息: \(result)")
+            return result
         }
     }
-    
+
     func downloadX1a0HeCCPackages(
         progressHandler: @escaping (Double, String) -> Void,
-        cancellationHandler: @escaping () -> Bool,
-        shouldProcess: Bool = true
+        cancellationHandler: @escaping () -> Bool
     ) async throws {
         let baseUrl = "https://cdn-ffc.oobesaas.adobe.com/core/v1/applications?name=CreativeCloud&platform=\(AppStatics.isAppleSilicon ? "macarm64" : "osx10")"
 
@@ -1586,7 +1620,7 @@ class NewDownloadUtils {
             }
 
             await MainActor.run {
-                progressHandler(0.9, shouldProcess ? "正在安装组件..." : "正在完成下载...")
+                progressHandler(0.9, "正在完成下载...")
             }
 
             let targetDirectory = "/Library/Application\\ Support/Adobe/Adobe\\ Desktop\\ Common"
@@ -1646,25 +1680,10 @@ class NewDownloadUtils {
                 }
             }
 
-            try await Task.sleep(nanoseconds: 1_000_000_000)
-
-            if shouldProcess {
-                try await withCheckedThrowingContinuation { continuation in
-                    ModifySetup.backupAndModifySetupFile { success, message in
-                        if success {
-                            continuation.resume()
-                        } else {
-                            continuation.resume(throwing: NetworkError.installError(message))
-                        }
-                    }
-                }
-                ModifySetup.clearVersionCache()
-            }
-
             try? FileManager.default.removeItem(at: tempDirectory)
 
             await MainActor.run {
-                progressHandler(1.0, shouldProcess ? "安装完成" : "下载完成")
+                progressHandler(1.0, "下载完成")
             }
         } catch {
             print("发生错误: \(error.localizedDescription)")

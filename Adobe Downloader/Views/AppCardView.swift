@@ -214,7 +214,27 @@ final class AppCardViewModel: ObservableObject {
         }
     }
 
+    func isProductInstalled(version: String) -> Bool {
+        let platform = HDPIMParityDecisionEngine.shared.preferredPlatformId(
+            productId: uniqueProduct.id,
+            version: version
+        ) ?? "unknown"
+        return globalNetworkManager.isProductInstalled(
+            productId: uniqueProduct.id,
+            version: version,
+            platform: platform
+        )
+    }
+
     func checkAndStartDownload(version: String, language: String) async {
+        if isProductInstalled(version: version) {
+            await MainActor.run {
+                errorMessage = "该产品版本已安装"
+                showError = true
+            }
+            return
+        }
+
         if let existingPath = globalNetworkManager.isVersionDownloaded(productId: uniqueProduct.id, version: version, language: language) {
             await MainActor.run {
                 existingFilePath = existingPath
@@ -390,15 +410,23 @@ struct AppCardView: View {
     }
 
     var body: some View {
-        VStack(spacing: 10) {
+        VStack(spacing: 0) {
+            Spacer(minLength: 20)
+
             CardIconView(viewModel: viewModel)
+                .frame(width: 96, height: 96)
+
+            Spacer(minLength: 16)
 
             Text(viewModel.uniqueProduct.displayName)
-                .font(.system(size: AppCardConstants.titleFontSize, weight: .semibold))
+                .font(.system(size: 16, weight: .semibold))
                 .lineLimit(2)
                 .multilineTextAlignment(.center)
                 .fixedSize(horizontal: false, vertical: true)
-                .foregroundColor(.primary.opacity(0.92))
+                .foregroundColor(.primary)
+                .padding(.horizontal, 12)
+
+            Spacer(minLength: 8)
 
             DotBadgeRow(viewModel: viewModel)
 
@@ -406,48 +434,36 @@ struct AppCardView: View {
 
             if let active = viewModel.activeDownloadTask {
                 ActiveDownloadBar(task: active)
+                    .padding(.horizontal, 12)
+                    .padding(.bottom, 12)
             }
 
             DownloadActionButton(viewModel: viewModel)
+                .padding(.horizontal, 12)
+                .padding(.bottom, 16)
         }
-        .padding(14)
         .frame(
-            minWidth: AppCardConstants.cardMinWidth,
-            idealWidth: AppCardConstants.cardIdealWidth,
+            minWidth: 200,
+            idealWidth: 220,
             maxWidth: .infinity,
-            minHeight: AppCardConstants.cardMinHeight,
+            minHeight: 260,
             alignment: .top
         )
         .background(
-            ZStack {
-                RoundedRectangle(cornerRadius: AppCardConstants.cornerRadius)
-                    .fill(Color(.windowBackgroundColor).opacity(isHovered ? 0.95 : 0.45))
-                if isHovered {
-                    LinearGradient(
-                        colors: [Color.blue.opacity(0.08), Color.clear],
-                        startPoint: .top,
-                        endPoint: .bottom
-                    )
-                    .clipShape(RoundedRectangle(cornerRadius: AppCardConstants.cornerRadius))
-                }
-            }
+            RoundedRectangle(cornerRadius: 16)
+                .fill(isHovered ? Color(.controlBackgroundColor).opacity(0.15) : Color.clear)
         )
         .overlay(
-            RoundedRectangle(cornerRadius: AppCardConstants.cornerRadius)
+            RoundedRectangle(cornerRadius: 16)
                 .strokeBorder(
-                    isHovered ? Color.blue.opacity(0.35) : Color.secondary.opacity(0.12),
-                    lineWidth: isHovered ? 1 : 0.5
+                    isHovered ? Color.accentColor.opacity(0.3) : Color.secondary.opacity(0.2),
+                    lineWidth: 1
                 )
         )
-        .shadow(
-            color: Color.primary.opacity(isHovered ? 0.1 : 0.04),
-            radius: isHovered ? 8 : 3,
-            x: 0,
-            y: isHovered ? 4 : 2
-        )
-        .animation(.easeOut(duration: 0.2), value: isHovered)
         .onHover { hovering in
-            self.isHovered = hovering
+            withAnimation(.easeInOut(duration: 0.15)) {
+                self.isHovered = hovering
+            }
         }
         .contentShape(Rectangle())
         .modifier(SheetModifier(viewModel: viewModel))

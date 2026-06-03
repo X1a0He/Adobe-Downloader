@@ -18,6 +18,7 @@ struct NavigationCustomDownloadView: View {
     @State private var allPackages: [Package] = []
     @State private var dependenciesToDownload: [DependenciesToDownload] = []
     @State private var showExistingFileAlert = false
+    @State private var showInstalledAlert = false
     @State private var existingFilePath: URL?
     @State private var pendingDependencies: [DependenciesToDownload] = []
     @State private var productIcon: NSImage? = nil
@@ -72,6 +73,9 @@ struct NavigationCustomDownloadView: View {
                         existingFilePath = path
                         pendingDependencies = dependencies
                         showExistingFileAlert = true
+                    },
+                    onInstalledProduct: {
+                        showInstalledAlert = true
                     }
                 )
             }
@@ -110,6 +114,11 @@ struct NavigationCustomDownloadView: View {
                     iconImage: productIcon
                 )
             }
+        }
+        .alert("提示", isPresented: $showInstalledAlert) {
+            Button("确定", role: .cancel) { }
+        } message: {
+            Text("该产品版本已安装")
         }
     }
 
@@ -782,6 +791,7 @@ private struct NavigationCustomPackageSelectorView: View {
     @State private var activeFilters: Set<CustomPackageFilter> = []
     @State private var collapsedDependencies: Set<String> = []
     @State private var didInitializeCollapse = false
+    @State private var copyToastTask: Task<Void, Never>?
 
     let productId: String
     let version: String
@@ -791,6 +801,7 @@ private struct NavigationCustomPackageSelectorView: View {
     let onDownloadStart: ([DependenciesToDownload]) -> Void
     let onCancel: () -> Void
     let onFileExists: (URL, [DependenciesToDownload]) -> Void
+    let onInstalledProduct: () -> Void
 
     var body: some View {
         VStack(spacing: 0) {
@@ -877,16 +888,25 @@ private struct NavigationCustomPackageSelectorView: View {
             initializeSelection()
             initializeCollapseIfNeeded()
         }
-        .popover(isPresented: $showCopiedAlert, arrowEdge: .trailing) {
-            HStack(spacing: 6) {
-                Image(systemName: "checkmark.circle.fill")
-                    .foregroundColor(.green)
-                Text("已复制")
-                    .font(.system(size: 14, weight: .medium))
-                    .foregroundColor(.primary)
+        .overlay(alignment: .top) {
+            if showCopiedAlert {
+                HStack(spacing: 6) {
+                    Image(systemName: "checkmark.circle.fill")
+                        .foregroundColor(.green)
+                    Text("已复制")
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundColor(.primary)
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                .background(
+                    RoundedRectangle(cornerRadius: 8)
+                        .fill(Color(NSColor.windowBackgroundColor))
+                        .shadow(color: Color.black.opacity(0.12), radius: 8, x: 0, y: 3)
+                )
+                .padding(.top, 14)
+                .transition(.opacity.combined(with: .move(edge: .top)))
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
         }
     }
 
@@ -1011,6 +1031,17 @@ private struct NavigationCustomPackageSelectorView: View {
             dependency.packages.contains { $0.isSelected }
         }
 
+        let platform = HDPIMParityDecisionEngine.shared.preferredPlatformId(
+            productId: productId,
+            version: version
+        ) ?? "unknown"
+
+        if globalNetworkManager.isProductInstalled(productId: productId, version: version, platform: platform) {
+            isDownloading = false
+            onInstalledProduct()
+            return
+        }
+
         if let existingPath = globalNetworkManager.isVersionDownloaded(
             productId: productId,
             version: version,
@@ -1028,9 +1059,16 @@ private struct NavigationCustomPackageSelectorView: View {
         let pasteboard = NSPasteboard.general
         pasteboard.clearContents()
         pasteboard.setString(text, forType: .string)
-        showCopiedAlert = true
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
-            showCopiedAlert = false
+        withAnimation(.easeInOut(duration: 0.15)) {
+            showCopiedAlert = true
+        }
+        copyToastTask?.cancel()
+        copyToastTask = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 1_500_000_000)
+            guard !Task.isCancelled else { return }
+            withAnimation(.easeInOut(duration: 0.15)) {
+                showCopiedAlert = false
+            }
         }
     }
 
@@ -1407,8 +1445,10 @@ private struct NavigationEnhancedPackageRow: View {
 
                     if isRequiredPackage {
                         subtleBadge(text: "必需", color: .red)
+                    } else if package.isAdobeDownloaderPreselected {
+                        subtleBadge(text: "Adobe Downloader 预选", color: .purple)
                     } else if package.isDefaultSelected {
-                        subtleBadge(text: "官方默认", color: .blue)
+                        subtleBadge(text: "默认选择", color: .blue)
                     }
 
                     if !package.isOfficiallyEligible {

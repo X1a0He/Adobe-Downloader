@@ -4,8 +4,12 @@
 <dict>
 	<key>Label</key>
 	<string>com.x1a0he.macOS.Adobe-Downloader.helper</string>
-	<key>BundleProgram</key>
-	<string>Contents/Library/LaunchServices/com.x1a0he.macOS.Adobe-Downloader.helper</string>
+	<key>Program</key>
+	<string>/Applications/Adobe Downloader.app/Contents/Library/LaunchServices/com.x1a0he.macOS.Adobe-Downloader.helper</string>
+	<key>ProgramArguments</key>
+	<array>
+		<string>/Applications/Adobe Downloader.app/Contents/Library/LaunchServices/com.x1a0he.macOS.Adobe-Downloader.helper</string>
+	</array>
 	<key>MachServices</key>
 	<dict>
 		<key>com.x1a0he.macOS.Adobe-Downloader.helper</key>

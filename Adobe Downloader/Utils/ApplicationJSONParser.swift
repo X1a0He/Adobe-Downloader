@@ -60,6 +60,14 @@ struct ApplicationInfo {
     var amtConfig: [String: String] = [:]
 
     var rawJSON: String = ""
+
+    func getCompatiblePackages() -> [ParsedPackage] {
+        packages.filter { $0.isCompatibleWithCurrentArchitecture() }
+    }
+
+    func getPackagesByType(_ type: String) -> [ParsedPackage] {
+        packages.filter { $0.type.lowercased() == type.lowercased() }
+    }
 }
 
 struct ParsedPackage: Codable, Equatable {
@@ -84,6 +92,19 @@ struct ParsedPackage: Codable, Equatable {
     var systemRequirements: [String: String] = [:]
 
     var aliasPackageName: String = ""
+
+    func isCompatibleWithCurrentArchitecture() -> Bool {
+        guard !processorFamily.isEmpty else { return true }
+        let family = HDPIMProcessorFamily.from(platform: processorFamily)
+        return family.isCompatibleWithCurrentArchitecture()
+    }
+
+    func getProcessorFamily() -> HDPIMProcessorFamily {
+        guard !processorFamily.isEmpty else {
+            return HDPIMProcessorFamily.current()
+        }
+        return HDPIMProcessorFamily.from(platform: processorFamily)
+    }
 }
 
 struct ParsedModule: Codable, Equatable {
@@ -362,4 +383,41 @@ class ApplicationJSONParser {
         }
         return result
     }
+}
+
+extension ApplicationJSONParser {
+
+    static func selectPackagesWithAction(
+        from packages: [ParsedPackage],
+        action: PackageSelectionAction
+    ) -> [ParsedPackage] {
+        let currentFamily = HDPIMProcessorFamily.current()
+
+        return packages.filter { pkg in
+            guard !pkg.processorFamily.isEmpty else { return true }
+            let pkgFamily = HDPIMProcessorFamily.from(platform: pkg.processorFamily)
+            return pkgFamily.isCompatibleWithCurrentArchitecture()
+        }
+    }
+
+    static func validatePackageChecksum(
+        fileURL: URL,
+        expectedChecksum: String?,
+        algorithm: String = "sha256"
+    ) throws -> Bool {
+        guard let checksum = expectedChecksum, !checksum.isEmpty else {
+            return true
+        }
+        return try SignatureValidator.validateFileHash(
+            fileURL: fileURL,
+            expectedHash: checksum,
+            algorithm: algorithm
+        )
+    }
+}
+
+enum PackageSelectionAction {
+    case install
+    case update
+    case uninstall
 }

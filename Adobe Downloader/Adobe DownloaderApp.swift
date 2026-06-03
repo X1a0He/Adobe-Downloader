@@ -4,15 +4,10 @@ import Sparkle
 @main
 struct Adobe_DownloaderApp: App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
-    @State private var showBackupAlert = false
     @State private var showTipsSheet = false
     @State private var showLanguagePicker = false
-    @State private var showCreativeCloudAlert = false
-    @State private var showBackupResultAlert = false
     @State private var showSettingsView = false
-    
-    @StateObject private var backupResult = BackupResult()
-    
+
     private var storage: StorageData { StorageData.shared }
     private let updaterController: SPUStandardUpdaterController
 
@@ -71,30 +66,6 @@ struct Adobe_DownloaderApp: App {
                     .task {
                         await setupApplication()
                     }
-                    .sheet(isPresented: $showCreativeCloudAlert) {
-                        ShouldExistsSetUpView()
-                            .environmentObject(globalNetworkManager)
-                    }
-                    .sheet(isPresented: $showBackupAlert) {
-                        SetupBackupAlertView(
-                            onConfirm: {
-                                showBackupAlert = false
-                                handleBackup()
-                            },
-                            onCancel: {
-                                showBackupAlert = false
-                            }
-                        )
-                    }
-                    .sheet(isPresented: $showBackupResultAlert) {
-                        SetupBackupResultView(
-                            isSuccess: backupResult.success, 
-                            message: backupResult.message,
-                            onDismiss: {
-                                showBackupResultAlert = false
-                            }
-                        )
-                    }
                     .sheet(isPresented: $showTipsSheet) {
                         TipsSheetView(
                             showTipsSheet: $showTipsSheet,
@@ -146,16 +117,6 @@ struct Adobe_DownloaderApp: App {
             }
         }
     }
-    
-    private func handleBackup() {
-        ModifySetup.backupAndModifySetupFile { success, message in
-            DispatchQueue.main.async {
-                self.backupResult.success = success
-                self.backupResult.message = message
-                self.showBackupResultAlert = true
-            }
-        }
-    }
 }
 
 extension Scene {
@@ -166,9 +127,4 @@ extension Scene {
             return self
         }
     }
-}
-
-class BackupResult: ObservableObject {
-    @Published var success: Bool = false
-    @Published var message: String = ""
 }

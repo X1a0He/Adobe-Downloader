@@ -54,6 +54,7 @@ enum VersionPickerFilter: String, CaseIterable, Identifiable {
     case all
     case latest
     case downloaded
+    case installed
     case hasDependencies
 
     var id: String { rawValue }
@@ -63,6 +64,7 @@ enum VersionPickerFilter: String, CaseIterable, Identifiable {
         case .all: return "全部"
         case .latest: return "仅最新"
         case .downloaded: return "已下载"
+        case .installed: return "已安装"
         case .hasDependencies: return "有依赖"
         }
     }
@@ -72,6 +74,7 @@ enum VersionPickerFilter: String, CaseIterable, Identifiable {
         case .all: return "square.grid.2x2"
         case .latest: return "sparkles"
         case .downloaded: return "checkmark.circle"
+        case .installed: return "checkmark.seal"
         case .hasDependencies: return "shippingbox"
         }
     }
@@ -134,7 +137,7 @@ struct NavigationVersionPickerView: View {
             }
             .frame(
                 minWidth: 520,
-                idealWidth: VersionPickerConstants.viewWidth,
+                idealWidth: 560,
                 maxWidth: 720,
                 minHeight: 560,
                 idealHeight: VersionPickerConstants.viewHeight,
@@ -611,6 +614,18 @@ private struct VersionListView: View {
                     language: defaultLanguage
                 ) != nil
             }
+        case .installed:
+            list = list.filter { entry in
+                let platform = HDPIMParityDecisionEngine.shared.preferredPlatformId(
+                    productId: productId,
+                    version: entry.key
+                ) ?? "unknown"
+                return globalNetworkManager.isProductInstalled(
+                    productId: productId,
+                    version: entry.key,
+                    platform: platform
+                )
+            }
         case .hasDependencies:
             list = list.filter { entry in
                 !(entry.value.languageSet.first?.dependencies.isEmpty ?? true)
@@ -742,10 +757,15 @@ private struct VersionRow: View, Equatable {
     }
 
     @State private var cachedExistingPath: URL? = nil
+    @State private var cachedDownloadedPath: URL? = nil
     @State private var isHovered = false
 
     private var existingPath: URL? {
         cachedExistingPath
+    }
+
+    private var downloadedPath: URL? {
+        cachedDownloadedPath
     }
 
     var body: some View {
@@ -757,6 +777,7 @@ private struct VersionRow: View, Equatable {
                 isGroupLatest: isGroupLatest,
                 isOverallLatest: isOverallLatest,
                 hasExistingPath: existingPath != nil,
+                hasDownloadedPackage: existingPath == nil && downloadedPath != nil,
                 onSelect: { onToggle(version) },
                 onToggle: { onToggle(version) }
             )
@@ -794,7 +815,20 @@ private struct VersionRow: View, Equatable {
         .onHover { isHovered = $0 }
         .onAppear {
             if cachedExistingPath == nil {
-                cachedExistingPath = globalNetworkManager.isVersionDownloaded(
+                let platform = HDPIMParityDecisionEngine.shared.preferredPlatformId(
+                    productId: productId,
+                    version: version
+                ) ?? "unknown"
+                let installed = globalNetworkManager.isProductInstalled(
+                    productId: productId,
+                    version: version,
+                    platform: platform
+                )
+                cachedExistingPath = installed ? URL(fileURLWithPath: "/") : nil
+            }
+
+            if cachedDownloadedPath == nil {
+                cachedDownloadedPath = globalNetworkManager.isVersionDownloaded(
                     productId: productId,
                     version: version,
                     language: defaultLanguage
@@ -811,6 +845,7 @@ private struct VersionHeader: View {
     let isGroupLatest: Bool
     let isOverallLatest: Bool
     let hasExistingPath: Bool
+    let hasDownloadedPackage: Bool
     let onSelect: () -> Void
     let onToggle: () -> Void
 
@@ -831,7 +866,8 @@ private struct VersionHeader: View {
                     info: info,
                     isGroupLatest: isGroupLatest,
                     isOverallLatest: isOverallLatest,
-                    hasExistingPath: hasExistingPath
+                    hasExistingPath: hasExistingPath,
+                    hasDownloadedPackage: hasDownloadedPackage
                 )
                 Spacer()
                 VStack(alignment: .trailing, spacing: 3) {
@@ -1056,6 +1092,7 @@ struct VersionInfo: View {
     let isGroupLatest: Bool
     let isOverallLatest: Bool
     let hasExistingPath: Bool
+    let hasDownloadedPackage: Bool
 
     private var productVersion: String? {
         info.languageSet.first?.productVersion
@@ -1080,6 +1117,8 @@ struct VersionInfo: View {
 
                 if hasExistingPath {
                     ExistingPathButton(isVisible: true)
+                } else if hasDownloadedPackage {
+                    DownloadedPackageButton(isVisible: true)
                 }
 
                 if let pv = productVersion, pv != version {
@@ -1161,7 +1200,7 @@ struct ExistingPathButton: View {
 
     var body: some View {
         if isVisible {
-            Text("已存在")
+            Text("已安装")
                 .font(.system(size: 10, weight: .medium))
                 .foregroundColor(.green.opacity(0.9))
                 .padding(.horizontal, 6)
@@ -1173,6 +1212,28 @@ struct ExistingPathButton: View {
                 .overlay(
                     RoundedRectangle(cornerRadius: 4)
                         .stroke(Color.green.opacity(0.25), lineWidth: 0.5)
+                )
+        }
+    }
+}
+
+struct DownloadedPackageButton: View {
+    let isVisible: Bool
+
+    var body: some View {
+        if isVisible {
+            Text("已下载")
+                .font(.system(size: 10, weight: .medium))
+                .foregroundColor(.blue.opacity(0.9))
+                .padding(.horizontal, 6)
+                .padding(.vertical, 2)
+                .background(
+                    RoundedRectangle(cornerRadius: 4)
+                        .fill(Color.blue.opacity(0.12))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 4)
+                        .stroke(Color.blue.opacity(0.25), lineWidth: 0.5)
                 )
         }
     }
