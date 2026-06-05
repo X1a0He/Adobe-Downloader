@@ -23,6 +23,8 @@ final class PDMHttpCommunicator {
     private var statusCodeChecked = false
     private(set) var lastResponseStatusCode: Int = 0
     private(set) var lastETag: String = ""
+    private(set) var lastContentRange: String = ""
+    private(set) var lastContentLength: Int64 = 0
 
     init() {
         userAgent = Self.buildFFCUserAgent()
@@ -182,6 +184,8 @@ final class PDMHttpCommunicator {
         statusCodeChecked = false
         lastResponseStatusCode = 0
         lastETag = ""
+        lastContentRange = ""
+        lastContentLength = 0
 
         let cfURL = url as CFURL
         let request = CFHTTPMessageCreateRequest(
@@ -193,6 +197,71 @@ final class PDMHttpCommunicator {
 
         let rangeValue = "bytes=\(startByte)-\(endByte)"
         CFHTTPMessageSetHeaderFieldValue(request, "Range" as CFString, rangeValue as CFString)
+
+        cookieManager.applyCookies(to: request, url: url)
+
+        if !userAgent.isEmpty {
+            CFHTTPMessageSetHeaderFieldValue(request, "User-Agent" as CFString, userAgent as CFString)
+        }
+
+        for (key, value) in headers {
+            CFHTTPMessageSetHeaderFieldValue(request, key as CFString, value as CFString)
+        }
+
+        let stream = CFReadStreamCreateForHTTPRequest(kCFAllocatorDefault, request).takeRetainedValue()
+
+        if url.scheme == "https" {
+            let sslSettings: [String: Any] = [
+                kCFStreamPropertySocketSecurityLevel as String: kCFStreamSocketSecurityLevelNegotiatedSSL
+            ]
+            CFReadStreamSetProperty(
+                stream,
+                CFStreamPropertyKey(rawValue: kCFStreamPropertySSLSettings),
+                sslSettings as CFDictionary
+            )
+        }
+
+        if proxyConfig.isConfigured {
+            applyProxy(to: stream)
+        }
+
+        CFReadStreamSetProperty(
+            stream,
+            CFStreamPropertyKey(rawValue: kCFStreamPropertyHTTPShouldAutoredirect),
+            kCFBooleanTrue
+        )
+
+        readStream = stream
+
+        guard CFReadStreamOpen(stream) else {
+            closeStream()
+            return false
+        }
+
+        downloadInitialized = true
+        return true
+    }
+
+    func initIndefiniteHttpDownload(
+        url: URL,
+        headers: [(String, String)] = [],
+        validateSSL: Bool = true
+    ) -> Bool {
+        currentURL = url
+        downloadInitialized = false
+        statusCodeChecked = false
+        lastResponseStatusCode = 0
+        lastETag = ""
+        lastContentRange = ""
+        lastContentLength = 0
+
+        let cfURL = url as CFURL
+        let request = CFHTTPMessageCreateRequest(
+            kCFAllocatorDefault,
+            "GET" as CFString,
+            cfURL,
+            kCFHTTPVersion1_1
+        ).takeRetainedValue()
 
         cookieManager.applyCookies(to: request, url: url)
 
@@ -268,6 +337,7 @@ final class PDMHttpCommunicator {
             let deadline = Date().addingTimeInterval(PDMConstants.rangeCheckTimeoutSeconds)
             var gotResponse = false
             var statusCode = 0
+            var contentLength: Int64 = -1
 
             while !cancelDownload && Date() < deadline {
                 guard let stream = readStream else { break }
@@ -282,6 +352,11 @@ final class PDMHttpCommunicator {
 
                         if let url = currentURL {
                             cookieManager.saveCookies(from: cfResponse, for: url)
+                        }
+
+                        if let headers = CFHTTPMessageCopyAllHeaderFields(cfResponse)?.takeRetainedValue() as? [String: String],
+                           let length = headers["Content-Length"] ?? headers["content-length"] {
+                            contentLength = Int64(length) ?? -1
                         }
 
                         gotResponse = true
@@ -303,7 +378,7 @@ final class PDMHttpCommunicator {
 
             closeStream()
 
-            if gotResponse && statusCode == 206 {
+            if gotResponse && statusCode == 206 && contentLength == 2 {
                 return true
             }
         }
@@ -327,40 +402,18 @@ final class PDMHttpCommunicator {
             return (.error(.cancelled), 0)
         }
 
+        captureResponseMetadata()
         let bytesRead = CFReadStreamRead(stream, buffer, bufferSize)
 
         if bytesRead > 0 {
             progressCallback?(Int64(bytesRead))
-
-            if let url = currentURL, !cookieSaved {
-                if let responseMsg = CFReadStreamCopyProperty(
-                    stream,
-                    CFStreamPropertyKey(rawValue: kCFStreamPropertyHTTPResponseHeader)
-                ) {
-                    let cfResponse = responseMsg as! CFHTTPMessage
-                    cookieManager.saveCookies(from: cfResponse, for: url)
-                    cookieSaved = true
-                }
-            }
-
-            if !statusCodeChecked {
-                if let responseMsg = CFReadStreamCopyProperty(
-                    stream,
-                    CFStreamPropertyKey(rawValue: kCFStreamPropertyHTTPResponseHeader)
-                ) {
-                    let cfResponse = responseMsg as! CFHTTPMessage
-                    lastResponseStatusCode = CFHTTPMessageGetResponseStatusCode(cfResponse)
-                    if let etagRef = CFHTTPMessageCopyHeaderFieldValue(cfResponse, "ETag" as CFString) {
-                        lastETag = etagRef.takeRetainedValue() as String
-                    }
-                    statusCodeChecked = true
-                }
-            }
-
+            captureResponseMetadata()
             return (.moreData, bytesRead)
         } else if bytesRead == 0 {
+            captureResponseMetadata()
             return (.complete, 0)
         } else {
+            captureResponseMetadata()
             handleStreamError(stream)
 
             if proxyConfig.isHTTPS && currentURL?.scheme == "https" {
@@ -471,6 +524,46 @@ final class PDMHttpCommunicator {
         return response
     }
 
+    private func captureResponseMetadata() {
+        guard let stream = readStream,
+              let responseMsg = CFReadStreamCopyProperty(
+                  stream,
+                  CFStreamPropertyKey(rawValue: kCFStreamPropertyHTTPResponseHeader)
+              ) else {
+            return
+        }
+
+        let cfResponse = responseMsg as! CFHTTPMessage
+
+        if let url = currentURL, !cookieSaved {
+            cookieManager.saveCookies(from: cfResponse, for: url)
+            cookieSaved = true
+        }
+
+        if !statusCodeChecked {
+            let statusCode = CFHTTPMessageGetResponseStatusCode(cfResponse)
+            if statusCode > 0 {
+                lastResponseStatusCode = statusCode
+                statusCodeChecked = true
+            }
+        }
+
+        if lastETag.isEmpty,
+           let etagRef = CFHTTPMessageCopyHeaderFieldValue(cfResponse, "ETag" as CFString) {
+            lastETag = etagRef.takeRetainedValue() as String
+        }
+
+        if lastContentRange.isEmpty,
+           let contentRangeRef = CFHTTPMessageCopyHeaderFieldValue(cfResponse, "Content-Range" as CFString) {
+            lastContentRange = contentRangeRef.takeRetainedValue() as String
+        }
+
+        if lastContentLength == 0,
+           let contentLengthRef = CFHTTPMessageCopyHeaderFieldValue(cfResponse, "Content-Length" as CFString) {
+            lastContentLength = Int64(contentLengthRef.takeRetainedValue() as String) ?? 0
+        }
+    }
+
     private func handleStreamError(_ stream: CFReadStream) {
         if let error = CFReadStreamCopyError(stream) {
             let domain = CFErrorGetDomain(error) as String? ?? "unknown"
@@ -481,7 +574,7 @@ final class PDMHttpCommunicator {
 
     static func buildFFCUserAgent() -> String {
         let osVersion = ProcessInfo.processInfo.operatingSystemVersion
-        let appVersion = UserDefaults.standard.string(forKey: "adobeAppVersion") ?? "6.4.0.361"
-        return "Creative Cloud/\(appVersion)/Mac-\(osVersion.majorVersion).\(osVersion.minorVersion)"
+        let appVersion = UserDefaults.standard.string(forKey: "adobeAppVersion") ?? "6.9.0.618"
+        return "CreativeCloud/\(appVersion)/Mac-\(osVersion.majorVersion).\(osVersion.minorVersion)"
     }
 }

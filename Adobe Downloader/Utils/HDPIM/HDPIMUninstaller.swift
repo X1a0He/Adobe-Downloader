@@ -40,6 +40,7 @@ final class HDPIMUninstaller {
             propertyTable.setupSystemDirectories()
             propertyTable.setInstallDir(package.installPath)
             propertyTable.setProductInstallDir(package.installPath)
+            propertyTable.setProperty("workflowType", "uninstall")
 
             try await HDPIMRollbackHelper.executeUninstallPIMX(
                 at: URL(fileURLWithPath: pimxPath),

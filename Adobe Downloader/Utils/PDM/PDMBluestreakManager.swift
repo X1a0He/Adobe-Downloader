@@ -71,7 +71,7 @@ final class PDMBluestreakManager {
                 } else {
                     size = info.segmentSize
                 }
-                let hash = i < info.segments.count ? info.segments[i].hash : ""
+                let hash = info.segments.first { $0.segmentNumber == i + 1 }?.hash ?? ""
                 segments.append(PDMSegment(
                     index: i,
                     startByte: start,

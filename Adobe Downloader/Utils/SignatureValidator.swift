@@ -81,7 +81,9 @@ class SignatureValidator {
             let segmentIndex = segment.segmentNumber - 1
             let startOffset = Int64(segmentIndex) * validationInfo.segmentSize
             let isLastSegment = segment.segmentNumber == validationInfo.segmentCount
-            let segmentSize = isLastSegment ? validationInfo.lastSegmentSize : validationInfo.segmentSize
+            let segmentSize = isLastSegment && validationInfo.lastSegmentSize > 0
+                ? validationInfo.lastSegmentSize
+                : validationInfo.segmentSize
 
             fileHandle.seek(toFileOffset: UInt64(startOffset))
             let segmentData = fileHandle.readData(ofLength: Int(segmentSize))
@@ -90,13 +92,27 @@ class SignatureValidator {
                 return false
             }
 
-            let hash = md5Hash(of: segmentData)
+            let hash = segmentHash(data: segmentData, algorithm: validationInfo.algorithm, expectedHash: segment.hash)
             if hash.lowercased() != segment.hash.lowercased() {
                 return false
             }
         }
 
         return true
+    }
+
+    private static func segmentHash(data: Data, algorithm: String, expectedHash: String) -> String {
+        switch algorithm.lowercased() {
+        case "sha256", "sha-256", "type2":
+            return sha256Hash(of: data)
+        case "sha1", "sha-1":
+            let digest = Insecure.SHA1.hash(data: data)
+            return digest.map { String(format: "%02x", $0) }.joined()
+        case "md5", "type1":
+            return md5Hash(of: data)
+        default:
+            return expectedHash.count == 64 ? sha256Hash(of: data) : md5Hash(of: data)
+        }
     }
 
     static func verifyRSASignature(data: Data, signature: Data, publicKeyPEM: String) -> Bool {

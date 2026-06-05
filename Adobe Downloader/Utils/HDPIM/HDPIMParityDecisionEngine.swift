@@ -629,7 +629,7 @@ final class HDPIMParityDecisionEngine {
             )
 
             dependencyModel.packages = dependency.packages.compactMap { packageDecision in
-                guard !packageDecision.parsedPackage.path.isEmpty,
+                guard (!packageDecision.parsedPackage.path.isEmpty || !packageDecision.parsedPackage.manifestURL.isEmpty),
                       !packageDecision.parsedPackage.fullPackageName.isEmpty else {
                     return nil
                 }
@@ -639,6 +639,7 @@ final class HDPIMParityDecisionEngine {
                     fullPackageName: packageDecision.parsedPackage.fullPackageName,
                     downloadSize: packageDecision.parsedPackage.downloadSize,
                     downloadURL: packageDecision.parsedPackage.path,
+                    manifestURL: packageDecision.parsedPackage.manifestURL,
                     packageVersion: packageDecision.packageVersion,
                     condition: packageDecision.parsedPackage.condition,
                     isRequired: packageDecision.isRequired,
@@ -646,7 +647,9 @@ final class HDPIMParityDecisionEngine {
                     isAdobeDownloaderPreselected: packageDecision.isAdobeDownloaderPreselected,
                     isOfficiallyEligible: packageDecision.isOfficiallyEligible,
                     officialFilterReasons: packageDecision.officialFilterReasons,
-                    validationURL: packageDecision.parsedPackage.validationURLType2
+                    validationURL: packageDecision.parsedPackage.validationURLType2,
+                    validationURLType1: packageDecision.parsedPackage.validationURLType1,
+                    packageHashKey: packageDecision.parsedPackage.packageHashKey
                 )
                 package.hostValidation = nil
                 return package

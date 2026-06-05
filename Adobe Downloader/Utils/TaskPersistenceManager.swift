@@ -65,6 +65,10 @@ class TaskPersistenceManager: @unchecked Sendable {
                             fullPackageName: package.fullPackageName,
                             downloadSize: package.downloadSize,
                             downloadURL: package.downloadURL,
+                            manifestURL: package.manifestURL,
+                            validationURL: package.validationURL,
+                            validationURLType1: package.validationURLType1,
+                            packageHashKey: package.packageHashKey,
                             downloadedSize: package.downloadedSize,
                             progress: package.progress,
                             speed: package.speed,
@@ -153,6 +157,7 @@ class TaskPersistenceManager: @unchecked Sendable {
             }()
             
             let products = taskData.productsToDownload.map { productData -> DependenciesToDownload in
+                let parsedPackageMetadata = packageMetadataByFullPackageName(applicationJson: productData.applicationJson)
                 let product = DependenciesToDownload(
                     sapCode: productData.sapCode,
                     version: productData.version,
@@ -166,37 +171,57 @@ class TaskPersistenceManager: @unchecked Sendable {
                 )
                 
                 product.packages = productData.packages.map { packageData -> Package in
+                    let parsedPackage = parsedPackageMetadata[packageData.fullPackageName]
+                    let packageHashKey = !(packageData.packageHashKey ?? "").isEmpty
+                        ? (packageData.packageHashKey ?? "")
+                        : (parsedPackage?.packageHashKey ?? "")
+                    let validationURL = packageData.validationURL ?? parsedPackage?.validationURLType2
+                    let validationURLType1 = packageData.validationURLType1 ?? parsedPackage?.validationURLType1
+                    let downloadURL = packageData.downloadURL.isEmpty ? (parsedPackage?.path ?? "") : packageData.downloadURL
+                    let manifestURL = packageData.manifestURL ?? parsedPackage?.manifestURL ?? ""
+                    let downloadSize = packageData.downloadSize > 0 ? packageData.downloadSize : (parsedPackage?.downloadSize ?? 0)
                     let package = Package(
                         type: packageData.type,
                         fullPackageName: packageData.fullPackageName,
-                        downloadSize: packageData.downloadSize,
-                        downloadURL: packageData.downloadURL,
+                        downloadSize: downloadSize,
+                        downloadURL: downloadURL,
+                        manifestURL: manifestURL,
                         packageVersion: packageData.packageVersion,
                         condition: packageData.condition ?? "",
                         isRequired: packageData.isRequired ?? false,
                         isDefaultSelected: packageData.isDefaultSelected ?? false,
                         isOfficiallyEligible: packageData.isOfficiallyEligible ?? true,
-                        officialFilterReasons: packageData.officialFilterReasons ?? []
+                        officialFilterReasons: packageData.officialFilterReasons ?? [],
+                        validationURL: validationURL,
+                        validationURLType1: validationURLType1,
+                        packageHashKey: packageHashKey
                     )
                     package.isSelected = package.isRequired || (packageData.isSelected ?? false) || package.isDefaultSelected || packageData.downloaded
                     package.hostValidation = packageData.hostValidation
-                    let clampedDownloadedSize = packageData.downloadSize > 0
-                        ? min(max(packageData.downloadedSize, 0), packageData.downloadSize)
+                    let clampedDownloadedSize = package.downloadSize > 0
+                        ? min(max(packageData.downloadedSize, 0), package.downloadSize)
                         : max(packageData.downloadedSize, 0)
                     package.speed = 0
 
-                    if packageData.downloaded || packageData.status == .completed {
+                    let savedAsCompleted = packageData.downloaded || packageData.status == .completed
+                    let completedArchiveIsValid = savedAsCompleted && restoredPackageArchiveIsValid(
+                        package: package,
+                        taskDirectory: taskData.directory,
+                        sapCode: productData.sapCode
+                    )
+
+                    if savedAsCompleted && completedArchiveIsValid {
                         package.downloaded = true
                         package.status = .completed
-                        package.downloadedSize = packageData.downloadSize
+                        package.downloadedSize = package.downloadSize
                         package.progress = 1.0
                     } else {
                         package.downloaded = false
-                        package.downloadedSize = clampedDownloadedSize
+                        package.downloadedSize = savedAsCompleted ? 0 : clampedDownloadedSize
                         package.progress = package.downloadSize > 0
-                            ? min(max(Double(clampedDownloadedSize) / Double(package.downloadSize), 0), 1)
+                            ? min(max(Double(package.downloadedSize) / Double(package.downloadSize), 0), 1)
                             : packageData.progress
-                        package.status = shouldNormalizePackagesToPaused ? .paused : packageData.status
+                        package.status = (shouldNormalizePackagesToPaused || savedAsCompleted) ? .paused : packageData.status
                     }
                     return package
                 }
@@ -204,10 +229,17 @@ class TaskPersistenceManager: @unchecked Sendable {
                 return product
             }
             
+            let hasPendingPackages = products.flatMap { $0.packages }.contains { !$0.downloaded }
             let initialStatus: DownloadStatus
             switch taskData.totalStatus {
             case .completed(let info):
-                initialStatus = .completed(info)
+                initialStatus = hasPendingPackages
+                    ? .paused(DownloadStatus.PauseInfo(
+                        reason: .other(String(localized: "下载包完整性校验未通过")),
+                        timestamp: Date(),
+                        resumable: true
+                    ))
+                    : .completed(info)
             case .failed(let info):
                 initialStatus = .failed(info)
             case .downloading:
@@ -269,6 +301,46 @@ class TaskPersistenceManager: @unchecked Sendable {
         } catch {
             print("Error loading task from \(url): \(error)")
             return nil
+        }
+    }
+
+    private func packageMetadataByFullPackageName(applicationJson: String?) -> [String: ParsedPackage] {
+        guard let applicationJson,
+              !applicationJson.isEmpty,
+              let applicationInfo = try? ApplicationJSONParser.parse(jsonString: applicationJson) else {
+            return [:]
+        }
+
+        var packages: [String: ParsedPackage] = [:]
+        for package in applicationInfo.packages {
+            packages[package.fullPackageName] = package
+        }
+        return packages
+    }
+
+    private func restoredPackageArchiveIsValid(package: Package, taskDirectory: URL, sapCode: String) -> Bool {
+        guard !package.fullPackageName.isEmpty else {
+            return false
+        }
+
+        let fileURL = taskDirectory
+            .appendingPathComponent(sapCode)
+            .appendingPathComponent(package.fullPackageName)
+
+        guard FileManager.default.fileExists(atPath: fileURL.path) else {
+            return false
+        }
+
+        do {
+            let attributes = try FileManager.default.attributesOfItem(atPath: fileURL.path)
+            let actualSize = (attributes[.size] as? NSNumber)?.int64Value ?? 0
+            if package.downloadSize > 0, actualSize != package.downloadSize {
+                return false
+            }
+
+            return true
+        } catch {
+            return false
         }
     }
     
@@ -402,6 +474,10 @@ private struct PackageData: Codable {
     let fullPackageName: String
     let downloadSize: Int64
     let downloadURL: String
+    let manifestURL: String?
+    let validationURL: String?
+    let validationURLType1: String?
+    let packageHashKey: String?
     let downloadedSize: Int64
     let progress: Double
     let speed: Double

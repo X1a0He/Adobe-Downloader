@@ -62,9 +62,10 @@ class HDPIMPropertyTable {
     }
 
     func setupSystemDirectories() {
-        let home = HDPIMRuntimeEnvironment.userHomeDirectory()
+        let home = NSHomeDirectory()
 
         properties["ffcenvironment"] = "PROD"
+        properties["prefmigration"] = "true"
         properties["adobecommon"] = "/Library/Application Support/Adobe"
         properties["adobeprogramfiles"] = "/Applications"
         properties["programfiles"] = "/Applications"
@@ -85,6 +86,10 @@ class HDPIMPropertyTable {
         properties["userdesktop"] = "\(home)/Desktop"
         properties["_oobehome"] = "/Library/Application Support/Adobe"
         properties["userinternetplugins"] = "\(home)/Library/Internet Plug-Ins"
+        properties["userfavorites"] = "\(home)/Library/Favorites"
+        properties["userpictures"] = "\(home)/Pictures"
+        properties["usertemplates"] = "\(home)/Templates"
+        properties["shareddesktop"] = "/Users/Shared/Desktop"
     }
 
     func expandPath(_ rawPath: String) -> String {
@@ -99,13 +104,8 @@ class HDPIMPropertyTable {
             if let value = properties[key.lowercased()] {
                 result = result.replacingOccurrences(of: fullPlaceholder, with: value)
             } else {
-                let afterClose = closeBracket.upperBound
-                let prefix = String(result[..<afterClose])
-                let suffix = String(result[afterClose...])
-                if !suffix.contains("[") { break }
-                let expandedSuffix = expandPathInternal(suffix)
-                result = prefix + expandedSuffix
-                break
+                print("⚠️ [HDPIM] 未知占位符: [\(key)]，替换为空字符串")
+                result = result.replacingOccurrences(of: fullPlaceholder, with: "")
             }
         }
         return result
@@ -123,7 +123,8 @@ class HDPIMPropertyTable {
             if let value = properties[key.lowercased()] {
                 result = result.replacingOccurrences(of: fullPlaceholder, with: value)
             } else {
-                break
+                print("⚠️ [HDPIM] 未知占位符: [\(key)]，替换为空字符串")
+                result = result.replacingOccurrences(of: fullPlaceholder, with: "")
             }
         }
         return result

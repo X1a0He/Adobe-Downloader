@@ -37,6 +37,21 @@ actor InstallManager {
 
     private var isInstalling = false
 
+    private static var shouldEmitDetailedInstallLogs: Bool {
+        #if DEBUG
+        return true
+        #else
+        return false
+        #endif
+    }
+
+    private static func emitDetailedInstallLog(_ message: String, logHandler: ((String) -> Void)?) {
+        guard shouldEmitDetailedInstallLogs else {
+            return
+        }
+        logHandler?(message)
+    }
+
     func install(
         at appPath: URL,
         progressHandler: @escaping (Double, String) -> Void,
@@ -105,7 +120,7 @@ actor InstallManager {
     func cancel() {
         guard isInstalling else { return }
         Task {
-            _ = try? await HelperManager.shared.executeShell("__HDPIM_CANCEL__")
+            try? await HelperManager.shared.cancelCurrentOperation()
         }
         isInstalling = false
     }
@@ -145,7 +160,7 @@ actor InstallManager {
                     let status = components[2]
                     if state.lastLoggedProgressStatus != status {
                         state.lastLoggedProgressStatus = status
-                        logHandler?(status)
+                        emitDetailedInstallLog(status, logHandler: logHandler)
                     }
                     Task { @MainActor in
                         progressHandler(progress, status)
@@ -156,9 +171,11 @@ actor InstallManager {
 
             if line.hasPrefix("LOG|") {
                 let message = String(line.dropFirst(4))
-                logHandler?(message)
-                Task { @MainActor in
-                    progressHandler(state.latestProgress, message)
+                if shouldEmitDetailedInstallLogs {
+                    logHandler?(message)
+                    Task { @MainActor in
+                        progressHandler(state.latestProgress, message)
+                    }
                 }
                 continue
             }
@@ -181,7 +198,7 @@ actor InstallManager {
                 continue
             }
 
-            logHandler?(line)
+            emitDetailedInstallLog(line, logHandler: logHandler)
         }
     }
 
@@ -195,7 +212,7 @@ actor InstallManager {
         }
 
         progressHandler(0.0, "正在准备安装源...")
-        logHandler?("[HDPIM Install] 安装源位于受保护目录，正在复制到临时安装目录: \(appPath.path)")
+        Self.emitDetailedInstallLog("[HDPIM Install] 安装源位于受保护目录，正在复制到临时安装目录: \(appPath.path)", logHandler: logHandler)
 
         let stageRoot = URL(fileURLWithPath: NSHomeDirectory(), isDirectory: true)
             .appendingPathComponent("Library/Application Support/Adobe Downloader/InstallSources", isDirectory: true)
@@ -212,7 +229,7 @@ actor InstallManager {
             throw InstallError.installationFailed("安装源复制失败: \(error.localizedDescription)")
         }
 
-        logHandler?("[HDPIM Install] 临时安装目录准备完成: \(stagedURL.path)")
+        Self.emitDetailedInstallLog("[HDPIM Install] 临时安装目录准备完成: \(stagedURL.path)", logHandler: logHandler)
         return PreparedInstallSource(url: stagedURL, cleanupURL: stageRoot)
     }
 

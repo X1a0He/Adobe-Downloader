@@ -19,7 +19,9 @@ final class PDMDownloadEngine {
         url: URL,
         destinationURL: URL,
         headers: [String: String],
+        expectedTotalSize: Int64 = 0,
         validationURL: String? = nil,
+        validationURLs: [String] = [],
         progressHandler: ((Int64, Int64, Double) -> Void)?,
         rangeAvailabilityHandler: ((Int64, Bool) -> Void)? = nil
     ) async -> PDMDownloadResult {
@@ -51,18 +53,48 @@ final class PDMDownloadEngine {
             etag = sizeResponse.headers["ETag"] ?? sizeResponse.headers["etag"] ?? ""
         }
 
-        if let validationURLString = validationURL, !validationURLString.isEmpty {
+        if totalSize <= 0, expectedTotalSize > 0 {
+            totalSize = expectedTotalSize
+        }
+
+        let validationCandidates = normalizedValidationCandidates(
+            primary: validationURL,
+            candidates: validationURLs
+        )
+
+        if !validationCandidates.isEmpty {
             let validationMgr = PDMValidationManager(communicator: communicator)
-            validationInfo = validationMgr.fetchValidationInfo(
-                from: validationURLString,
-                headers: enrichedHeaders
-            )
-            if validationInfo != nil && totalSize <= 0 {
-                if let info = validationInfo {
-                    let lastSeg = info.lastSegmentSize > 0
-                        ? info.lastSegmentSize
-                        : info.segmentSize
-                    totalSize = Int64(max(0, info.segmentCount - 1)) * info.segmentSize + lastSeg
+            for validationURLString in validationCandidates {
+                validationInfo = validationMgr.fetchValidationInfo(
+                    from: validationURLString,
+                    headers: enrichedHeaders
+                )
+                if validationInfo != nil {
+                    break
+                }
+            }
+            guard validationInfo != nil else {
+                return .error(PDMDownloadError(
+                    code: .downloadFailed,
+                    message: "Validation data could not be downloaded or parsed"
+                ))
+            }
+
+            if let info = validationInfo {
+                let validationSize = validationTotalSize(info)
+                if expectedTotalSize > 0, validationSize > 0, validationSize != expectedTotalSize {
+                    return .error(PDMDownloadError(
+                        code: .signatureValidationFailed,
+                        message: "Validation size does not match expected package size"
+                    ))
+                }
+                if totalSize <= 0 {
+                    totalSize = validationSize
+                } else if validationSize > 0, totalSize != validationSize {
+                    return .error(PDMDownloadError(
+                        code: .signatureValidationFailed,
+                        message: "Validation size does not match remote package size"
+                    ))
                 }
             }
         }
@@ -104,6 +136,25 @@ final class PDMDownloadEngine {
         }
 
         return result
+    }
+
+    private func normalizedValidationCandidates(primary: String?, candidates: [String]) -> [String] {
+        var result: [String] = []
+        for value in [primary].compactMap({ $0 }) + candidates {
+            let normalized = value.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !normalized.isEmpty, !result.contains(normalized) {
+                result.append(normalized)
+            }
+        }
+        return result
+    }
+
+    private func validationTotalSize(_ info: ValidationInfo) -> Int64 {
+        guard info.segmentCount > 0, info.segmentSize > 0 else {
+            return 0
+        }
+        let lastSegmentSize = info.lastSegmentSize > 0 ? info.lastSegmentSize : info.segmentSize
+        return Int64(max(0, info.segmentCount - 1)) * info.segmentSize + lastSegmentSize
     }
 
     func pause(packageId: String) {

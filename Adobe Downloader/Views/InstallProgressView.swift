@@ -886,6 +886,7 @@ private struct InstallActionSection: View {
                         .foregroundColor(.white)
                 }
                 .buttonStyle(BeautifulButtonStyle(baseColor: .red))
+                .disabled(data.status.contains("回滚") || data.logs.last?.contains("回滚") == true)
             }
 
             Spacer()

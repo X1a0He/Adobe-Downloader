@@ -58,11 +58,13 @@ class HDPIMInstallHelper {
     var logHandler: ((String) -> Void)?
 
     private func log(_ message: String) {
+        #if DEBUG
         if let logHandler {
             logHandler(message)
         } else {
             print(message)
         }
+        #endif
     }
 
     init(propertyTable: HDPIMPropertyTable) {
@@ -118,6 +120,7 @@ class HDPIMInstallHelper {
         let stagingFolder = extractDir.appendingPathComponent(aliasPackageName).path
         propertyTable.setStagingFolder(stagingFolder)
         log("[HDPIM InstallHelper] StagingFolder: \(stagingFolder)")
+        setenv(HDPIMHeadlessInstallRunner.stagingFolderEnvironmentKey, stagingFolder, 1)
 
         propertyTable.setProductInstallDir(productInstallDir)
         log("[HDPIM InstallHelper] InstallDir (产品特定): \(productInstallDir)")

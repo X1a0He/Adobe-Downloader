@@ -16,6 +16,7 @@ struct HDPIMExtractionResult {
     let diffJSONURLs: [URL]
     let restoredSymlinkCount: Int
     let restoredPermissionCount: Int
+    let restoredMetadataCount: Int
     let usedRetryCount: Int
 }
 
@@ -128,6 +129,7 @@ final class HDPIMZipExtractor {
             diffJSONURLs: Self.collectArtifacts(in: request.destinationURL, matching: { $0.lastPathComponent.lowercased().hasSuffix("_diff.json") }),
             restoredSymlinkCount: summary.restoredSymlinkCount,
             restoredPermissionCount: summary.restoredPermissionCount,
+            restoredMetadataCount: summary.restoredMetadataCount,
             usedRetryCount: 0
         )
     }
@@ -169,12 +171,19 @@ final class HDPIMZipExtractor {
         let tracker = HDPIMExtractionProgressTracker(totalWork: totalWork, progressHandler: progressHandler)
 
         var pendingSymlinkEntries: [HDPIMZipEntryRecord] = []
+        var pendingAppleDoubleEntries: [HDPIMZipEntryRecord] = []
         var restoredPermissionCount = 0
         let permissionLock = NSLock()
         var preparedDirectories = Set<String>()
 
         for entry in entries {
             try archiveExtractor.throwIfCancelled(cancellationCheck)
+
+            if archiveExtractor.isMacOSXEntry(entry) {
+                pendingAppleDoubleEntries.append(entry)
+                tracker.advance(1)
+                continue
+            }
 
             let outputURL = destinationURL.appendingPathComponent(entry.normalizedPath, isDirectory: entry.type == .directory)
 
@@ -203,7 +212,7 @@ final class HDPIMZipExtractor {
             }
         }
 
-        let regularEntries = entries.filter { $0.type == .regularFile }
+        let regularEntries = entries.filter { $0.type == .regularFile && !archiveExtractor.isMacOSXEntry($0) }
         let workerCount = min(3, max(regularEntries.isEmpty ? 0 : 1, regularEntries.count))
 
         if workerCount > 0 {
@@ -222,12 +231,25 @@ final class HDPIMZipExtractor {
                         while let entry = try awaitNextEntry(from: workQueue) {
                             try self.archiveExtractor.throwIfCancelled(cancellationCheck)
                             let outputURL = destinationURL.appendingPathComponent(entry.normalizedPath, isDirectory: false)
-                            let restored = try session.extractRegularEntry(
-                                entry,
-                                to: outputURL,
-                                compressionType: compressionType,
-                                chunkHandler: { tracker.advance(UInt64($0)) }
-                            )
+                            let restored: Bool
+                            do {
+                                restored = try session.extractRegularEntry(
+                                    entry,
+                                    to: outputURL,
+                                    compressionType: compressionType,
+                                    chunkHandler: { tracker.advance(UInt64($0)) },
+                                    cancellationCheck: cancellationCheck
+                                )
+                            } catch {
+                                try self.archiveExtractor.throwIfCancelled(cancellationCheck)
+                                restored = try session.extractRegularEntry(
+                                    entry,
+                                    to: outputURL,
+                                    compressionType: compressionType,
+                                    chunkHandler: { tracker.advance(UInt64($0)) },
+                                    cancellationCheck: cancellationCheck
+                                )
+                            }
                             if restored {
                                 permissionLock.lock()
                                 restoredPermissionCount += 1
@@ -288,11 +310,29 @@ final class HDPIMZipExtractor {
             try archiveExtractor.validateSymlinkTarget(at: record.linkPath, target: record.linkTarget)
         }
 
+        var restoredMetadataCount = 0
+        if !pendingAppleDoubleEntries.isEmpty {
+            let metadataSession = try archiveExtractor.makeSession(zipURL: zipURL)
+            for entry in pendingAppleDoubleEntries {
+                try archiveExtractor.throwIfCancelled(cancellationCheck)
+                let restored = (try? metadataSession.restoreAppleDoubleMetadata(
+                    entry,
+                    destinationURL: destinationURL,
+                    compressionType: compressionType,
+                    cancellationCheck: cancellationCheck
+                )) ?? false
+                if restored {
+                    restoredMetadataCount += 1
+                }
+            }
+        }
+
         tracker.complete()
 
         return HDPIMMiniZipExtractionSummary(
             restoredSymlinkCount: restoredSymlinkCount,
-            restoredPermissionCount: restoredPermissionCount
+            restoredPermissionCount: restoredPermissionCount,
+            restoredMetadataCount: restoredMetadataCount
         )
     }
 }
@@ -361,6 +401,7 @@ final class HDPIMDMGExtractor {
             diffJSONURLs: [],
             restoredSymlinkCount: 0,
             restoredPermissionCount: 0,
+            restoredMetadataCount: 0,
             usedRetryCount: 0
         )
     }
@@ -524,6 +565,7 @@ final class HDPIMExtractionCoordinator {
                     diffJSONURLs: baseResult.diffJSONURLs,
                     restoredSymlinkCount: baseResult.restoredSymlinkCount,
                     restoredPermissionCount: baseResult.restoredPermissionCount,
+                    restoredMetadataCount: baseResult.restoredMetadataCount,
                     usedRetryCount: attempt
                 )
             } catch {

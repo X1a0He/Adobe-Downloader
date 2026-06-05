@@ -49,7 +49,7 @@ class HDPIMRollbackManager {
 
     init(backupManager: HDPIMBackupManager) {
         self.backupManager = backupManager
-        let appSupport = URL(fileURLWithPath: HDPIMRuntimeEnvironment.userHomeDirectory())
+        let appSupport = URL(fileURLWithPath: NSHomeDirectory())
             .appendingPathComponent("Library/Application Support/Adobe Downloader/Snapshots")
         self.snapshotRoot = appSupport
     }

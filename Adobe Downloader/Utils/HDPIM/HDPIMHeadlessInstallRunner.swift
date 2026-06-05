@@ -5,6 +5,8 @@ enum HDPIMHeadlessInstallRunner {
     static let installArgument = "--hdpim-install"
     static let localExecutionEnvironmentKey = "ADOBE_DOWNLOADER_LOCAL_INSTALL"
     static let userHomeEnvironmentKey = "ADOBE_DOWNLOADER_USER_HOME"
+    static let cancelFileEnvironmentKey = "ADOBE_DOWNLOADER_CANCEL_FILE"
+    static let stagingFolderEnvironmentKey = "ADOBE_DOWNLOADER_STAGING_FOLDER"
 
     static var isActive: Bool {
         productDirectoryPath() != nil
@@ -14,7 +16,12 @@ enum HDPIMHeadlessInstallRunner {
         guard let productDir = productDirectoryPath() else { return }
 
         let semaphore = DispatchSemaphore(value: 0)
+        let cancellationState = HDPIMHeadlessCancellationState(cancelFileURL: cancelFileURL())
+        let signalSources = installCancellationSignalHandlers(cancellationState)
         var exitCode: Int32 = 0
+        defer {
+            signalSources.forEach { $0.cancel() }
+        }
 
         Task.detached(priority: .userInitiated) {
             let pipeline = HDPIMInstallPipeline()
@@ -28,7 +35,9 @@ enum HDPIMHeadlessInstallRunner {
                     logHandler: { message in
                         emit("LOG|\(sanitize(message))")
                     },
-                    cancellationCheck: nil
+                    cancellationCheck: {
+                        cancellationState.isCancelled
+                    }
                 )
                 emit("RESULT|SUCCESS")
             } catch {
@@ -55,6 +64,27 @@ enum HDPIMHeadlessInstallRunner {
         return arguments[index + 1]
     }
 
+    private static func cancelFileURL() -> URL? {
+        guard let path = ProcessInfo.processInfo.environment[cancelFileEnvironmentKey],
+              !path.isEmpty else {
+            return nil
+        }
+        return URL(fileURLWithPath: path)
+    }
+
+    private static func installCancellationSignalHandlers(_ state: HDPIMHeadlessCancellationState) -> [DispatchSourceSignal] {
+        let signals = [SIGTERM, SIGINT]
+        return signals.map { signalNumber in
+            _ = Darwin.signal(signalNumber, SIG_IGN)
+            let source = DispatchSource.makeSignalSource(signal: signalNumber, queue: DispatchQueue.global(qos: .userInitiated))
+            source.setEventHandler {
+                state.markCancelled()
+            }
+            source.resume()
+            return source
+        }
+    }
+
     private static func sanitize(_ value: String) -> String {
         value.replacingOccurrences(of: "\r\n", with: "\n")
             .replacingOccurrences(of: "\n", with: " ")
@@ -63,6 +93,38 @@ enum HDPIMHeadlessInstallRunner {
     private static func emit(_ line: String) {
         print(line)
         fflush(stdout)
+    }
+}
+
+private final class HDPIMHeadlessCancellationState {
+    private let lock = NSLock()
+    private let cancelFileURL: URL?
+    private var cancelled = false
+
+    init(cancelFileURL: URL?) {
+        self.cancelFileURL = cancelFileURL
+    }
+
+    var isCancelled: Bool {
+        lock.lock()
+        let localCancelled = cancelled
+        lock.unlock()
+        if localCancelled {
+            return true
+        }
+        guard let cancelFileURL else {
+            return false
+        }
+        return FileManager.default.fileExists(atPath: cancelFileURL.path)
+    }
+
+    func markCancelled() {
+        lock.lock()
+        cancelled = true
+        lock.unlock()
+        if let cancelFileURL {
+            try? Data([1]).write(to: cancelFileURL, options: .atomic)
+        }
     }
 }
 

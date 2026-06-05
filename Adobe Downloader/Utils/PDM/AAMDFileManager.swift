@@ -19,27 +19,34 @@ final class AAMDFileManager {
     }
 
     func remove() {
-        try? fileManager.removeItem(at: aamdURL)
+        guard fileManager.fileExists(atPath: aamdURL.path),
+              let handle = try? FileHandle(forWritingTo: aamdURL) else {
+            return
+        }
+        defer { try? handle.close() }
+        handle.truncateFile(atOffset: 0)
     }
 
     func writeMetaInfo() {
         let header = "\(AAMDFileManager.headerString)\n"
         guard let data = header.data(using: .utf8) else { return }
+
+        if fileManager.fileExists(atPath: aamdURL.path),
+           let handle = try? FileHandle(forWritingTo: aamdURL) {
+            defer { try? handle.close() }
+            handle.truncateFile(atOffset: 0)
+            handle.write(data)
+            return
+        }
+
         fileManager.createFile(atPath: aamdURL.path, contents: data)
     }
 
-    func writeHeaders(_ headers: [String: String], segmentCount: Int) {
+    func writeHeaders(_ headers: [String: String], segmentTableSpan: Int) {
         guard let handle = try? FileHandle(forWritingTo: aamdURL) else { return }
         defer { try? handle.close() }
 
-        handle.seekToEndOfFile()
-
-        for _ in 0..<segmentCount {
-            let entry = String(format: "%20lu\n", 0)
-            if let data = entry.data(using: .utf8) {
-                handle.write(data)
-            }
-        }
+        handle.seek(toFileOffset: UInt64(headersOffset(segmentTableSpan: segmentTableSpan)))
 
         let xml = constructHeadersXML(headers)
         if let data = xml.data(using: .utf8) {
@@ -128,11 +135,20 @@ final class AAMDFileManager {
             if segSize != segmentSize { return false }
         }
 
+        if let storedBytesToDownload = stored["NO_Of_BYTES_TO_DOWNLOAD"],
+           let bytesToDownload = Int64(storedBytesToDownload) {
+            if bytesToDownload != remoteFileSize { return false }
+        }
+
         return true
     }
 
     private func segmentOffset(_ segment: Int) -> Int {
         AAMDFileManager.headerSize + segment * AAMDFileManager.segmentEntrySize
+    }
+
+    private func headersOffset(segmentTableSpan: Int) -> Int {
+        AAMDFileManager.headerSize + (max(segmentTableSpan, 0) + 1) * AAMDFileManager.segmentEntrySize
     }
 
     private func constructHeadersXML(_ headers: [String: String]) -> String {

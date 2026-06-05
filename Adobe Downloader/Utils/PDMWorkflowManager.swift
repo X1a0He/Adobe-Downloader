@@ -52,6 +52,8 @@ struct AssetGlobalData {
     var manifestPath: String = ""
     var downloadURL: String = ""
     var validationURL: String = ""
+    var validationURLs: [String] = []
+    var inlineValidationData: String = ""
     var downloadFileName: String = ""
     var downloadFileHash: String = ""
     var totalSize: Int64 = 0
@@ -68,6 +70,268 @@ struct PDMError: Error, LocalizedError {
     static let validationDownloadFailed = PDMError(code: 113, message: "Validation file could not be downloaded")
     static let assetDownloadFailed = PDMError(code: 119, message: "Asset download failed")
     static let signatureValidationFailed = PDMError(code: 134, message: "Signature validation failed")
+    static let assetExecutionFailed = PDMError(code: 119, message: "Asset execution failed")
+}
+
+private enum PDMManifestAssetType: String {
+    case zip = "ZIP"
+    case dmg = "DMG"
+    case binary = "BINARY"
+
+    init?(_ rawValue: String) {
+        self.init(rawValue: rawValue.trimmingCharacters(in: .whitespacesAndNewlines).uppercased())
+    }
+}
+
+private enum PDMManifestValidationSource {
+    case relativeURL
+    case type2URL
+    case type1URL
+    case validationDataURL
+}
+
+private struct PDMManifestValidationPath {
+    let value: String
+    let source: PDMManifestValidationSource
+}
+
+private struct PDMManifestXMLDocument {
+    private let document: XMLDocument
+
+    init(element: XMLElement) throws {
+        self.document = try XMLDocument(data: Data(element.xmlString.utf8))
+    }
+
+    func firstString(_ xpath: String) throws -> String? {
+        let value = try document.nodes(forXPath: xpath)
+            .first?
+            .stringValue?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return value?.isEmpty == false ? value : nil
+    }
+
+    func elements(_ xpath: String) throws -> [XMLElement] {
+        try document.nodes(forXPath: xpath).compactMap { $0 as? XMLElement }
+    }
+}
+
+private struct PDMManifestAction {
+    let name: String
+    let type: String
+    let sequenceNumber: Int
+    let actionData: [String: String]
+    let rawXML: String
+
+    var isExtract: Bool {
+        name.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == "extract"
+    }
+
+    var isSupported: Bool {
+        isExtract && sequenceNumber > 0
+    }
+
+    init?(element: XMLElement) throws {
+        let xml = try PDMManifestXMLDocument(element: element)
+
+        self.name = try xml.firstString("//action/name") ?? ""
+        self.type = try xml.firstString("//action/type") ?? ""
+        self.sequenceNumber = Int(try xml.firstString("//action/sequence_no") ?? "") ?? 0
+        self.actionData = try Self.actionData(from: xml)
+        self.rawXML = element.xmlString
+
+        guard !name.isEmpty else {
+            return nil
+        }
+    }
+
+    private static func firstString(_ element: XMLElement, xpaths: [String]) throws -> String? {
+        for xpath in xpaths {
+            let value = try element.nodes(forXPath: xpath)
+                .first?
+                .stringValue?
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            if let value, !value.isEmpty {
+                return value
+            }
+        }
+        return nil
+    }
+
+    private static func actionData(from xml: PDMManifestXMLDocument) throws -> [String: String] {
+        let dataNodes = try xml.elements("//action/action_data/data")
+        var result: [String: String] = [:]
+
+        for dataElement in dataNodes {
+            let key = try firstString(dataElement, xpaths: ["key", ".//key"])
+                ?? dataElement.attribute(forName: "key")?.stringValue
+                ?? ""
+            let value = try firstString(dataElement, xpaths: ["value", ".//value"])
+                ?? dataElement.attribute(forName: "value")?.stringValue
+                ?? ""
+            let normalizedKey = key.trimmingCharacters(in: .whitespacesAndNewlines)
+            let normalizedValue = value.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !normalizedKey.isEmpty {
+                result[normalizedKey] = normalizedValue
+            }
+        }
+
+        return result
+    }
+
+    private static func uniqueElements(_ element: XMLElement, xpaths: [String]) throws -> [XMLElement] {
+        var result: [XMLElement] = []
+        var seen = Set<String>()
+
+        for xpath in xpaths {
+            for node in try element.nodes(forXPath: xpath) {
+                guard let actionElement = node as? XMLElement else {
+                    continue
+                }
+
+                let key = actionElement.xmlString
+                guard seen.insert(key).inserted else {
+                    continue
+                }
+                result.append(actionElement)
+            }
+        }
+
+        return result
+    }
+}
+
+private struct PDMManifestAsset {
+    let type: PDMManifestAssetType
+    let rawXML: String
+    let assetRelativePath: String
+    let assetPath: String
+    let inlineValidationData: String
+    let validationDataRelativeURL: String
+    let validationType2URL: String
+    let validationType1URL: String
+    let validationDataURL: String
+    let sequenceNumber: Int
+    let assetSize: Int64
+    let actions: [PDMManifestAction]
+
+    var downloadPath: String {
+        if !assetRelativePath.isEmpty {
+            return assetRelativePath
+        }
+        return assetPath
+    }
+
+    var validationPaths: [PDMManifestValidationPath] {
+        if !validationDataRelativeURL.isEmpty {
+            return [PDMManifestValidationPath(value: validationDataRelativeURL, source: .relativeURL)]
+        }
+        if !validationType2URL.isEmpty {
+            return [PDMManifestValidationPath(value: validationType2URL, source: .type2URL)]
+        }
+        if !validationType1URL.isEmpty {
+            return [PDMManifestValidationPath(value: validationType1URL, source: .type1URL)]
+        }
+        if !validationDataURL.isEmpty {
+            return [PDMManifestValidationPath(value: validationDataURL, source: .validationDataURL)]
+        }
+        return []
+    }
+
+    var shouldStartOverlappedExtraction: Bool {
+        type == .zip && actions.contains { $0.isExtract }
+    }
+
+    var downloadFileName: String {
+        let path = downloadPath
+        if let url = URL(string: path), !url.lastPathComponent.isEmpty {
+            return url.lastPathComponent
+        }
+        let name = URL(fileURLWithPath: path).lastPathComponent
+        return name.isEmpty ? "asset_\(sequenceNumber)" : name
+    }
+
+    init?(element: XMLElement) throws {
+        let xml = try PDMManifestXMLDocument(element: element)
+        let rawType = try xml.firstString("//asset/asset_type") ?? ""
+
+        guard let type = PDMManifestAssetType(rawType) else {
+            return nil
+        }
+
+        self.type = type
+        self.rawXML = element.xmlString
+        self.assetRelativePath = try xml.firstString("//asset/asset_rel_path") ?? ""
+        self.assetPath = Self.sanitizedAssetPath(try xml.firstString("//asset/asset_path") ?? "")
+        self.inlineValidationData = try xml.firstString("//asset/validation_data_string") ?? ""
+        self.validationDataRelativeURL = try xml.firstString("//asset/validation_data_rel_url") ?? ""
+        self.validationType2URL = try xml.firstString("/asset/validation_urls/type2") ?? ""
+        self.validationType1URL = try xml.firstString("/asset/validation_urls/type1") ?? ""
+        self.validationDataURL = try xml.firstString("//asset/validation_data") ?? ""
+        self.sequenceNumber = Int(try xml.firstString("//asset/sequence_no") ?? "") ?? 0
+        self.assetSize = Int64(try xml.firstString("//asset/asset_size") ?? "") ?? 0
+
+        let actionNodes = try xml.elements("//asset/actions/action")
+        var parsedActions: [PDMManifestAction] = []
+        for actionElement in actionNodes {
+            guard let action = try PDMManifestAction(element: actionElement), action.isSupported else {
+                return nil
+            }
+            parsedActions.append(action)
+        }
+        self.actions = parsedActions.sorted { $0.sequenceNumber < $1.sequenceNumber }
+
+        guard sequenceNumber > 0,
+              assetSize > 0,
+              !downloadPath.isEmpty,
+              !inlineValidationData.isEmpty || !validationPaths.isEmpty else {
+            return nil
+        }
+    }
+
+    private static func firstString(_ element: XMLElement, xpaths: [String]) throws -> String? {
+        for xpath in xpaths {
+            let value = try element.nodes(forXPath: xpath)
+                .first?
+                .stringValue?
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            if let value, !value.isEmpty {
+                return value
+            }
+        }
+        return nil
+    }
+
+    private static func uniqueElements(_ element: XMLElement, xpaths: [String]) throws -> [XMLElement] {
+        var result: [XMLElement] = []
+        var seen = Set<String>()
+
+        for xpath in xpaths {
+            for node in try element.nodes(forXPath: xpath) {
+                guard let actionElement = node as? XMLElement else {
+                    continue
+                }
+
+                let key = actionElement.xmlString
+                guard seen.insert(key).inserted else {
+                    continue
+                }
+                result.append(actionElement)
+            }
+        }
+
+        return result
+    }
+
+    private static func sanitizedAssetPath(_ path: String) -> String {
+        var result = path.trimmingCharacters(in: .whitespacesAndNewlines)
+        if result.contains("ccmdl.adobe.com"), !result.contains("https") {
+            result = result.replacingOccurrences(of: "http", with: "https")
+            result = result.replacingOccurrences(of: "ccmdl", with: "ccmdls")
+        } else if result.contains("stage-ffc-files.corp.adobe.com"), !result.contains("https") {
+            result = result.replacingOccurrences(of: "http", with: "https")
+        }
+        return result
+    }
 }
 
 class PDMWorkflowManager {
@@ -79,6 +343,13 @@ class PDMWorkflowManager {
     private var overlappedExtractor: HDPIMOverlappedZipExtractor?
     private var overlappedExtractionTask: Task<HDPIMExtractionResult, Error>?
     private var overlappedExtractionResult: HDPIMExtractionResult?
+    private var packageIdentifier: String?
+    private var assets: [PDMManifestAsset] = []
+    private var currentAsset: PDMManifestAsset?
+    private var downloadedAssetURL: URL?
+    private var executedAssetURL: URL?
+    private static let defaultValidationServiceBaseURL = "https://cdn-ffc.oobesaas.adobe.com/core/v1/validation"
+    private let validationServiceBaseURL: String
 
     var progressHandler: ((PDMState, Double) -> Void)?
     var completionHandler: ((Result<URL, Error>) -> Void)?
@@ -86,7 +357,14 @@ class PDMWorkflowManager {
 
     private var destinationURL: URL?
 
-    init(tempDirectory: URL) {
+    init(
+        tempDirectory: URL,
+        validationServiceBaseURL: String = PDMWorkflowManager.defaultValidationServiceBaseURL
+    ) {
+        let trimmedValidationServiceBaseURL = validationServiceBaseURL.trimmingCharacters(in: .whitespacesAndNewlines)
+        self.validationServiceBaseURL = trimmedValidationServiceBaseURL.isEmpty
+            ? PDMWorkflowManager.defaultValidationServiceBaseURL
+            : trimmedValidationServiceBaseURL
         self.globalData = AssetGlobalData(tempDirectory: tempDirectory)
     }
 
@@ -95,13 +373,22 @@ class PDMWorkflowManager {
         cdnBaseURL: String,
         headers: [String: String],
         destinationDirectory: URL,
+        packageIdentifier: String? = nil,
         progressHandler: ((PDMState, Double) -> Void)? = nil,
         cancellationCheck: (() async -> Bool)? = nil
     ) async throws -> URL {
         self.progressHandler = progressHandler
         self.cancellationCheck = cancellationCheck
         self.globalData.manifestURL = manifestURL
+        self.packageIdentifier = packageIdentifier
         self.isRunning = true
+        self.currentState = .downloadPackageManifest
+        self.validationInfo = nil
+        self.assets = []
+        self.currentAsset = nil
+        self.downloadedAssetURL = nil
+        self.executedAssetURL = nil
+        self.destinationURL = nil
 
         while currentState != .workflowCompletion && isRunning {
             if let check = cancellationCheck, await check() {
@@ -203,63 +490,160 @@ class PDMWorkflowManager {
         let manifestData = try Data(contentsOf: manifestFile)
         let xmlDoc = try XMLDocument(data: manifestData)
 
-        if let assetPath = try xmlDoc.nodes(forXPath: "//asset_list/asset/asset_path").first?.stringValue {
-            if assetPath.hasPrefix("http") {
-                globalData.downloadURL = assetPath
-            } else {
-                let cleanCdn = cdnBaseURL.hasSuffix("/") ? String(cdnBaseURL.dropLast()) : cdnBaseURL
-                let cleanPath = assetPath.hasPrefix("/") ? assetPath : "/\(assetPath)"
-                globalData.downloadURL = cleanCdn + cleanPath
+        let version = try firstXMLString(xmlDoc, xpaths: ["//manifest/version"])
+        guard version != nil else {
+            throw PDMError.manifestParseFailed
+        }
+
+        assets = []
+        for assetElement in try manifestAssetElements(from: xmlDoc) {
+            guard let asset = try PDMManifestAsset(element: assetElement) else {
+                throw PDMError.manifestParseFailed
             }
+            assets.append(asset)
         }
 
-        if let validationPath = try xmlDoc.nodes(forXPath: "//asset_list/asset/validation_url").first?.stringValue {
-            globalData.validationURL = validationPath
+        guard let asset = assets.last else {
+            throw PDMError.manifestParseFailed
         }
 
-        if let assetSize = try xmlDoc.nodes(forXPath: "//asset_list/asset/asset_size").first?.stringValue {
-            globalData.totalSize = Int64(assetSize) ?? 0
+        currentAsset = asset
+        globalData.downloadURL = resolvedManifestURL(asset.downloadPath, cdnBaseURL: cdnBaseURL)
+        globalData.inlineValidationData = asset.inlineValidationData
+        globalData.validationURLs = []
+        for validationPath in asset.validationPaths {
+            appendValidationURL(validationPath, cdnBaseURL: cdnBaseURL)
         }
-
-        if let downloadURL = URL(string: globalData.downloadURL) {
-            globalData.downloadFileName = downloadURL.lastPathComponent
-        }
+        globalData.validationURL = globalData.validationURLs.first ?? ""
+        globalData.totalSize = asset.assetSize
+        globalData.downloadFileName = asset.downloadFileName
 
         progressHandler?(.parseAssetManifest, 1.0)
         await moveToNextState()
     }
 
+    private func resolvedManifestURL(_ path: String, cdnBaseURL: String) -> String {
+        let trimmedPath = path.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmedPath.isEmpty else {
+            return ""
+        }
+
+        guard URL(string: trimmedPath)?.scheme == nil else {
+            return trimmedPath
+        }
+
+        let cleanCdn = cdnBaseURL.hasSuffix("/") ? String(cdnBaseURL.dropLast()) : cdnBaseURL
+        let cleanPath = trimmedPath.hasPrefix("/") ? trimmedPath : "/\(trimmedPath)"
+        return cleanCdn + cleanPath
+    }
+
+    private func firstXMLString(_ xmlDoc: XMLDocument, xpaths: [String]) throws -> String? {
+        for xpath in xpaths {
+            let value = try xmlDoc.nodes(forXPath: xpath)
+                .first?
+                .stringValue?
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            if let value, !value.isEmpty {
+                return value
+            }
+        }
+        return nil
+    }
+
+    private func manifestAssetElements(from xmlDoc: XMLDocument) throws -> [XMLElement] {
+        try xmlDoc.nodes(forXPath: "//manifest/asset_list/asset").compactMap { $0 as? XMLElement }
+    }
+
+    private func appendValidationURL(_ path: PDMManifestValidationPath, cdnBaseURL: String) {
+        let resolvedURL = resolvedManifestValidationURL(path, cdnBaseURL: cdnBaseURL)
+        let candidates = [resolvedURL]
+            + validationServiceFallbackURLs(for: resolvedURL)
+            + validationServiceFallbackURLs(for: path.value)
+
+        for candidate in candidates where !candidate.isEmpty {
+            if !globalData.validationURLs.contains(candidate) {
+                globalData.validationURLs.append(candidate)
+            }
+        }
+    }
+
+    private func resolvedManifestValidationURL(_ path: PDMManifestValidationPath, cdnBaseURL: String) -> String {
+        switch path.source {
+        case .relativeURL:
+            return resolvedManifestURL(path.value, cdnBaseURL: cdnBaseURL)
+        case .type2URL, .type1URL, .validationDataURL:
+            return path.value.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+    }
+
+    private func validationServiceFallbackURLs(for value: String) -> [String] {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return [] }
+
+        let fileName: String
+        if let url = URL(string: trimmed), !url.lastPathComponent.isEmpty {
+            fileName = url.lastPathComponent
+        } else {
+            fileName = URL(fileURLWithPath: trimmed).lastPathComponent
+        }
+
+        guard !fileName.isEmpty else {
+            return []
+        }
+
+        let cleanBaseURL = validationServiceBaseURL.hasSuffix("/") ? String(validationServiceBaseURL.dropLast()) : validationServiceBaseURL
+        return ["\(cleanBaseURL)/\(fileName)"]
+    }
+
     private func handleAssetValidationDownload(headers: [String: String]) async throws {
-        guard !globalData.validationURL.isEmpty else {
+        let validationFile = globalData.tempDirectory.appendingPathComponent("validation.xml")
+
+        if !globalData.inlineValidationData.isEmpty {
+            try globalData.inlineValidationData.write(to: validationFile, atomically: true, encoding: .utf8)
+            progressHandler?(.downloadAssetValidation, 1.0)
+            await moveToNextState()
+            return
+        }
+
+        guard !globalData.validationURLs.isEmpty else {
             await moveToNextState()
             return
         }
 
         progressHandler?(.downloadAssetValidation, 0)
 
-        guard let url = URL(string: globalData.validationURL) else {
+        for validationURL in globalData.validationURLs {
+            guard let url = URL(string: validationURL) else {
+                continue
+            }
+
+            var request = URLRequest(url: url)
+            request.httpMethod = "GET"
+            request.timeoutInterval = NetworkConstants.downloadTimeout
+            headers.forEach { request.setValue($0.value, forHTTPHeaderField: $0.key) }
+
+            let data: Data
+            let response: URLResponse
+            do {
+                (data, response) = try await URLSession.shared.data(for: request)
+            } catch {
+                continue
+            }
+
+            guard let httpResponse = response as? HTTPURLResponse,
+                  (200...299).contains(httpResponse.statusCode),
+                  !data.isEmpty else {
+                continue
+            }
+
+            try data.write(to: validationFile)
+
+            progressHandler?(.downloadAssetValidation, 1.0)
             await moveToNextState()
             return
         }
 
-        var request = URLRequest(url: url)
-        request.httpMethod = "GET"
-        request.timeoutInterval = NetworkConstants.downloadTimeout
-        headers.forEach { request.setValue($0.value, forHTTPHeaderField: $0.key) }
-
-        let (data, response) = try await URLSession.shared.data(for: request)
-
-        guard let httpResponse = response as? HTTPURLResponse,
-              (200...299).contains(httpResponse.statusCode) else {
-            await moveToNextState()
-            return
-        }
-
-        let validationFile = globalData.tempDirectory.appendingPathComponent("validation.xml")
-        try data.write(to: validationFile)
-
-        progressHandler?(.downloadAssetValidation, 1.0)
-        await moveToNextState()
+        throw PDMError.validationDownloadFailed
     }
 
     private func handleAssetValidationParsing() async throws {
@@ -274,10 +658,24 @@ class PDMWorkflowManager {
             if globalData.downloadFileName.isEmpty, let info = validationInfo {
                 globalData.downloadFileName = "asset_\(info.packageHashKey.prefix(8)).zip"
             }
+
+            if let info = validationInfo {
+                let totalSize = validationTotalSize(info)
+                if globalData.totalSize <= 0 {
+                    globalData.totalSize = totalSize
+                } else if totalSize > 0, totalSize != globalData.totalSize {
+                    throw PDMError(code: 107, message: "Validation size does not match asset size")
+                }
+            }
         }
 
         progressHandler?(.parseAssetValidation, 1.0)
         await moveToNextState()
+    }
+
+    private func validationTotalSize(_ info: ValidationInfo) -> Int64 {
+        let lastSegmentSize = info.lastSegmentSize > 0 ? info.lastSegmentSize : info.segmentSize
+        return Int64(max(0, info.segmentCount - 1)) * info.segmentSize + lastSegmentSize
     }
 
     private func handleCheckDownloadedBits(destinationDirectory: URL) async throws {
@@ -289,11 +687,12 @@ class PDMWorkflowManager {
 
             if FileManager.default.fileExists(atPath: filePath.path) {
                 let attrs = try? FileManager.default.attributesOfItem(atPath: filePath.path)
-                let existingSize = attrs?[.size] as? Int64 ?? 0
+                let existingSize = (attrs?[.size] as? NSNumber)?.int64Value ?? 0
 
                 if existingSize == globalData.totalSize && globalData.totalSize > 0 {
                     progressHandler?(.checkDownloadedBits, 1.0)
-                    currentState = .workflowCompletion
+                    downloadedAssetURL = filePath
+                    currentState = .assetSignatureValidation
                     return
                 }
             }
@@ -306,14 +705,15 @@ class PDMWorkflowManager {
     private func handleStartOverlappedExtraction(destinationDirectory: URL) async throws {
         progressHandler?(.startOverlappedExtraction, 0)
 
-        guard !globalData.downloadURL.isEmpty,
+        guard currentAsset?.shouldStartOverlappedExtraction == true,
+              !globalData.downloadURL.isEmpty,
               let url = URL(string: globalData.downloadURL) else {
             await moveToNextState()
             return
         }
 
         let fileName = globalData.downloadFileName.isEmpty ? url.lastPathComponent : globalData.downloadFileName
-        guard fileName.lowercased().hasSuffix(".zip") else {
+        guard currentAsset?.type == .zip, fileName.lowercased().hasSuffix(".zip") else {
             await moveToNextState()
             return
         }
@@ -359,17 +759,20 @@ class PDMWorkflowManager {
         let fileName = globalData.downloadFileName.isEmpty ? url.lastPathComponent : globalData.downloadFileName
         let filePath = destinationDirectory.appendingPathComponent(fileName)
         destinationURL = filePath
+        downloadedAssetURL = filePath
 
         progressHandler?(.downloadAssetBits, 0)
 
-        let packageIdentifier = "PDM_\(fileName)"
+        let effectivePackageIdentifier = packageIdentifier ?? "PDM_\(fileName)"
 
         let result = await PDMDownloadEngine.shared.downloadFile(
-            packageId: packageIdentifier,
+            packageId: effectivePackageIdentifier,
             url: url,
             destinationURL: filePath,
             headers: headers,
+            expectedTotalSize: globalData.totalSize,
             validationURL: globalData.validationURL.isEmpty ? nil : globalData.validationURL,
+            validationURLs: globalData.validationURLs,
             progressHandler: { [weak self] downloaded, total, speed in
                 let progress = total > 0 ? Double(downloaded) / Double(total) : 0
                 self?.progressHandler?(.downloadAssetBits, progress)
@@ -411,30 +814,28 @@ class PDMWorkflowManager {
     private func handleExecutionOfAsset(destinationDirectory: URL) async throws {
         progressHandler?(.executeAsset, 0)
 
-        let fileName = globalData.downloadFileName.isEmpty ?
-            URL(string: globalData.downloadURL)?.lastPathComponent ?? "asset" :
-            globalData.downloadFileName
-        let assetURL = destinationDirectory.appendingPathComponent(fileName)
+        guard let asset = currentAsset else {
+            await moveToNextState()
+            return
+        }
 
-        if fileName.lowercased().hasSuffix(".dmg") {
-            let extractor = HDPIMDMGExtractor()
-            let result = try await extractor.extract(
-                request: HDPIMExtractionRequest(
-                    sourceURL: assetURL,
-                    destinationURL: destinationDirectory,
-                    compressionType: "dmg",
-                    packageName: fileName,
-                    validationURL: nil,
-                    isDMG: true,
-                    allowOverlap: false
-                ),
-                cancellationCheck: { [weak self] in !(self?.isRunning ?? false) }
-            )
-            destinationURL = result.extractRoot
-        } else if let extractionResult = overlappedExtractionResult {
-            destinationURL = extractionResult.extractRoot
-        } else {
-            destinationURL = assetURL
+        let assetURL = downloadedAssetURL ?? assetFileURL(destinationDirectory: destinationDirectory)
+        guard FileManager.default.fileExists(atPath: assetURL.path) else {
+            throw PDMError.assetExecutionFailed
+        }
+
+        guard !asset.actions.isEmpty else {
+            executedAssetURL = assetURL
+            progressHandler?(.executeAsset, 1.0)
+            await moveToNextState()
+            return
+        }
+
+        for action in asset.actions {
+            guard action.isExtract else {
+                throw PDMError.assetExecutionFailed
+            }
+            executedAssetURL = try await executeExtractAction(asset: asset, assetURL: assetURL)
         }
 
         progressHandler?(.executeAsset, 1.0)
@@ -444,32 +845,95 @@ class PDMWorkflowManager {
     private func handleAssetSignatureValidation() async throws {
         progressHandler?(.assetSignatureValidation, 0)
 
-        guard let destination = destinationURL else {
-            await moveToNextState()
-            return
+        guard let assetURL = downloadedAssetURL ?? destinationURL else {
+            throw PDMError.signatureValidationFailed
         }
 
-        if destination.pathExtension.lowercased() == "dmg" ||
-           destination.pathExtension.lowercased() == "pkg" {
-            let process = Process()
-            process.executableURL = URL(fileURLWithPath: "/usr/bin/codesign")
-            process.arguments = ["--verify", "--deep", "--strict", destination.path]
+        if let validationInfo, globalData.totalSize > 0 {
+            let isValid = try SignatureValidator.validateWithSegments(fileURL: assetURL, validationInfo: validationInfo)
+            guard isValid else {
+                throw PDMError.signatureValidationFailed
+            }
+        }
 
-            let pipe = Pipe()
-            process.standardError = pipe
-
-            try process.run()
-            process.waitUntilExit()
-
-            if process.terminationStatus != 0 {
-                let data = pipe.fileHandleForReading.readDataToEndOfFile()
-                let output = String(data: data, encoding: .utf8) ?? ""
-                throw PDMError(code: 134, message: "Signature validation failed: \(output)")
+        if shouldValidateCodeSignature(assetURL) {
+            guard SignatureValidator.verifyCodeSignature(at: assetURL) else {
+                throw PDMError.signatureValidationFailed
             }
         }
 
         progressHandler?(.assetSignatureValidation, 1.0)
         await moveToNextState()
+    }
+
+    private func assetFileURL(destinationDirectory: URL) -> URL {
+        if let downloadedAssetURL {
+            return downloadedAssetURL
+        }
+
+        let fileName = globalData.downloadFileName.isEmpty ?
+            URL(string: globalData.downloadURL)?.lastPathComponent ?? "asset" :
+            globalData.downloadFileName
+        return destinationDirectory.appendingPathComponent(fileName)
+    }
+
+    private func executeExtractAction(asset: PDMManifestAsset, assetURL: URL) async throws -> URL {
+        switch asset.type {
+        case .zip:
+            if let extractionResult = overlappedExtractionResult {
+                return extractionResult.extractRoot
+            }
+
+            let extractRoot = globalData.tempDirectory
+                .appendingPathComponent("PDMExtract-\(UUID().uuidString)", isDirectory: true)
+            let extractor = HDPIMZipExtractor()
+            let result = try extractor.extract(
+                request: HDPIMExtractionRequest(
+                    sourceURL: assetURL,
+                    destinationURL: extractRoot,
+                    compressionType: "",
+                    packageName: assetURL.lastPathComponent,
+                    validationURL: globalData.validationURL.isEmpty ? nil : globalData.validationURL,
+                    isDMG: false,
+                    allowOverlap: false
+                ),
+                progressHandler: { [weak self] progress in
+                    self?.progressHandler?(.executeAsset, progress)
+                },
+                cancellationCheck: { [weak self] in !(self?.isRunning ?? false) }
+            )
+            return result.extractRoot
+
+        case .dmg:
+            let extractRoot = globalData.tempDirectory
+                .appendingPathComponent("PDMExtract-\(UUID().uuidString)", isDirectory: true)
+            let extractor = HDPIMDMGExtractor()
+            let result = try await extractor.extract(
+                request: HDPIMExtractionRequest(
+                    sourceURL: assetURL,
+                    destinationURL: extractRoot,
+                    compressionType: "dmg",
+                    packageName: assetURL.lastPathComponent,
+                    validationURL: nil,
+                    isDMG: true,
+                    allowOverlap: false
+                ),
+                cancellationCheck: { [weak self] in !(self?.isRunning ?? false) }
+            )
+            return result.extractRoot
+
+        case .binary:
+            return assetURL
+        }
+    }
+
+    private func shouldValidateCodeSignature(_ url: URL) -> Bool {
+        switch url.pathExtension.lowercased() {
+        case "app", "pkg", "dmg":
+            return true
+        default:
+            return false
+        }
     }
 
     private func moveToNextState() async {

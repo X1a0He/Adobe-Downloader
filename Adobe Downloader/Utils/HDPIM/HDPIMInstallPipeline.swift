@@ -55,11 +55,13 @@ class HDPIMInstallPipeline {
     }
 
     private func log(_ message: String) {
+        #if DEBUG
         if let logHandler {
             logHandler(message)
         } else {
             print(message)
         }
+        #endif
     }
 
     func install(
@@ -90,6 +92,7 @@ class HDPIMInstallPipeline {
         let installDir = requestInfo["InstallDir"] ?? "/Applications"
         propertyTable.setInstallDir(installDir)
         propertyTable.mergeFromRequestInfo(requestInfo)
+        propertyTable.setProperty("workflowType", "install")
 
         progressHandler(0.05, "正在收集包信息...")
         try HDPIMDatabase.shared.open()
@@ -141,6 +144,9 @@ class HDPIMInstallPipeline {
         }
 
         log("[HDPIM Pipeline] 本次实际需要安装 \(packagesToInstall.count) 个包: \(packagesToInstall.map { $0.packageName })")
+
+        progressHandler(0.075, "正在校验安装包完整性...")
+        try validatePackageArchives(packagesToInstall)
 
         progressHandler(0.08, "正在检查冲突进程...")
         try checkConflictingProcesses(packages: packagesToInstall)
@@ -208,9 +214,9 @@ class HDPIMInstallPipeline {
                     let zipSize = (try? FileManager.default.attributesOfItem(atPath: pkg.zipPath.path)[.size] as? Int64) ?? 0
                     log("[HDPIM Pipeline] ZIP 大小: \(ByteCountFormatter.string(fromByteCount: zipSize, countStyle: .file))")
                     if pkg.compressionType.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == "zip-lzma2" {
-                        log("[HDPIM Pipeline] 解压后端: native-liblzma + 3 worker")
+                        log("[HDPIM Pipeline] 解压后端: minizip-ng + 7-Zip LZMA2 + 3 worker")
                     } else {
-                        log("[HDPIM Pipeline] 解压后端: cminizip + 3 worker")
+                        log("[HDPIM Pipeline] 解压后端: minizip-ng + 3 worker")
                     }
                     progressHandler(baseProgress, "正在解压 \(pkg.packageName) (\(index+1)/\(totalPackages))...")
 
@@ -220,6 +226,7 @@ class HDPIMInstallPipeline {
                         extractedPackage = try await extractPackage(
                             pkg: pkg,
                             propertyTable: propertyTable,
+                            cancellationCheck: cancellationCheck,
                             progressHandler: { extractProgress in
                                 let clampedProgress = min(max(extractProgress, 0), 1)
                                 let mappedProgress = baseProgress + clampedProgress * 0.02
@@ -238,7 +245,7 @@ class HDPIMInstallPipeline {
                         let extractDir = extractedPackage.extractDir
                         log("[HDPIM Pipeline] 解压完成: \(pkg.packageName) → \(extractDir.path)")
                         log("[HDPIM Pipeline] PIMX 校验通过: \(extractedPackage.validation.pimxURL.path)")
-                        log("[HDPIM Pipeline] 解压恢复统计: symlink=\(extractedPackage.extractionResult.restoredSymlinkCount), permissions=\(extractedPackage.extractionResult.restoredPermissionCount), retries=\(extractedPackage.extractionResult.usedRetryCount)")
+                        log("[HDPIM Pipeline] 解压恢复统计: symlink=\(extractedPackage.extractionResult.restoredSymlinkCount), permissions=\(extractedPackage.extractionResult.restoredPermissionCount), metadata=\(extractedPackage.extractionResult.restoredMetadataCount), retries=\(extractedPackage.extractionResult.usedRetryCount)")
                         if !extractedPackage.extractionResult.diffJSONURLs.isEmpty {
                             log("[HDPIM Pipeline] 发现 diff.json: \(extractedPackage.extractionResult.diffJSONURLs.map(\.lastPathComponent))")
                         }
@@ -641,6 +648,34 @@ class HDPIMInstallPipeline {
         )
     }
 
+    private func validatePackageArchives(_ packages: [PackageToInstall]) throws {
+        for package in packages {
+            try validatePackageArchive(package)
+        }
+    }
+
+    private func validatePackageArchive(_ package: PackageToInstall) throws {
+        if package.parsed.downloadSize > 0 {
+            let actualSize = try zipFileSize(package.zipPath)
+            guard actualSize == package.parsed.downloadSize else {
+                throw HDPIMInstallError.extractionFailed(
+                    "安装包校验失败: \(package.packageName) 大小不一致，期望 \(formatByteCount(package.parsed.downloadSize))，实际 \(formatByteCount(actualSize))。请重新下载该包后再安装"
+                )
+            }
+        }
+
+        log("[HDPIM Pipeline] 安装包大小校验通过: \(package.packageName)")
+    }
+
+    private func zipFileSize(_ zipURL: URL) throws -> Int64 {
+        let attributes = try FileManager.default.attributesOfItem(atPath: zipURL.path)
+        return (attributes[.size] as? NSNumber)?.int64Value ?? 0
+    }
+
+    private func formatByteCount(_ value: Int64) -> String {
+        ByteCountFormatter.string(fromByteCount: value, countStyle: .file)
+    }
+
     private func resolvePackageExecutionMode(for package: PackageToInstall) async -> PackageExecutionMode {
         let processorFamily = HDPIMProcessorFamily.from(platform: package.platform)
         let installedPackages = HDPIMDatabase.shared.getInstalledPackageSnapshots(
@@ -739,6 +774,7 @@ class HDPIMInstallPipeline {
     private func extractPackage(
         pkg: PackageToInstall,
         propertyTable: HDPIMPropertyTable,
+        cancellationCheck: (() -> Bool)? = nil,
         progressHandler: ((Double) -> Void)? = nil
     ) async throws -> ValidatedExtractPackage {
         let extractDir = try makeExtractLocation(installDir: pkg.productInstallDir)
@@ -747,7 +783,8 @@ class HDPIMInstallPipeline {
         let extractionResult = try await extractPackageAssets(
             pkg: pkg,
             to: extractDir,
-            progressHandler: progressHandler
+            progressHandler: progressHandler,
+            cancellationCheck: cancellationCheck
         )
         guard !extractionResult.pimxURLs.isEmpty else {
             throw HDPIMInstallError.pimxNotFound("包 \(pkg.packageName) 解压后未找到 .pimx")
@@ -770,7 +807,8 @@ class HDPIMInstallPipeline {
     private func extractPackageAssets(
         pkg: PackageToInstall,
         to destination: URL,
-        progressHandler: ((Double) -> Void)? = nil
+        progressHandler: ((Double) -> Void)? = nil,
+        cancellationCheck: (() -> Bool)? = nil
     ) async throws -> HDPIMExtractionResult {
         let coordinator = HDPIMExtractionCoordinator()
         let result = try await coordinator.extract(
@@ -779,7 +817,7 @@ class HDPIMInstallPipeline {
                 destinationURL: destination,
                 compressionType: pkg.compressionType,
                 packageName: pkg.packageName,
-                validationURL: pkg.parsed.validationURLType2,
+                validationURL: pkg.parsed.validationURLType2 ?? pkg.parsed.validationURLType1,
                 isDMG: pkg.parsed.type.lowercased() == "dmg",
                 allowOverlap: false
             ),
@@ -788,7 +826,7 @@ class HDPIMInstallPipeline {
                 self?.log("[HDPIM Pipeline] 解压重试 \(attempt)/\(maxRetryCount): \(pkg.packageName), reason=\(error.localizedDescription)")
             },
             cancellationCheck: { [weak self] in
-                self?.isCancelled ?? false
+                (self?.isCancelled ?? false) || (cancellationCheck?() ?? false)
             }
         )
 

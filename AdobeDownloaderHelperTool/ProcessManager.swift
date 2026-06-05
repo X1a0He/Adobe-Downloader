@@ -1,4 +1,5 @@
 import Foundation
+import Darwin
 
 final class ProcessManager {
     static let shared = ProcessManager()
@@ -6,6 +7,7 @@ final class ProcessManager {
     private var currentProcess: Process?
     private var outputPipe: Pipe?
     private var errorPipe: Pipe?
+    private var cancelFileURL: URL?
     private var outputBuffer = ""
     private let queue = DispatchQueue(label: "com.helper.process")
 
@@ -30,10 +32,12 @@ final class ProcessManager {
         let process = Process()
         let outPipe = Pipe()
         let errPipe = Pipe()
+        let cancelURL = makeCancelFileURL()
+        try? FileManager.default.removeItem(at: cancelURL)
 
         process.executableURL = executableURL
         process.arguments = ["--hdpim-install", productDir]
-        process.environment = createEnvironment(userHome: userHome)
+        process.environment = createEnvironment(userHome: userHome, cancelFileURL: cancelURL)
         process.standardOutput = outPipe
         process.standardError = errPipe
 
@@ -51,6 +55,7 @@ final class ProcessManager {
             currentProcess = process
             outputPipe = outPipe
             errorPipe = errPipe
+            cancelFileURL = cancelURL
         }
     }
 
@@ -80,8 +85,13 @@ final class ProcessManager {
 
     func cancel() {
         queue.sync {
-            currentProcess?.terminate()
-            cleanup()
+            guard let process = currentProcess else { return }
+            if let cancelFileURL {
+                try? Data([1]).write(to: cancelFileURL, options: .atomic)
+            }
+            if process.isRunning {
+                process.terminate()
+            }
         }
     }
 
@@ -117,18 +127,28 @@ final class ProcessManager {
     private func cleanup() {
         outputPipe?.fileHandleForReading.readabilityHandler = nil
         errorPipe?.fileHandleForReading.readabilityHandler = nil
+        if let cancelFileURL {
+            try? FileManager.default.removeItem(at: cancelFileURL)
+        }
         currentProcess = nil
         outputPipe = nil
         errorPipe = nil
+        cancelFileURL = nil
         outputBuffer = ""
     }
 
-    private func createEnvironment(userHome: String) -> [String: String] {
+    private func createEnvironment(userHome: String, cancelFileURL: URL) -> [String: String] {
         var env = ProcessInfo.processInfo.environment
         env["ADOBE_DOWNLOADER_LOCAL_INSTALL"] = "1"
         env["ADOBE_DOWNLOADER_USER_HOME"] = userHome
+        env["ADOBE_DOWNLOADER_CANCEL_FILE"] = cancelFileURL.path
         env["HOME"] = userHome
         return env
+    }
+
+    private func makeCancelFileURL() -> URL {
+        FileManager.default.temporaryDirectory
+            .appendingPathComponent("adobe-downloader-hdpim-\(UUID().uuidString).cancel", isDirectory: false)
     }
 
     private func locateMainAppExecutable() throws -> URL {

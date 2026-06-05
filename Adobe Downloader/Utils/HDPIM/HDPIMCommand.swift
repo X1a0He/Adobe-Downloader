@@ -29,6 +29,11 @@ extension HDPIMCommand {
     func getPimxCommandFragments() -> [HDPIMPimxCommandFragment] { [] }
 }
 
+struct HDPIMShellExecutionResult {
+    let output: String
+    let exitCode: Int32
+}
+
 enum HDPIMCommandError: Int, Error, LocalizedError {
     case success = 0
     case pimxInvalid = 3
@@ -92,10 +97,25 @@ enum HDPIMCommandExecutor {
 
     static func executeShell(_ command: String) async throws -> String {
         if useLocalExecution {
-            return try await executeLocalShell(command)
+            let result = try await executeLocalShellResult(command)
+            if result.exitCode == 0 {
+                return result.output.isEmpty ? "Success" : result.output
+            }
+            return "Error: Command failed with exit code \(result.exitCode): \(result.output)"
         }
 
         return try await HelperManager.shared.executeShell(command)
+    }
+
+    static func executeShellResult(_ command: String) async throws -> HDPIMShellExecutionResult {
+        if useLocalExecution {
+            return try await executeLocalShellResult(command)
+        }
+
+        let marker = "__ADOBE_DOWNLOADER_EXIT_CODE_\(UUID().uuidString.replacingOccurrences(of: "-", with: "_"))__"
+        let wrappedCommand = "{ \(command)\n}; __ad_status=$?; printf '\\n\(marker):%d\\n' \"$__ad_status\"; exit 0"
+        let output = try await HelperManager.shared.executeShell(wrappedCommand)
+        return parseShellResult(output: output, marker: marker)
     }
 
     static func executeShellChecked(
@@ -114,7 +134,7 @@ enum HDPIMCommandExecutor {
         FileManager.default.fileExists(atPath: path)
     }
 
-    private static func executeLocalShell(_ command: String) async throws -> String {
+    private static func executeLocalShellResult(_ command: String) async throws -> HDPIMShellExecutionResult {
         return try await withCheckedThrowingContinuation { continuation in
             DispatchQueue.global(qos: .userInitiated).async {
                 let task = Process()
@@ -133,19 +153,44 @@ enum HDPIMCommandExecutor {
                     let errorData = stderr.fileHandleForReading.readDataToEndOfFile()
                     let output = String(data: outputData, encoding: .utf8) ?? ""
                     let errorOutput = String(data: errorData, encoding: .utf8) ?? ""
-
-                    if task.terminationStatus == 0 {
-                        let result = output.trimmingCharacters(in: .whitespacesAndNewlines)
-                        continuation.resume(returning: result.isEmpty ? "Success" : result)
-                    } else {
-                        let message = errorOutput.trimmingCharacters(in: .whitespacesAndNewlines)
-                        continuation.resume(returning: "Error: Command failed with exit code \(task.terminationStatus): \(message)")
-                    }
+                    let resultOutput = [output, errorOutput]
+                        .filter { !$0.isEmpty }
+                        .joined(separator: "\n")
+                        .trimmingCharacters(in: .whitespacesAndNewlines)
+                    continuation.resume(returning: HDPIMShellExecutionResult(
+                        output: resultOutput,
+                        exitCode: task.terminationStatus
+                    ))
                 } catch {
                     continuation.resume(throwing: error)
                 }
             }
         }
+    }
+
+    private static func parseShellResult(output: String, marker: String) -> HDPIMShellExecutionResult {
+        guard let markerRange = output.range(of: "\(marker):", options: .backwards) else {
+            return HDPIMShellExecutionResult(
+                output: output.trimmingCharacters(in: .whitespacesAndNewlines),
+                exitCode: 0
+            )
+        }
+
+        let commandOutput = String(output[..<markerRange.lowerBound])
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let statusStart = markerRange.upperBound
+        let statusTail = output[statusStart...]
+        let statusText = statusTail
+            .split(whereSeparator: { $0 == "\n" || $0 == "\r" })
+            .first
+            .map(String.init)?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? "0"
+        let exitCode = Int32(statusText) ?? 0
+
+        return HDPIMShellExecutionResult(
+            output: commandOutput,
+            exitCode: exitCode
+        )
     }
 }
 

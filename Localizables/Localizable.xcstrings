@@ -872,6 +872,9 @@
         }
       }
     },
+    "下载包完整性校验未通过" : {
+
+    },
     "下载失败" : {
       "extractionState" : "stale",
       "localizations" : {

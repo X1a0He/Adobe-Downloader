@@ -110,8 +110,12 @@ final class HelperManager: ObservableObject {
     }
 
     private func isRunningFromValidLocation() -> Bool {
+        #if DEBUG
+        return true
+        #else
         let bundlePath = Bundle.main.bundleURL.path
         return bundlePath.hasPrefix("/Applications/")
+        #endif
     }
 
     private func saveInstalledVersion() {

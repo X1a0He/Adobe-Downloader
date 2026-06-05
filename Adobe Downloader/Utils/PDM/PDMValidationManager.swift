@@ -52,16 +52,26 @@ final class PDMValidationManager {
 
         let computedHash: String
 
-        switch algorithm.lowercased() {
-        case "sha256", "sha-256":
+        let normalizedAlgorithm = algorithm.lowercased()
+
+        switch normalizedAlgorithm {
+        case "sha256", "sha-256", "type2":
             let digest = SHA256.hash(data: data)
             computedHash = digest.map { String(format: "%02x", $0) }.joined()
         case "sha1", "sha-1":
             let digest = Insecure.SHA1.hash(data: data)
             computedHash = digest.map { String(format: "%02x", $0) }.joined()
-        default:
+        case "md5", "type1":
             let digest = Insecure.MD5.hash(data: data)
             computedHash = digest.map { String(format: "%02x", $0) }.joined()
+        default:
+            if expectedHash.count == 64 {
+                let digest = SHA256.hash(data: data)
+                computedHash = digest.map { String(format: "%02x", $0) }.joined()
+            } else {
+                let digest = Insecure.MD5.hash(data: data)
+                computedHash = digest.map { String(format: "%02x", $0) }.joined()
+            }
         }
 
         return computedHash.lowercased() == expectedHash.lowercased()
@@ -73,7 +83,7 @@ final class PDMValidationManager {
         totalSize: Int64
     ) throws -> Bool {
         let attrs = try FileManager.default.attributesOfItem(atPath: fileURL.path)
-        let fileSize = attrs[.size] as? Int64 ?? 0
+        let fileSize = (attrs[.size] as? NSNumber)?.int64Value ?? 0
         guard fileSize == totalSize else {
             return false
         }
@@ -81,17 +91,18 @@ final class PDMValidationManager {
         let fileHandle = try FileHandle(forReadingFrom: fileURL)
         defer { try? fileHandle.close() }
 
-        for (index, segment) in validationInfo.segments.enumerated() {
+        for segment in validationInfo.segments {
+            let segmentIndex = segment.segmentNumber - 1
             let segmentSize: Int64
-            if index == validationInfo.segmentCount - 1 {
+            if segment.segmentNumber == validationInfo.segmentCount {
                 segmentSize = validationInfo.lastSegmentSize > 0
                     ? validationInfo.lastSegmentSize
-                    : (totalSize - Int64(index) * validationInfo.segmentSize)
+                    : (totalSize - Int64(segmentIndex) * validationInfo.segmentSize)
             } else {
                 segmentSize = validationInfo.segmentSize
             }
 
-            let offset = Int64(index) * validationInfo.segmentSize
+            let offset = Int64(segmentIndex) * validationInfo.segmentSize
             try fileHandle.seek(toOffset: UInt64(offset))
             guard let segmentData = try fileHandle.read(upToCount: Int(segmentSize)) else {
                 return false
@@ -102,7 +113,7 @@ final class PDMValidationManager {
                 expectedHash: segment.hash,
                 algorithm: validationInfo.algorithm
             ) {
-                throw PDMDownloadError.segmentValidationFailed(index)
+                throw PDMDownloadError.segmentValidationFailed(segmentIndex)
             }
         }
 

@@ -132,6 +132,16 @@ private func makeDeleteEntry(
     )
 }
 
+private func isDirectoryDeleteTarget(_ path: String) -> Bool {
+    var isDirectory: ObjCBool = false
+    if FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory) {
+        return isDirectory.boolValue
+    }
+
+    return URL(fileURLWithPath: path).pathExtension.lowercased() == "app"
+        || path.hasSuffix("/")
+}
+
 class MoveFileCommand: HDPIMCommand {
     let source: String
     let target: String
@@ -161,7 +171,7 @@ class MoveFileCommand: HDPIMCommand {
         guard didMove else {
             return []
         }
-        return [makeDeleteEntry(pimxTargetPath: pimxTargetPath, actualTargetPath: target, isDirectory: false)]
+        return [makeDeleteEntry(pimxTargetPath: pimxTargetPath, actualTargetPath: target, isDirectory: isDirectoryDeleteTarget(target))]
     }
 }
 
@@ -247,7 +257,7 @@ class CopyFileCommand: HDPIMCommand {
         guard didCopy else {
             return []
         }
-        return [makeDeleteEntry(pimxTargetPath: pimxTargetPath, actualTargetPath: target, isDirectory: false)]
+        return [makeDeleteEntry(pimxTargetPath: pimxTargetPath, actualTargetPath: target, isDirectory: isDirectoryDeleteTarget(target))]
     }
 }
 
@@ -278,7 +288,7 @@ class BlindCopyCommand: HDPIMCommand {
         guard didCopy else {
             return []
         }
-        return [makeDeleteEntry(pimxTargetPath: pimxTargetPath, actualTargetPath: target, isDirectory: false)]
+        return [makeDeleteEntry(pimxTargetPath: pimxTargetPath, actualTargetPath: target, isDirectory: isDirectoryDeleteTarget(target))]
     }
 }
 

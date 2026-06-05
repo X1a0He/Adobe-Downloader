@@ -46,6 +46,10 @@ actor PDMProgressTracker {
         totalBytes
     }
 
+    func updateTotalBytes(_ totalBytes: Int64) {
+        self.totalBytes = totalBytes
+    }
+
     private func reportIfNeeded() {
         let now = Date()
         let elapsed = now.timeIntervalSince(lastReportTime)

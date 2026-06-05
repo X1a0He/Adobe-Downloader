@@ -241,8 +241,11 @@ class Package: Identifiable, ObservableObject, Codable {
     var fullPackageName: String
     var downloadSize: Int64
     var downloadURL: String
+    var manifestURL: String
     var packageVersion: String
     var validationURL: String?
+    var validationURLType1: String?
+    var packageHashKey: String
 
     @Published var downloadedSize: Int64 = 0 {
         didSet {
@@ -301,6 +304,7 @@ class Package: Identifiable, ObservableObject, Codable {
         fullPackageName: String,
         downloadSize: Int64,
         downloadURL: String,
+        manifestURL: String = "",
         packageVersion: String,
         condition: String = "",
         isRequired: Bool = false,
@@ -308,14 +312,19 @@ class Package: Identifiable, ObservableObject, Codable {
         isAdobeDownloaderPreselected: Bool = false,
         isOfficiallyEligible: Bool = true,
         officialFilterReasons: [String] = [],
-        validationURL: String? = nil
+        validationURL: String? = nil,
+        validationURLType1: String? = nil,
+        packageHashKey: String = ""
     ) {
         self.type = type
         self.fullPackageName = fullPackageName
         self.downloadSize = downloadSize
         self.downloadURL = downloadURL
+        self.manifestURL = manifestURL
         self.packageVersion = packageVersion
         self.validationURL = validationURL
+        self.validationURLType1 = validationURLType1
+        self.packageHashKey = packageHashKey
         self.condition = condition
         self.isRequired = isRequired
         self.isDefaultSelected = isDefaultSelected || isAdobeDownloaderPreselected || isRequired
@@ -374,7 +383,7 @@ class Package: Identifiable, ObservableObject, Codable {
     }
 
     enum CodingKeys: String, CodingKey {
-        case id, type, fullPackageName, downloadSize, downloadURL, packageVersion, validationURL, condition, isRequired, isDefaultSelected, isAdobeDownloaderPreselected, isOfficiallyEligible, officialFilterReasons, isSelected, hostValidation
+        case id, type, fullPackageName, downloadSize, downloadURL, manifestURL, packageVersion, validationURL, validationURLType1, packageHashKey, condition, isRequired, isDefaultSelected, isAdobeDownloaderPreselected, isOfficiallyEligible, officialFilterReasons, isSelected, hostValidation
     }
 
     func encode(to encoder: Encoder) throws {
@@ -384,8 +393,11 @@ class Package: Identifiable, ObservableObject, Codable {
         try container.encode(fullPackageName, forKey: .fullPackageName)
         try container.encode(downloadSize, forKey: .downloadSize)
         try container.encode(downloadURL, forKey: .downloadURL)
+        try container.encode(manifestURL, forKey: .manifestURL)
         try container.encode(packageVersion, forKey: .packageVersion)
         try container.encodeIfPresent(validationURL, forKey: .validationURL)
+        try container.encodeIfPresent(validationURLType1, forKey: .validationURLType1)
+        try container.encode(packageHashKey, forKey: .packageHashKey)
         try container.encode(condition, forKey: .condition)
         try container.encode(isRequired, forKey: .isRequired)
         try container.encode(isDefaultSelected, forKey: .isDefaultSelected)
@@ -403,8 +415,11 @@ class Package: Identifiable, ObservableObject, Codable {
         fullPackageName = try container.decode(String.self, forKey: .fullPackageName)
         downloadSize = try container.decode(Int64.self, forKey: .downloadSize)
         downloadURL = try container.decode(String.self, forKey: .downloadURL)
+        manifestURL = try container.decodeIfPresent(String.self, forKey: .manifestURL) ?? ""
         packageVersion = try container.decode(String.self, forKey: .packageVersion)
         validationURL = try container.decodeIfPresent(String.self, forKey: .validationURL)
+        validationURLType1 = try container.decodeIfPresent(String.self, forKey: .validationURLType1)
+        packageHashKey = try container.decodeIfPresent(String.self, forKey: .packageHashKey) ?? ""
         condition = try container.decodeIfPresent(String.self, forKey: .condition) ?? ""
         isRequired = try container.decodeIfPresent(Bool.self, forKey: .isRequired) ?? false
         isAdobeDownloaderPreselected = try container.decodeIfPresent(Bool.self, forKey: .isAdobeDownloaderPreselected) ?? false
@@ -439,7 +454,20 @@ struct ValidationInfo {
         xmlParser.delegate = parser
         
         guard xmlParser.parse() else { return nil }
-        
+
+        guard !parser.algorithm.isEmpty,
+              parser.segmentSize > 0,
+              parser.lastSegmentSize > 0,
+              parser.lastSegmentSize <= parser.segmentSize,
+              parser.segmentCount > 0,
+              parser.segments.count == parser.segmentCount,
+              parser.segments.allSatisfy({ (1...parser.segmentCount).contains($0.segmentNumber) && !$0.hash.isEmpty }),
+              Set(parser.segments.map(\.segmentNumber)).count == parser.segmentCount else {
+            return nil
+        }
+
+        let sortedSegments = parser.segments.sorted { $0.segmentNumber < $1.segmentNumber }
+
         return ValidationInfo(
             segmentSize: parser.segmentSize,
             version: parser.version,
@@ -447,7 +475,7 @@ struct ValidationInfo {
             segmentCount: parser.segmentCount,
             lastSegmentSize: parser.lastSegmentSize,
             packageHashKey: parser.packageHashKey,
-            segments: parser.segments
+            segments: sortedSegments
         )
     }
 }
@@ -462,20 +490,26 @@ class ValidationXMLParser: NSObject, XMLParserDelegate {
     var segments: [ValidationInfo.SegmentInfo] = []
     
     private var currentElement: String = ""
+    private var currentText: String = ""
     private var currentSegmentNumber: Int = 0
     
     func parser(_ parser: XMLParser, didStartElement elementName: String, namespaceURI: String?, qualifiedName qName: String?, attributes attributeDict: [String : String] = [:]) {
         currentElement = elementName
+        currentText = ""
         
         if elementName == "segment", let segmentNumber = attributeDict["segmentNumber"], let number = Int(segmentNumber) {
             currentSegmentNumber = number
         }
     }
-    
+
     func parser(_ parser: XMLParser, foundCharacters string: String) {
-        let trimmedString = string.trimmingCharacters(in: .whitespacesAndNewlines)
+        currentText += string
+    }
+
+    func parser(_ parser: XMLParser, didEndElement elementName: String, namespaceURI: String?, qualifiedName qName: String?) {
+        let trimmedString = currentText.trimmingCharacters(in: .whitespacesAndNewlines)
         
-        switch currentElement {
+        switch elementName {
         case "segmentSize":
             if let size = Int64(trimmedString) {
                 segmentSize = size
@@ -501,6 +535,9 @@ class ValidationXMLParser: NSObject, XMLParserDelegate {
         default:
             break
         }
+
+        currentElement = ""
+        currentText = ""
     }
 }
 

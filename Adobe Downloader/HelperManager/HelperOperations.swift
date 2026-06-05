@@ -56,6 +56,22 @@ extension HelperManager {
         try await client.executeInstallation(operation, progress: progress)
     }
 
+    func cancelCurrentOperation() async throws {
+        let client = try getClient()
+        let operation = HelperOperation.cancelOperation
+
+        try await withCheckedThrowingContinuation { continuation in
+            client.execute(operation) { result in
+                switch result {
+                case .success:
+                    continuation.resume()
+                case .failure(let error):
+                    continuation.resume(throwing: error)
+                }
+            }
+        }
+    }
+
     func executeShell(_ command: String) async throws -> String {
         let client = try getClient()
         let operation = HelperOperation.executeShell(command: command)

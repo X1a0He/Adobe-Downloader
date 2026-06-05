@@ -110,7 +110,7 @@ enum PDMProxyType {
 struct PDMBluestreakConfig {
     var downloadEnabled: Bool = true
     var extractionV2Enabled: Bool = false
-    var maxSegments: Int = 4
+    var maxSegments: Int = 40
     var segmentSize: Int64 = 2 * 1024 * 1024
     var isAutoUpdate: Bool = false
     var isLowBandwidthMode: Bool = false

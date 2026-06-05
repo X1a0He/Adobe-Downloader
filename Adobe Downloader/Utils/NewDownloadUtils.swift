@@ -141,6 +141,7 @@ actor ConcurrentDownloadProgressManager {
 
 class NewDownloadUtils {
     private let taskProgressPublishLimiter = TaskProgressPublishLimiter()
+    private let pdmValidationServiceBaseURL = "https://cdn-ffc.oobesaas.adobe.com/core/v1/validation"
 
     private class DownloadDelegate: NSObject, URLSessionDownloadDelegate {
         var completionHandler: (URL?, URLResponse?, Error?) -> Void
@@ -179,11 +180,7 @@ class NewDownloadUtils {
 
                 let destinationURL = destinationDirectory.appendingPathComponent(fileName)
 
-                if FileManager.default.fileExists(atPath: destinationURL.path) {
-                    try FileManager.default.removeItem(at: destinationURL)
-                }
-
-                try FileManager.default.moveItem(at: location, to: destinationURL)
+                try Self.copyFileContents(from: location, to: destinationURL)
                 completionHandler(destinationURL, downloadTask.response, nil)
 
             } catch {
@@ -249,6 +246,30 @@ class NewDownloadUtils {
 
             lastUpdateTime = now
             lastBytes = totalBytesWritten
+        }
+
+        private static func copyFileContents(from sourceURL: URL, to destinationURL: URL) throws {
+            if !FileManager.default.fileExists(atPath: destinationURL.path) {
+                FileManager.default.createFile(atPath: destinationURL.path, contents: nil)
+            }
+
+            let sourceHandle = try FileHandle(forReadingFrom: sourceURL)
+            let destinationHandle = try FileHandle(forWritingTo: destinationURL)
+
+            defer {
+                try? sourceHandle.close()
+                try? destinationHandle.close()
+            }
+
+            destinationHandle.truncateFile(atOffset: 0)
+
+            while true {
+                let data = sourceHandle.readData(ofLength: 1024 * 1024)
+                if data.isEmpty {
+                    break
+                }
+                destinationHandle.write(data)
+            }
         }
     }
 
@@ -515,6 +536,29 @@ class NewDownloadUtils {
             }
             await taskProgressPublishLimiter.reset(taskId: task.id)
             cleanupCompletedPackageMetadata(task: task)
+        } else {
+            let failedPackages = task.dependenciesToDownload.flatMap { $0.packages }.filter {
+                if case .failed = $0.status { return true }
+                return false
+            }
+            if !failedPackages.isEmpty {
+                let failureMessages = failedPackages.compactMap { pkg -> String? in
+                    if case .failed(let msg) = pkg.status {
+                        return msg
+                    }
+                    return nil
+                }
+                let message = failureMessages.first ?? "Download failed"
+                await MainActor.run {
+                    task.setStatus(.failed(DownloadStatus.FailureInfo(
+                        message: message,
+                        error: nil,
+                        timestamp: Date(),
+                        recoverable: true
+                    )))
+                }
+                await globalNetworkManager.saveTask(task)
+            }
         }
     }
 
@@ -596,20 +640,97 @@ class NewDownloadUtils {
         return min(max(resumedBytes, 0), expectedSize)
     }
 
-    private func shouldTreatPackageAsCompleted(package: Package, destinationURL: URL) -> Bool {
-        if package.downloaded || package.status == .completed {
-            return true
+    private func packageArchiveValidationError(package: Package, destinationURL: URL) -> PDMDownloadError? {
+        if !package.manifestURL.isEmpty {
+            return nil
         }
 
+        do {
+            let attributes = try FileManager.default.attributesOfItem(atPath: destinationURL.path)
+            let actualSize = (attributes[.size] as? NSNumber)?.int64Value ?? 0
+
+            if package.downloadSize > 0, actualSize != package.downloadSize {
+                return PDMDownloadError(
+                    code: .signatureValidationFailed,
+                    message: "\(package.fullPackageName) 大小不一致，期望 \(package.downloadSize)，实际 \(actualSize)"
+                )
+            }
+
+            return nil
+        } catch {
+            return PDMDownloadError(
+                code: .signatureValidationFailed,
+                message: "\(package.fullPackageName) 完整性校验失败: \(error.localizedDescription)",
+                underlying: error
+            )
+        }
+    }
+
+    private func isPackageArchiveValidForCompletion(package: Package, destinationURL: URL) -> Bool {
         guard FileManager.default.fileExists(atPath: destinationURL.path) else {
             return false
         }
 
-        if package.downloadSize > 0, package.downloadedSize >= package.downloadSize {
-            return true
+        return packageArchiveValidationError(package: package, destinationURL: destinationURL) == nil
+    }
+
+    private func shouldTreatPackageAsCompleted(package: Package, destinationURL: URL) -> Bool {
+        guard FileManager.default.fileExists(atPath: destinationURL.path) else {
+            return false
         }
 
-        return package.progress >= 1.0
+        let hasCompletedState = package.downloaded
+            || package.status == .completed
+            || (package.downloadSize > 0 && package.downloadedSize >= package.downloadSize)
+            || package.progress >= 1.0
+
+        return hasCompletedState && isPackageArchiveValidForCompletion(package: package, destinationURL: destinationURL)
+    }
+
+    private func resetPackageArchiveResumeState(package: Package, destinationURL: URL) {
+        let aamd = AAMDFileManager(downloadFileURL: destinationURL)
+        if aamd.exists(), let headers = aamd.readHeaders() {
+            let segmentSize = Int64(headers["SEGMENT_SIZE"] ?? "") ?? (2 * 1024 * 1024)
+            let fileSize = Int64(headers["FILE_SIZE"] ?? "") ?? package.downloadSize
+            let expectedSize = max(fileSize, package.downloadSize)
+            let segmentCount = max(1, Int((expectedSize + segmentSize - 1) / segmentSize))
+
+            for segment in 0..<segmentCount {
+                aamd.updateSegmentData(segment: segment, bytesDownloaded: 0)
+            }
+        }
+
+        if FileManager.default.fileExists(atPath: destinationURL.path),
+           let fileHandle = try? FileHandle(forWritingTo: destinationURL) {
+            fileHandle.truncateFile(atOffset: UInt64(max(package.downloadSize, 0)))
+            try? fileHandle.close()
+        }
+    }
+
+    private func resetFailedPackageArchive(task: NewDownloadTask, package: Package) {
+        var destinationURL: URL?
+
+        for dependency in task.dependenciesToDownload {
+            if let candidate = dependency.packages.first(where: {
+                $0.id == package.id || $0.fullPackageName == package.fullPackageName
+            }) {
+                destinationURL = packageDestinationURL(task: task, dependency: dependency, package: candidate)
+                break
+            }
+        }
+
+        let resolvedURL = destinationURL
+            ?? task.directory
+                .appendingPathComponent(task.productId)
+                .appendingPathComponent(package.fullPackageName)
+
+        AAMDFileManager(downloadFileURL: resolvedURL).remove()
+
+        if FileManager.default.fileExists(atPath: resolvedURL.path),
+           let fileHandle = try? FileHandle(forWritingTo: resolvedURL) {
+            fileHandle.truncateFile(atOffset: 0)
+            try? fileHandle.close()
+        }
     }
 
     private func rebuildTaskPackages(task: NewDownloadTask, inactiveStatus: PackageStatus) async {
@@ -624,7 +745,9 @@ class NewDownloadUtils {
 
                 let destinationURL = packageDestinationURL(task: task, dependency: dependency, package: package)
                 let restoredBytes = restoredDownloadedSize(package: package, destinationURL: destinationURL)
-                let restoredIsCompleted = (restoredBytes ?? 0) >= package.downloadSize && package.downloadSize > 0
+                let restoredIsCompleted = (restoredBytes ?? 0) >= package.downloadSize
+                    && package.downloadSize > 0
+                    && isPackageArchiveValidForCompletion(package: package, destinationURL: destinationURL)
                 let savedIsCompleted = restoredBytes == nil && shouldTreatPackageAsCompleted(package: package, destinationURL: destinationURL)
 
                 await MainActor.run {
@@ -711,46 +834,280 @@ class NewDownloadUtils {
         product: DependenciesToDownload
     ) async -> PDMDownloadResult {
         guard !package.fullPackageName.isEmpty,
-              !package.downloadURL.isEmpty,
-              package.downloadSize > 0 else {
+              (!package.downloadURL.isEmpty || !package.manifestURL.isEmpty) else {
             return .completed
         }
 
         let cleanCdn = globalCdn.hasSuffix("/") ? String(globalCdn.dropLast()) : globalCdn
-        let cleanPath = package.downloadURL.hasPrefix("/") ? package.downloadURL : "/\(package.downloadURL)"
-        let downloadURL = cleanCdn + cleanPath
-
-        guard let url = URL(string: downloadURL) else { return .completed }
-
         let destinationURL = packageDestinationURL(task: task, dependency: product, package: package)
         let packageId = generatePackageIdentifier(package: package, task: task, dependency: product)
-
-        let result = await PDMDownloadEngine.shared.downloadFile(
-            packageId: packageId,
-            url: url,
-            destinationURL: destinationURL,
-            headers: NetworkConstants.downloadHeaders,
-            validationURL: nil,
-            progressHandler: { [weak self] downloadedBytes, totalBytes, speed in
-                Task {
-                    await MainActor.run {
-                        let normalizedDownloadedBytes = totalBytes > 0
-                            ? min(max(downloadedBytes, 0), totalBytes)
-                            : max(downloadedBytes, 0)
-                        package.downloadedSize = normalizedDownloadedBytes
-                        package.progress = self?.normalizedProgress(
-                            downloadedSize: normalizedDownloadedBytes,
-                            totalSize: totalBytes
-                        ) ?? 0
-                        package.speed = speed
-                        package.objectWillChange.send()
-                    }
-                    await self?.updateTaskProgressDirect(task: task)
-                }
-            }
+        let validationServiceBaseURL = pdmValidationServiceBaseURL(for: product)
+        let validationURLs = normalizedValidationURLs(
+            [package.validationURL, package.validationURLType1],
+            cdn: cleanCdn,
+            validationServiceBaseURL: validationServiceBaseURL
         )
 
+        let startWorkflowDownload: () async -> PDMDownloadResult = { [weak self] in
+            guard let self else {
+                return .error(PDMDownloadError(code: .criticalError, message: "Download manager released"))
+            }
+
+            do {
+                let workflow = PDMWorkflowManager(
+                    tempDirectory: task.directory.appendingPathComponent(product.sapCode),
+                    validationServiceBaseURL: validationServiceBaseURL ?? pdmValidationServiceBaseURL
+                )
+                let manifestURL = self.normalizedPackageURL(package.manifestURL, cdn: cleanCdn)
+                let downloadedURL = try await workflow.execute(
+                    manifestURL: manifestURL,
+                    cdnBaseURL: cleanCdn,
+                    headers: NetworkConstants.downloadHeaders,
+                    destinationDirectory: task.directory.appendingPathComponent(product.sapCode),
+                    packageIdentifier: packageId,
+                    progressHandler: { state, progress in
+                        Task {
+                            await MainActor.run {
+                                if state == .downloadAssetBits {
+                                    let normalizedProgress = min(max(progress, 0), 1)
+                                    package.progress = normalizedProgress
+                                    package.downloadedSize = Int64(Double(max(package.downloadSize, 0)) * normalizedProgress)
+                                }
+                                package.objectWillChange.send()
+                            }
+                            await self.updateTaskProgressDirect(task: task)
+                        }
+                    },
+                    cancellationCheck: {
+                        let isCancelled = await globalCancelTracker.isCancelled(task.id)
+                        if isCancelled {
+                            return true
+                        }
+                        return await globalCancelTracker.isPaused(task.id)
+                    }
+                )
+
+                let finalURL = destinationURL
+                if downloadedURL.path != finalURL.path {
+                    try self.prepareCompletedWorkflowDownload(from: downloadedURL, to: finalURL)
+                }
+                if let completedSize = self.fileSizeIfExists(finalURL), completedSize > 0 {
+                    await MainActor.run {
+                        package.downloadSize = completedSize
+                        package.downloadedSize = completedSize
+                        package.progress = 1.0
+                    }
+                    await self.updateTaskProgressDirect(task: task, force: true)
+                }
+                return .completed
+            } catch let error as PDMDownloadError {
+                return .error(error)
+            } catch NetworkError.cancelled {
+                return .cancelled
+            } catch {
+                return .error(PDMDownloadError(code: .downloadFailed, message: error.localizedDescription, underlying: error))
+            }
+        }
+
+        let startDirectDownload: () async -> PDMDownloadResult = {
+            let downloadURL = self.normalizedPackageURL(package.downloadURL, cdn: cleanCdn)
+            guard let url = URL(string: downloadURL) else {
+                return .error(PDMDownloadError(code: .downloadFailed, message: "Invalid package download URL"))
+            }
+
+            return await PDMDownloadEngine.shared.downloadFile(
+                packageId: packageId,
+                url: url,
+                destinationURL: destinationURL,
+                headers: NetworkConstants.downloadHeaders,
+                expectedTotalSize: package.downloadSize,
+                validationURL: validationURLs.first,
+                validationURLs: validationURLs,
+                progressHandler: { [weak self] downloadedBytes, totalBytes, speed in
+                    Task {
+                        await MainActor.run {
+                            let normalizedDownloadedBytes = totalBytes > 0
+                                ? min(max(downloadedBytes, 0), totalBytes)
+                                : max(downloadedBytes, 0)
+                            package.downloadedSize = normalizedDownloadedBytes
+                            package.progress = self?.normalizedProgress(
+                                downloadedSize: normalizedDownloadedBytes,
+                                totalSize: totalBytes
+                            ) ?? 0
+                            package.speed = speed
+                            package.objectWillChange.send()
+                        }
+                        await self?.updateTaskProgressDirect(task: task)
+                    }
+                }
+            )
+        }
+
+        let result = package.manifestURL.isEmpty ? await startDirectDownload() : await startWorkflowDownload()
+        if package.manifestURL.isEmpty,
+           case .completed = result,
+           packageArchiveValidationError(package: package, destinationURL: destinationURL) != nil {
+            resetPackageArchiveResumeState(package: package, destinationURL: destinationURL)
+
+            await MainActor.run {
+                package.downloadedSize = 0
+                package.progress = 0
+                package.speed = 0
+                package.status = .downloading
+            }
+
+            let retryResult = package.manifestURL.isEmpty ? await startDirectDownload() : await startWorkflowDownload()
+            if case .completed = retryResult,
+               let retryValidationError = packageArchiveValidationError(package: package, destinationURL: destinationURL) {
+                return .error(retryValidationError)
+            }
+
+            return retryResult
+        }
+
         return result
+    }
+
+    private func fileSizeIfExists(_ url: URL) -> Int64? {
+        guard FileManager.default.fileExists(atPath: url.path) else {
+            return nil
+        }
+        let attributes = try? FileManager.default.attributesOfItem(atPath: url.path)
+        return (attributes?[.size] as? NSNumber)?.int64Value
+    }
+
+    private func normalizedPackageURL(_ value: String, cdn: String) -> String {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard URL(string: trimmed)?.scheme == nil else {
+            return trimmed
+        }
+
+        let cleanPath = trimmed.hasPrefix("/") ? trimmed : "/\(trimmed)"
+        return cdn + cleanPath
+    }
+
+    private func prepareCompletedWorkflowDownload(from sourceURL: URL, to destinationURL: URL) throws {
+        try FileManager.default.createDirectory(at: destinationURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+
+        if !FileManager.default.fileExists(atPath: destinationURL.path) {
+            FileManager.default.createFile(atPath: destinationURL.path, contents: nil)
+        }
+
+        let sourceHandle = try FileHandle(forReadingFrom: sourceURL)
+        let destinationHandle = try FileHandle(forWritingTo: destinationURL)
+
+        defer {
+            try? sourceHandle.close()
+            try? destinationHandle.close()
+        }
+
+        destinationHandle.truncateFile(atOffset: 0)
+
+        while true {
+            let data = sourceHandle.readData(ofLength: 1024 * 1024)
+            if data.isEmpty {
+                break
+            }
+            destinationHandle.write(data)
+        }
+    }
+
+    private func normalizedValidationURLs(
+        _ validationURLs: [String?],
+        cdn: String,
+        validationServiceBaseURL: String? = nil
+    ) -> [String] {
+        var result: [String] = []
+        for rawURL in validationURLs {
+            guard let validationURL = rawURL?.trimmingCharacters(in: .whitespacesAndNewlines),
+                  !validationURL.isEmpty else {
+                continue
+            }
+
+            let normalized: String
+            if URL(string: validationURL)?.scheme != nil {
+                normalized = validationURL
+            } else {
+                let cleanPath = validationURL.hasPrefix("/") ? validationURL : "/\(validationURL)"
+                normalized = cdn + cleanPath
+            }
+
+            if let validationServiceBaseURL {
+                for serviceCandidate in validationServiceFallbackURLs(for: normalized, baseURL: validationServiceBaseURL)
+                    + validationServiceFallbackURLs(for: validationURL, baseURL: validationServiceBaseURL) {
+                    appendValidationCandidate(serviceCandidate, to: &result)
+                }
+            }
+
+            appendValidationCandidate(normalized, to: &result)
+
+            if validationServiceBaseURL == nil {
+                let fallbackCandidates = validationServiceFallbackURLs(for: normalized, baseURL: pdmValidationServiceBaseURL)
+                    + validationServiceFallbackURLs(for: validationURL, baseURL: pdmValidationServiceBaseURL)
+                for fallbackCandidate in fallbackCandidates {
+                    appendValidationCandidate(fallbackCandidate, to: &result)
+                }
+            }
+        }
+        return result
+    }
+
+    private func appendValidationCandidate(_ candidate: String, to result: inout [String]) {
+        let normalized = candidate.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalized.isEmpty, !result.contains(normalized) else {
+            return
+        }
+        result.append(normalized)
+    }
+
+    private func validationServiceFallbackURLs(for value: String, baseURL: String) -> [String] {
+        let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return [] }
+
+        let fileName: String
+        if let url = URL(string: trimmed), !url.lastPathComponent.isEmpty {
+            fileName = url.lastPathComponent
+        } else {
+            fileName = URL(fileURLWithPath: trimmed).lastPathComponent
+        }
+
+        guard !fileName.isEmpty else {
+            return []
+        }
+
+        let cleanBaseURL = baseURL.hasSuffix("/") ? String(baseURL.dropLast()) : baseURL
+        return ["\(cleanBaseURL)/\(fileName)"]
+    }
+
+    private func pdmValidationServiceBaseURL(for product: DependenciesToDownload) -> String? {
+        guard let applicationJson = product.applicationJson,
+              let appInfo = try? ApplicationJSONParser.parse(jsonString: applicationJson) else {
+            return nil
+        }
+
+        let keys = ["AusstValidationURL", "PackageServiceValidationURL"]
+        for key in keys {
+            if let value = appInfo.properties[key] {
+                let value = "\(value)"
+                let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !trimmed.isEmpty {
+                    return trimmed
+                }
+            }
+        }
+
+        for (key, value) in appInfo.properties {
+            guard keys.contains(where: { key.split(separator: ".").last?.caseInsensitiveCompare($0) == .orderedSame }) else {
+                continue
+            }
+            let value = "\(value)"
+            let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !trimmed.isEmpty {
+                return trimmed
+            }
+        }
+
+        return nil
     }
 
     private func updateTaskProgressDirect(task: NewDownloadTask, force: Bool = false) async {
@@ -941,11 +1298,8 @@ class NewDownloadUtils {
                 recoverable: isRecoverable
             )))
 
-            
             if !isRecoverable, let currentPackage = task.currentPackage {
-                let destinationDir = task.directory.appendingPathComponent("\(task.productId)")
-                let fileURL = destinationDir.appendingPathComponent(currentPackage.fullPackageName)
-                try? FileManager.default.removeItem(at: fileURL)
+                resetFailedPackageArchive(task: task, package: currentPackage)
             }
 
             await globalNetworkManager.saveTask(task)

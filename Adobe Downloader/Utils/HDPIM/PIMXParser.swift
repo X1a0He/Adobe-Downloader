@@ -36,6 +36,7 @@ struct PIMXProgramInvocation {
     let hasExplicitSuccessExitCodes: Bool
     let pimxPath: String
     let pimxArguments: [String]
+    let runInUserMode: Bool
 }
 
 struct PIMXAssetReference {
@@ -107,6 +108,9 @@ class PIMXParser {
             let type = element.attribute(forName: "type")?.stringValue ?? "file"
 
             guard !source.isEmpty, !target.isEmpty else { continue }
+            if boolAttribute(element.attribute(forName: "ignoreAsset")?.stringValue) {
+                continue
+            }
 
             let expandedSource = propertyTable.expandPath(source)
             let expandedTarget = propertyTable.expandPath(target)
@@ -130,11 +134,13 @@ class PIMXParser {
                     style: .move,
                     to: &commands
                 )
+                let appTarget = wrappedDirectoryRootTarget(source: expandedSource, target: expandedTarget)
+                let appTargetTemplate = wrappedDirectoryRootTarget(source: source, target: target)
                 assetReferences.append(PIMXAssetReference(
                     source: expandedSource,
-                    target: expandedTarget,
+                    target: appTarget ?? expandedTarget,
                     sourceTemplate: source,
-                    targetTemplate: normalizePIMXPath(target, isDirectoryLike: true),
+                    targetTemplate: normalizePIMXPath(appTargetTemplate ?? target, isDirectoryLike: true),
                     isDirectoryLike: true
                 ))
             case "symlink":
@@ -159,13 +165,15 @@ class PIMXParser {
                     style: .move,
                     to: &commands
                 )
+                let appTarget = wrappedDirectoryRootTarget(source: expandedSource, target: expandedTarget)
+                let appTargetTemplate = wrappedDirectoryRootTarget(source: source, target: target)
                 assetReferences.append(PIMXAssetReference(
                     source: expandedSource,
                     target: isDirectoryLike
-                        ? normalizePIMXPath(expandedTarget, isDirectoryLike: true)
+                        ? normalizePIMXPath(appTarget ?? expandedTarget, isDirectoryLike: true)
                         : resolvedFileTarget(source: expandedSource, target: expandedTarget),
                     sourceTemplate: source,
-                    targetTemplate: normalizePIMXPath(normalizedPimxTarget, isDirectoryLike: isDirectoryLike),
+                    targetTemplate: normalizePIMXPath(appTargetTemplate ?? normalizedPimxTarget, isDirectoryLike: isDirectoryLike),
                     isDirectoryLike: isDirectoryLike
                 ))
             }
@@ -178,6 +186,9 @@ class PIMXParser {
             let target = element.attribute(forName: "target")?.stringValue ?? ""
 
             guard !source.isEmpty, !target.isEmpty else { continue }
+            if boolAttribute(element.attribute(forName: "ignoreAsset")?.stringValue) {
+                continue
+            }
 
             let expandedSource = propertyTable.expandPath(source)
             let expandedTarget = propertyTable.expandPath(target)
@@ -195,11 +206,13 @@ class PIMXParser {
                 style: .blindCopy,
                 to: &commands
             )
+            let appTarget = wrappedDirectoryRootTarget(source: expandedSource, target: expandedTarget)
+            let appTargetTemplate = wrappedDirectoryRootTarget(source: source, target: target)
             assetReferences.append(PIMXAssetReference(
                 source: expandedSource,
-                target: isDirectoryLike ? expandedTarget : resolvedFileTarget(source: expandedSource, target: expandedTarget),
+                target: isDirectoryLike ? (appTarget ?? expandedTarget) : resolvedFileTarget(source: expandedSource, target: expandedTarget),
                 sourceTemplate: source,
-                targetTemplate: normalizePIMXPath(normalizedPimxTarget, isDirectoryLike: isDirectoryLike),
+                targetTemplate: normalizePIMXPath(appTargetTemplate ?? normalizedPimxTarget, isDirectoryLike: isDirectoryLike),
                 isDirectoryLike: isDirectoryLike
             ))
         }
@@ -389,6 +402,19 @@ class PIMXParser {
             return
         }
 
+        if let appTarget = wrappedDirectoryRootTarget(source: source, target: target),
+           let appPimxTarget = wrappedDirectoryRootTarget(source: sourceTemplate, target: targetTemplate) {
+            commands.append(
+                wrappedDirectoryCommandDescriptor(
+                    for: style,
+                    source: source,
+                    target: appTarget,
+                    pimxTarget: normalizePIMXPath(appPimxTarget, isDirectoryLike: true)
+                )
+            )
+            return
+        }
+
         let sourceURL = URL(fileURLWithPath: source, isDirectory: true)
         let normalizedTarget = target.hasSuffix("/") ? String(target.dropLast()) : target
         let targetRootURL = URL(fileURLWithPath: normalizedTarget, isDirectory: true)
@@ -485,6 +511,59 @@ class PIMXParser {
         return target
     }
 
+    private func wrappedDirectoryCommandDescriptor(
+        for style: AssetCommandStyle,
+        source: String,
+        target: String,
+        pimxTarget: String
+    ) -> PIMXCommandDescriptor {
+        if shouldMergeWrappedDirectory(source: source, target: target) {
+            return .mergeDirectory(source: source, target: target, pimxTarget: pimxTarget)
+        }
+        return commandDescriptor(for: style, source: source, target: target, pimxTarget: pimxTarget)
+    }
+
+    private func shouldMergeWrappedDirectory(source: String, target: String) -> Bool {
+        guard isExistingDirectory(target) else {
+            return false
+        }
+
+        let sourceURL = URL(fileURLWithPath: source, isDirectory: true)
+        switch sourceURL.pathExtension.lowercased() {
+        case "app":
+            let executableName = sourceURL.deletingPathExtension().lastPathComponent
+            let executablePath = sourceURL
+                .appendingPathComponent("Contents/MacOS", isDirectory: true)
+                .appendingPathComponent(executableName)
+                .path
+            return !FileManager.default.fileExists(atPath: executablePath)
+        case "framework":
+            let executableName = sourceURL.deletingPathExtension().lastPathComponent
+            let directExecutable = sourceURL.appendingPathComponent(executableName).path
+            let versionedExecutable = sourceURL
+                .appendingPathComponent("Versions/A", isDirectory: true)
+                .appendingPathComponent(executableName)
+                .path
+            return !FileManager.default.fileExists(atPath: directExecutable)
+                && !FileManager.default.fileExists(atPath: versionedExecutable)
+        default:
+            return true
+        }
+    }
+
+    private func wrappedDirectoryRootTarget(source: String, target: String) -> String? {
+        let wrappedExtensions = Set(["app", "framework", "bundle", "plugin", "xpc", "appex"])
+        guard wrappedExtensions.contains(URL(fileURLWithPath: source).pathExtension.lowercased()) else {
+            return nil
+        }
+
+        if wrappedExtensions.contains(URL(fileURLWithPath: target).pathExtension.lowercased()) {
+            return normalizePIMXPath(target, isDirectoryLike: true)
+        }
+
+        return resolvedFileTarget(source: source, target: target)
+    }
+
     private func appendPIMXPathComponent(_ base: String, _ component: String) -> String {
         let normalizedBase = base.hasSuffix("/") ? String(base.dropLast()) : base
         guard !normalizedBase.isEmpty else {
@@ -527,13 +606,16 @@ class PIMXParser {
             successExitCodes = [0]
         }
 
+        let runInUserMode = boolAttribute(element.attribute(forName: "runInUserMode")?.stringValue)
+
         return PIMXProgramInvocation(
             path: propertyTable.expandPath(pimxPath),
             arguments: pimxArguments.map(propertyTable.expandPath),
             successExitCodes: successExitCodes,
             hasExplicitSuccessExitCodes: !exitCodeNodes.isEmpty,
             pimxPath: pimxPath,
-            pimxArguments: pimxArguments
+            pimxArguments: pimxArguments,
+            runInUserMode: runInUserMode
         )
     }
 

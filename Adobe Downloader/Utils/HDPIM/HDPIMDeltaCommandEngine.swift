@@ -223,7 +223,7 @@ final class HDPIMDeltaCommandEngine {
             case .copyFile(let source, let target):
                 try ensureParentDirectoryExists(for: target)
                 try removeItemIfExists(at: target)
-                try FileManager.default.copyItem(atPath: source, toPath: target)
+                try copyFilePreservingMetadata(from: source, to: target)
 
             case .deletePath(let path):
                 try removeItemIfExists(at: path)
@@ -457,5 +457,12 @@ final class HDPIMDeltaCommandEngine {
         default:
             return nil
         }
+    }
+}
+
+private func copyFilePreservingMetadata(from source: String, to target: String) throws {
+    let result = copyfile(source, target, nil, copyfile_flags_t(COPYFILE_ALL))
+    guard result == 0 else {
+        throw NSError(domain: NSPOSIXErrorDomain, code: Int(errno))
     }
 }

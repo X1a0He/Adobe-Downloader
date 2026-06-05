@@ -80,10 +80,13 @@ struct ParsedPackage: Codable, Equatable {
     var extractSize: Int64 = 0
     var installSequenceNumber: Int = 0
     var path: String = ""
+    var manifestURL: String = ""
     var packageVersion: String = ""
     var condition: String = ""
+    var packageHashKey: String = ""
 
     var validationURLType2: String?
+    var validationURLType1: String?
 
     var features: Set<String> = []
 
@@ -214,11 +217,30 @@ class ApplicationJSONParser {
         }
 
         pkg.path = json["Path"] as? String ?? ""
+        pkg.manifestURL = firstString(
+            json,
+            keys: ["ManifestURL", "manifestURL", "manifestUrl", "manifest_url"]
+        ) ?? ""
         pkg.packageVersion = json["PackageVersion"] as? String ?? ""
         pkg.condition = json["Condition"] as? String ?? ""
+        pkg.packageHashKey = json["packageHashKey"] as? String ?? ""
+
+        let validationURL = firstString(
+            json,
+            keys: ["ValidationURL", "validationURL", "validationUrl", "validation_url"]
+        )
+
+        pkg.validationURLType2 = firstString(
+            json,
+            keys: ["ValidationURLType2", "validationURLType2", "validationUrlType2"]
+        )
+        pkg.validationURLType1 = validationURL
 
         if let validationURLs = json["ValidationURLs"] as? [String: Any] {
-            pkg.validationURLType2 = validationURLs["TYPE2"] as? String
+            pkg.validationURLType2 = firstString(
+                validationURLs,
+                keys: ["TYPE2", "Type2", "type2"]
+            ) ?? pkg.validationURLType2
         }
 
         if let features = getNestedValue(json, path: "Features.Feature") as? [[String: Any]] {
@@ -249,6 +271,18 @@ class ApplicationJSONParser {
         pkg.aliasPackageName = json["AliasPackageName"] as? String ?? ""
 
         return pkg
+    }
+
+    private static func firstString(_ json: [String: Any], keys: [String]) -> String? {
+        for key in keys {
+            if let value = json[key] as? String {
+                let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+                if !trimmed.isEmpty {
+                    return trimmed
+                }
+            }
+        }
+        return nil
     }
 
     private static func stringBool(_ value: Any?) -> Bool {
