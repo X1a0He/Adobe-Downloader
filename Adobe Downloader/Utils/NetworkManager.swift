@@ -71,7 +71,12 @@ class NetworkManager: ObservableObject {
             throw NetworkError.productNotFound
         }
 
-        let task = NewDownloadTask(
+        let task = downloadTasks.first {
+            $0.productId == productInfo.id &&
+            $0.productVersion == selectedVersion &&
+            $0.language == language &&
+            $0.directory.standardizedFileURL == destinationURL.standardizedFileURL
+        } ?? NewDownloadTask(
             productId: productInfo.id,
             productVersion: selectedVersion,
             language: language,
@@ -96,7 +101,14 @@ class NetworkManager: ObservableObject {
                 ?? "unknown",
             targetArchitecture: HDPIMParityTargetArchitecture.currentSelection.rawValue)
 
-        downloadTasks.append(task)
+        if !downloadTasks.contains(where: { $0.id == task.id }) {
+            downloadTasks.append(task)
+        }
+        task.setStatus(.preparing(DownloadStatus.PrepareInfo(
+            message: "正在准备自定义下载...",
+            timestamp: Date(),
+            stage: .initializing
+        )))
         updateDockBadge()
         await saveTask(task)
         

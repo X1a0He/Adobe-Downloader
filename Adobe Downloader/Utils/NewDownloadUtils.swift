@@ -282,7 +282,197 @@ class NewDownloadUtils {
             )))
         }
 
-        for dependencyToDownload in customDependencies {
+        let mergedDependencies = await makeMergedCustomDependencies(
+            task: task,
+            customDependencies: customDependencies
+        )
+
+        try writeApplicationJSONs(for: task, dependencies: mergedDependencies)
+
+        let totalSize = mergedDependencies.reduce(0) { productSum, product in
+            productSum + product.packages.reduce(0) { packageSum, pkg in
+                packageSum + (pkg.downloadSize > 0 ? pkg.downloadSize : 0)
+            }
+        }
+
+        await MainActor.run {
+            task.dependenciesToDownload = mergedDependencies
+            task.totalSize = totalSize
+            task.totalDownloadedSize = mergedDependencies.reduce(0) { productSum, product in
+                productSum + product.packages.reduce(0) { packageSum, package in
+                    packageSum + (package.downloaded ? max(package.downloadSize, 0) : min(max(package.downloadedSize, 0), max(package.downloadSize, 0)))
+                }
+            }
+            task.totalProgress = totalSize > 0 ? Double(task.totalDownloadedSize) / Double(totalSize) : 0
+            task.objectWillChange.send()
+        }
+
+        await startConcurrentDownloadProcess(task: task)
+    }
+
+    private func makeMergedCustomDependencies(
+        task: NewDownloadTask,
+        customDependencies: [DependenciesToDownload]
+    ) async -> [DependenciesToDownload] {
+        let existingDependencies = task.dependenciesToDownload
+        let existingDependencyByKey = dependencyLookup(existingDependencies)
+
+        var mergedDependencies: [DependenciesToDownload] = []
+        var handledKeys = Set<String>()
+
+        for dependency in customDependencies {
+            let key = dependencyIdentity(dependency)
+            guard !handledKeys.contains(key) else {
+                continue
+            }
+            handledKeys.insert(key)
+            let existingDependency = existingDependencyByKey[key]
+            let mergedDependency = cloneDependencyMetadata(from: dependency)
+            mergedDependency.packages = await mergedPackages(
+                task: task,
+                dependency: dependency,
+                existingDependency: existingDependency
+            )
+
+            if !mergedDependency.packages.isEmpty {
+                mergedDependencies.append(mergedDependency)
+            }
+        }
+
+        for existingDependency in existingDependencies where !handledKeys.contains(dependencyIdentity(existingDependency)) {
+            var downloadedPackages: [Package] = []
+            for package in existingDependency.packages {
+                let destinationURL = packageDestinationURL(task: task, dependency: existingDependency, package: package)
+                guard isPackageArchiveValidForCompletion(package: package, destinationURL: destinationURL) else {
+                    continue
+                }
+                await MainActor.run {
+                    package.isSelected = true
+                    package.downloaded = true
+                    package.status = .completed
+                    package.downloadedSize = package.downloadSize
+                    package.progress = 1
+                    package.speed = 0
+                }
+                downloadedPackages.append(package)
+            }
+            guard !downloadedPackages.isEmpty else {
+                continue
+            }
+            let mergedDependency = cloneDependencyMetadata(from: existingDependency)
+            mergedDependency.packages = downloadedPackages
+            mergedDependencies.append(mergedDependency)
+        }
+
+        return mergedDependencies
+    }
+
+    private func dependencyLookup(_ dependencies: [DependenciesToDownload]) -> [String: DependenciesToDownload] {
+        var lookup: [String: DependenciesToDownload] = [:]
+        for dependency in dependencies {
+            lookup[dependencyIdentity(dependency)] = dependency
+        }
+        return lookup
+    }
+
+    private func packageLookup(_ packages: [Package]) -> [String: Package] {
+        var lookup: [String: Package] = [:]
+        for package in packages {
+            lookup[packageIdentity(package)] = package
+        }
+        return lookup
+    }
+
+    private func dependencyIdentity(_ dependency: DependenciesToDownload) -> String {
+        [
+            dependency.sapCode,
+            dependency.version,
+            dependency.platform,
+            dependency.buildGuid
+        ]
+        .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+        .joined(separator: "|")
+    }
+
+    private func packageIdentity(_ package: Package) -> String {
+        let rawName = package.fullPackageName.trimmingCharacters(in: .whitespacesAndNewlines)
+        let normalizedName = rawName.hasSuffix(".zip") ? rawName : "\(rawName).zip"
+        let packageVersion = package.packageVersion.trimmingCharacters(in: .whitespacesAndNewlines)
+        let hashKey = package.packageHashKey.trimmingCharacters(in: .whitespacesAndNewlines)
+
+        if !packageVersion.isEmpty {
+            return "\(normalizedName)|\(packageVersion)"
+        }
+        if !hashKey.isEmpty {
+            return "\(normalizedName)|\(hashKey)"
+        }
+        return normalizedName
+    }
+
+    private func cloneDependencyMetadata(from dependency: DependenciesToDownload) -> DependenciesToDownload {
+        DependenciesToDownload(
+            sapCode: dependency.sapCode,
+            version: dependency.version,
+            buildGuid: dependency.buildGuid,
+            applicationJson: dependency.applicationJson ?? "",
+            isSoftDependency: dependency.isSoftDependency,
+            platform: dependency.platform,
+            baseVersion: dependency.baseVersion,
+            buildVersion: dependency.buildVersion,
+            selectedReason: dependency.selectedReason,
+            hostValidation: dependency.hostValidation
+        )
+    }
+
+    private func mergedPackages(
+        task: NewDownloadTask,
+        dependency: DependenciesToDownload,
+        existingDependency: DependenciesToDownload?
+    ) async -> [Package] {
+        let existingPackagesByName = packageLookup(existingDependency?.packages ?? [])
+
+        var packages: [Package] = []
+        for package in dependency.packages {
+            let destinationURL = packageDestinationURL(task: task, dependency: dependency, package: package)
+            let localArchiveIsValid = isPackageArchiveValidForCompletion(package: package, destinationURL: destinationURL)
+            let existingPackage = existingPackagesByName[packageIdentity(package)]
+            let shouldKeep = package.isSelected
+                || localArchiveIsValid
+                || existingPackage?.isSelected == true
+                || existingPackage?.downloaded == true
+
+            guard shouldKeep else {
+                continue
+            }
+
+            await MainActor.run {
+                package.isSelected = true
+                if localArchiveIsValid {
+                    package.downloaded = true
+                    package.status = .completed
+                    package.downloadedSize = package.downloadSize
+                    package.progress = 1
+                    package.speed = 0
+                } else if let existingPackage {
+                    package.downloaded = false
+                    package.status = existingPackage.status == .completed ? .waiting : existingPackage.status
+                    package.downloadedSize = existingPackage.status == .completed ? 0 : existingPackage.downloadedSize
+                    package.progress = existingPackage.status == .completed ? 0 : existingPackage.progress
+                    package.speed = 0
+                }
+            }
+
+            packages.append(package)
+        }
+
+        return packages
+    }
+
+    private func writeApplicationJSONs(
+        for task: NewDownloadTask,
+        dependencies: [DependenciesToDownload]
+    ) throws {
+        for dependencyToDownload in dependencies {
             let productDir = task.directory.appendingPathComponent("\(dependencyToDownload.sapCode)")
             if !FileManager.default.fileExists(atPath: productDir.path) {
                 try FileManager.default.createDirectory(at: productDir, withIntermediateDirectories: true)
@@ -294,7 +484,7 @@ class NewDownloadUtils {
                 if let jsonData = applicationJson.data(using: .utf8),
                    var appInfo = try JSONSerialization.jsonObject(with: jsonData) as? [String: Any] {
 
-                    let selectedPackageNames = Set(dependencyToDownload.packages.filter { $0.isSelected }.map { $0.fullPackageName })
+                    let selectedPackageNames = Set(dependencyToDownload.packages.flatMap { packageReferenceNames($0.fullPackageName) })
                     
                     if var packages = appInfo["Packages"] as? [String: Any],
                        let packageArray = packages["Package"] as? [[String: Any]] {
@@ -302,7 +492,7 @@ class NewDownloadUtils {
                         let filteredPackages = packageArray.filter { package in
                             if let packageName = package["PackageName"] as? String {
                                 let fullPackageName = packageName.hasSuffix(".zip") ? packageName : "\(packageName).zip"
-                                return selectedPackageNames.contains(fullPackageName)
+                                return selectedPackageNames.contains(fullPackageName) || selectedPackageNames.contains(packageName)
                             }
                             if let fullPackageName = package["fullPackageName"] as? String {
                                 return selectedPackageNames.contains(fullPackageName)
@@ -317,16 +507,11 @@ class NewDownloadUtils {
                     if var modules = appInfo["Modules"] as? [String: Any],
                        let moduleArray = modules["Module"] as? [[String: Any]] {
 
-                        let selectedPackageNamesWithoutZip = Set(dependencyToDownload.packages.filter { $0.isSelected }.compactMap { package in
-                            let name = package.fullPackageName
-                            return name.hasSuffix(".zip") ? String(name.dropLast(4)) : name
-                        })
-
                         let filteredModules = moduleArray.filter { module in
                             if let referencePackages = module["ReferencePackages"] as? [String: Any],
-                               let referencePackageArray = referencePackages["ReferencePackage"] as? [String] {
+                               let referencePackageArray = referencePackageValues(referencePackages["ReferencePackage"]) {
                                 return referencePackageArray.contains { packageName in
-                                    selectedPackageNamesWithoutZip.contains(packageName)
+                                    selectedPackageNames.contains(packageName)
                                 }
                             }
                             return false
@@ -346,37 +531,6 @@ class NewDownloadUtils {
                 try processedJsonString.write(to: jsonURL, atomically: true, encoding: String.Encoding.utf8)
             }
         }
-
-        let filteredDependencies = customDependencies.map { dependency in
-            let selectedPackages = dependency.packages.filter { $0.isSelected }
-            let filteredDependency = DependenciesToDownload(
-                sapCode: dependency.sapCode,
-                version: dependency.version,
-                buildGuid: dependency.buildGuid,
-                applicationJson: dependency.applicationJson ?? "",
-                isSoftDependency: dependency.isSoftDependency,
-                platform: dependency.platform,
-                baseVersion: dependency.baseVersion,
-                buildVersion: dependency.buildVersion,
-                selectedReason: dependency.selectedReason,
-                hostValidation: nil
-            )
-            filteredDependency.packages = selectedPackages
-            return filteredDependency
-        }.filter { !$0.packages.isEmpty }
-        
-        let totalSize = filteredDependencies.reduce(0) { productSum, product in
-            productSum + product.packages.reduce(0) { packageSum, pkg in
-                packageSum + (pkg.downloadSize > 0 ? pkg.downloadSize : 0)
-            }
-        }
-        
-        await MainActor.run {
-            task.dependenciesToDownload = filteredDependencies
-            task.totalSize = totalSize
-        }
-        
-        await startConcurrentDownloadProcess(task: task)
     }
 
     private func startConcurrentDownloadProcess(task: NewDownloadTask) async {
@@ -390,6 +544,7 @@ class NewDownloadUtils {
         }
 
         await rebuildTaskPackages(task: task, inactiveStatus: .waiting)
+        await prepareDownloadEnvironment(task: task)
 
         var allPackages: [(package: Package, dependency: DependenciesToDownload, originalIndex: Int)] = []
         var currentIndex = 0
@@ -434,8 +589,6 @@ class NewDownloadUtils {
             )))
             task.objectWillChange.send()
         }
-
-        await prepareDownloadEnvironment(task: task)
 
         await withTaskGroup(of: Void.self) { group in
             let semaphore = AsyncSemaphore(value: maxConcurrency)
@@ -564,32 +717,30 @@ class NewDownloadUtils {
 
     private func prepareDownloadEnvironment(task: NewDownloadTask) async {
         let driverPath = task.directory.appendingPathComponent("driver.xml")
-        if !FileManager.default.fileExists(atPath: driverPath.path) {
-            if let productInfo = globalCcmResult.products.first(where: { $0.id == task.productId && $0.version == task.productVersion }) {
-                let selectedModules = selectedDriverModules(for: task)
-                
-                let driverXml = generateDriverXML(
-                    version: task.productVersion,
-                    language: task.language,
-                    productInfo: productInfo,
-                    dependencies: task.dependenciesToDownload,
-                    targetArchitecture: task.targetArchitecture,
-                    modules: selectedModules
-                )
-                do {
-                    try driverXml.write(to: driverPath, atomically: true, encoding: String.Encoding.utf8)
-                } catch {
-                    print("Error generating driver.xml:", error.localizedDescription)
-                    await MainActor.run {
-                        task.setStatus(.failed(DownloadStatus.FailureInfo(
-                            message: "生成 driver.xml 失败: \(error.localizedDescription)",
-                            error: error,
-                            timestamp: Date(),
-                            recoverable: false
-                        )))
-                    }
-                    return
+        if let productInfo = globalCcmResult.products.first(where: { $0.id == task.productId && $0.version == task.productVersion }) {
+            let selectedModules = selectedDriverModules(for: task)
+
+            let driverXml = generateDriverXML(
+                version: task.productVersion,
+                language: task.language,
+                productInfo: productInfo,
+                dependencies: task.dependenciesToDownload,
+                targetArchitecture: task.targetArchitecture,
+                modules: selectedModules
+            )
+            do {
+                try driverXml.write(to: driverPath, atomically: true, encoding: String.Encoding.utf8)
+            } catch {
+                print("Error generating driver.xml:", error.localizedDescription)
+                await MainActor.run {
+                    task.setStatus(.failed(DownloadStatus.FailureInfo(
+                        message: "生成 driver.xml 失败: \(error.localizedDescription)",
+                        error: error,
+                        timestamp: Date(),
+                        recoverable: false
+                    )))
                 }
+                return
             }
         }
 

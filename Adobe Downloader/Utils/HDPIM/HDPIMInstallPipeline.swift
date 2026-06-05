@@ -20,6 +20,7 @@ class HDPIMInstallPipeline {
     private var backupManager: HDPIMBackupManager?
     private var allExecutedCommands: [HDPIMCommand] = []
     private var temporaryExtractDirectories: [URL] = []
+    private var backedUpPaths: Set<String> = []
 
     private var logHandler: ((String) -> Void)?
 
@@ -43,6 +44,11 @@ class HDPIMInstallPipeline {
         let repairPIMXHash: String?
         let repairPIMXHash256: String?
         let targetFolders: [String]
+    }
+
+    private struct BackupTargetCandidate {
+        let path: String
+        let isDirectoryLike: Bool?
     }
 
     private final class ExtractionProgressState {
@@ -73,6 +79,7 @@ class HDPIMInstallPipeline {
         isCancelled = false
         self.logHandler = logHandler
         temporaryExtractDirectories.removeAll()
+        backedUpPaths.removeAll()
         defer { cleanupTemporaryExtractDirectories() }
 
         progressHandler(0.0, "正在解析 driver.xml...")
@@ -151,24 +158,13 @@ class HDPIMInstallPipeline {
         progressHandler(0.08, "正在检查冲突进程...")
         try checkConflictingProcesses(packages: packagesToInstall)
 
-        progressHandler(0.1, "正在备份现有文件...")
+        progressHandler(0.1, "正在分析安装状态...")
         let backup = HDPIMBackupManager()
         self.backupManager = backup
 
-        let installDirs = collectInstallDirectories(
-            packages: packagesToInstall,
-            installDir: installDir,
-            sapCode: productInfo.sapCode
-        )
-        if !installDirs.isEmpty {
-            log("[HDPIM Pipeline] 需要备份 \(installDirs.count) 个目录: \(installDirs.map(\.path))")
-            try await backup.backupDirectories(
-                installDirs,
-                progressHandler: { index, total, dir in
-                    progressHandler(0.1, "正在备份现有文件 (\(index + 1)/\(total)): \(dir.lastPathComponent)")
-                },
-                logHandler: log
-            )
+        var executionModeByPackage: [String: PackageExecutionMode] = [:]
+        for pkg in packagesToInstall {
+            executionModeByPackage[packageIdentity(for: pkg)] = await resolvePackageExecutionMode(for: pkg)
         }
 
         let totalPackages = packagesToInstall.count
@@ -192,7 +188,12 @@ class HDPIMInstallPipeline {
 
                 let packageProgress = Double(index) / Double(totalPackages)
                 let baseProgress = 0.15 + packageProgress * 0.8  // 15%~95%
-                let executionMode = await resolvePackageExecutionMode(for: pkg)
+                let executionMode: PackageExecutionMode
+                if let cachedExecutionMode = executionModeByPackage[packageIdentity(for: pkg)] {
+                    executionMode = cachedExecutionMode
+                } else {
+                    executionMode = await resolvePackageExecutionMode(for: pkg)
+                }
                 let amtConfigAppID = firstNonEmptyString([
                     pkg.applicationInfo.amtConfig["AMTConfig.appID"],
                     pkg.applicationInfo.amtConfig["appID"]
@@ -259,6 +260,15 @@ class HDPIMInstallPipeline {
 
                     let helper = HDPIMInstallHelper(propertyTable: propertyTable)
                     helper.logHandler = logHandler
+
+                    try await backupPackageTargetsIfNeeded(
+                        package: pkg,
+                        executionMode: executionMode,
+                        extractedPackage: extractedPackage,
+                        backup: backup,
+                        progress: baseProgress + 0.02,
+                        progressHandler: progressHandler
+                    )
 
                     switch executionMode {
                     case .full(_):
@@ -966,26 +976,196 @@ class HDPIMInstallPipeline {
         throw HDPIMInstallError.conflictingProcessDetected(conflicting)
     }
 
+    private func backupPackageTargetsIfNeeded(
+        package: PackageToInstall,
+        executionMode: PackageExecutionMode,
+        extractedPackage: ValidatedExtractPackage,
+        backup: HDPIMBackupManager,
+        progress: Double,
+        progressHandler: @escaping (Double, String) -> Void
+    ) async throws {
+        guard packageRequiresFileBackup(executionMode) else {
+            return
+        }
+
+        let backupDirs = collectInstallDirectories(
+            package: package,
+            extractedPackage: extractedPackage
+        )
+        guard !backupDirs.isEmpty else {
+            return
+        }
+
+        log("[HDPIM Pipeline] 包 \(package.packageName) 需要备份 \(backupDirs.count) 个目录: \(backupDirs.map(\.path))")
+        try await backup.backupDirectories(
+            backupDirs,
+            progressHandler: { index, total, dir in
+                progressHandler(progress, "正在备份 \(package.packageName) 的现有文件 (\(index + 1)/\(total)): \(dir.lastPathComponent)")
+            },
+            logHandler: log
+        )
+    }
+
+    private func packageRequiresFileBackup(_ executionMode: PackageExecutionMode) -> Bool {
+        switch executionMode {
+        case .databaseOnly:
+            return false
+        case .full, .delta:
+            return true
+        }
+    }
+
     private func collectInstallDirectories(
-        packages: [PackageToInstall],
-        installDir: String,
-        sapCode: String
+        package: PackageToInstall,
+        extractedPackage: ValidatedExtractPackage
     ) -> [URL] {
         let fileManager = FileManager.default
-        var seen: Set<String> = []
+        let propertyTable = HDPIMPropertyTable()
+        propertyTable.setupSystemDirectories()
+        propertyTable.setInstallDir(package.productInstallDir)
+        propertyTable.setProductInstallDir(package.productInstallDir)
+        propertyTable.setMediaFolder(extractedPackage.extractDir.path)
+        propertyTable.setSourceFolder(extractedPackage.extractDir.path)
+        propertyTable.setStagingFolder(extractedPackage.validation.stagingFolder)
+        propertyTable.setProperty("workflowType", "install")
 
-        return packages.compactMap { package in
-            let path = URL(fileURLWithPath: package.productInstallDir, isDirectory: true)
-                .standardizedFileURL
-                .path
-            guard seen.insert(path).inserted else {
+        let candidates = backupCandidates(
+            from: extractedPackage.validation.packageInfo,
+            fallbackInstallDir: package.productInstallDir
+        )
+        let expandedPaths = candidates.compactMap { candidate -> String? in
+            let expandedPath = propertyTable.expandPath(candidate.path)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !expandedPath.isEmpty, !expandedPath.contains("[") else {
                 return nil
             }
-            guard fileManager.fileExists(atPath: path) else {
+
+            let backupPath = backupDirectoryPath(
+                expandedPath,
+                isDirectoryLike: candidate.isDirectoryLike
+            )
+            guard !backupPath.isEmpty,
+                  !shouldSkipExpandedBackupPath(backupPath),
+                  fileManager.fileExists(atPath: backupPath) else {
                 return nil
             }
-            return URL(fileURLWithPath: path, isDirectory: true)
+
+            return normalizedBackupPath(backupPath)
         }
+
+        var mergedPaths = mergeNestedBackupPaths(expandedPaths)
+        mergedPaths.removeAll { path in
+            !backedUpPaths.insert(path).inserted
+        }
+
+        return mergedPaths.map { URL(fileURLWithPath: $0, isDirectory: true) }
+    }
+
+    private func backupCandidates(
+        from packageInfo: PIMXPackageInfo,
+        fallbackInstallDir: String
+    ) -> [BackupTargetCandidate] {
+        let assetCandidates = packageInfo.assetReferences.map {
+            BackupTargetCandidate(path: $0.targetTemplate, isDirectoryLike: $0.isDirectoryLike)
+        }
+
+        if !assetCandidates.isEmpty {
+            return assetCandidates
+        }
+
+        let commandCandidates = packageInfo.commands.compactMap { command -> BackupTargetCandidate? in
+            switch command {
+            case .moveFile(_, let target, _),
+                    .copyFile(_, let target, _),
+                    .blindCopy(_, let target, _),
+                    .createSymlink(_, let target, _):
+                return BackupTargetCandidate(path: target, isDirectoryLike: false)
+            case .mergeDirectory(_, let target, _),
+                    .createDirectory(let target, _):
+                return BackupTargetCandidate(path: target, isDirectoryLike: true)
+            case .deleteFile(let target),
+                    .registerApplication(let target),
+                    .setDisplayAttributes(let target, _),
+                    .touch(let target):
+                return BackupTargetCandidate(path: target, isDirectoryLike: false)
+            case .deleteDirectory(let target),
+                    .permission(let target, _),
+                    .owner(let target, _, _),
+                    .folderIcon(let target, _):
+                return BackupTargetCandidate(path: target, isDirectoryLike: true)
+            case .runProgram:
+                return nil
+            }
+        }
+
+        if !commandCandidates.isEmpty {
+            return commandCandidates
+        }
+
+        return [BackupTargetCandidate(path: fallbackInstallDir, isDirectoryLike: true)]
+    }
+
+    private func backupDirectoryPath(_ path: String, isDirectoryLike: Bool?) -> String {
+        if isDirectoryLike == true {
+            return path
+        }
+
+        var isDirectory: ObjCBool = false
+        if FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory),
+           isDirectory.boolValue {
+            return path
+        }
+
+        return (path as NSString).deletingLastPathComponent
+    }
+
+    private func normalizedBackupPath(_ path: String) -> String {
+        let standardized = URL(fileURLWithPath: path, isDirectory: true)
+            .standardizedFileURL
+            .path
+        guard standardized.count > 1 else {
+            return standardized
+        }
+        return standardized.hasSuffix("/") ? String(standardized.dropLast()) : standardized
+    }
+
+    private func shouldSkipExpandedBackupPath(_ path: String) -> Bool {
+        let normalized = path.trimmingCharacters(in: .whitespacesAndNewlines)
+        return normalized.isEmpty
+            || normalized == "/"
+            || normalized.localizedCaseInsensitiveContains("/CustomHook/")
+    }
+
+    private func mergeNestedBackupPaths(_ paths: [String]) -> [String] {
+        let uniquePaths = Array(Set(paths))
+            .filter { !$0.isEmpty }
+            .sorted {
+                let leftDepth = $0.split(separator: "/").count
+                let rightDepth = $1.split(separator: "/").count
+                if leftDepth != rightDepth {
+                    return leftDepth < rightDepth
+                }
+                return $0.localizedStandardCompare($1) == .orderedAscending
+            }
+
+        var merged: [String] = []
+        for path in uniquePaths {
+            if merged.contains(where: { isBackupPath(path, nestedIn: $0) }) {
+                continue
+            }
+            merged.removeAll { isBackupPath($0, nestedIn: path) }
+            merged.append(path)
+        }
+
+        return merged.sorted(by: targetFolderComesFirst)
+    }
+
+    private func isBackupPath(_ path: String, nestedIn parent: String) -> Bool {
+        if path == parent {
+            return true
+        }
+        let normalizedParent = parent.hasSuffix("/") ? parent : "\(parent)/"
+        return path.hasPrefix(normalizedParent)
     }
 
     private func makeProductDatabaseContexts(

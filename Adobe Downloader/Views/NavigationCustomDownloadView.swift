@@ -70,9 +70,7 @@ struct NavigationCustomDownloadView: View {
                     },
                     onCancel: onDismiss,
                     onFileExists: { path, dependencies in
-                        existingFilePath = path
-                        pendingDependencies = dependencies
-                        showExistingFileAlert = true
+                        startCustomDownloadProcess(dependencies: dependencies, destinationURL: path)
                     },
                     onInstalledProduct: {
                         showInstalledAlert = true
@@ -93,15 +91,9 @@ struct NavigationCustomDownloadView: View {
                     onUseExisting: {
                         showExistingFileAlert = false
                         if let existingPath = existingFilePath {
-                            Task {
-                                await createCompletedCustomTask(
-                                    path: existingPath,
-                                    dependencies: pendingDependencies
-                                )
-                            }
+                            startCustomDownloadProcess(dependencies: pendingDependencies, destinationURL: existingPath)
                         }
                         pendingDependencies = []
-                        onDismiss()
                     },
                     onRedownload: {
                         showExistingFileAlert = false
@@ -226,19 +218,23 @@ struct NavigationCustomDownloadView: View {
         await globalNetworkManager.saveTask(task)
     }
 
-    private func startCustomDownloadProcess(dependencies: [DependenciesToDownload]) {
+    private func startCustomDownloadProcess(dependencies: [DependenciesToDownload], destinationURL existingDestinationURL: URL? = nil) {
         Task {
             let destinationURL: URL
-            do {
-                destinationURL = try await getDestinationURL(
-                    productId: productId,
-                    version: version,
-                    language: StorageData.shared.defaultLanguage,
-                    mainPlatform: dependencies.first(where: { $0.sapCode == productId })?.platform
-                )
-            } catch {
-                await MainActor.run { onDismiss() }
-                return
+            if let existingDestinationURL {
+                destinationURL = existingDestinationURL
+            } else {
+                do {
+                    destinationURL = try await getDestinationURL(
+                        productId: productId,
+                        version: version,
+                        language: StorageData.shared.defaultLanguage,
+                        mainPlatform: dependencies.first(where: { $0.sapCode == productId })?.platform
+                    )
+                } catch {
+                    await MainActor.run { onDismiss() }
+                    return
+                }
             }
 
             do {
@@ -787,6 +783,7 @@ private struct NavigationCustomPackageSelectorView: View {
     @State private var showCopiedAlert = false
     @State private var isDownloading = false
     @State private var requiredPackages: Set<UUID> = []
+    @State private var downloadedPackages: Set<UUID> = []
     @State private var searchText: String = ""
     @State private var activeFilters: Set<CustomPackageFilter> = []
     @State private var collapsedDependencies: Set<String> = []
@@ -843,6 +840,7 @@ private struct NavigationCustomPackageSelectorView: View {
                                 visiblePackages: entry.packages,
                                 selectedPackages: $selectedPackages,
                                 requiredPackages: requiredPackages,
+                                downloadedPackages: downloadedPackages,
                                 isForceExpanded: shouldForceExpand,
                                 isCollapsed: collapsedDependencies.contains(entry.dependency.sapCode),
                                 onToggleCollapse: { sapCode in
@@ -886,6 +884,7 @@ private struct NavigationCustomPackageSelectorView: View {
         .navigationTitle("自定义下载")
         .onAppear {
             initializeSelection()
+            initializeDownloadedPackages()
             initializeCollapseIfNeeded()
         }
         .overlay(alignment: .top) {
@@ -967,6 +966,7 @@ private struct NavigationCustomPackageSelectorView: View {
     private func initializeSelection() {
         selectedPackages.removeAll()
         requiredPackages.removeAll()
+        downloadedPackages.removeAll()
 
         for package in packages {
             if package.isRequired {
@@ -979,6 +979,78 @@ private struct NavigationCustomPackageSelectorView: View {
                 selectedPackages.insert(package.id)
             }
         }
+    }
+
+    private func initializeDownloadedPackages() {
+        guard let existingDirectory = existingDownloadDirectory() else { return }
+
+        for dependency in dependenciesToDownload {
+            for package in dependency.packages {
+                guard isDownloadedPackage(package, in: dependency, existingDirectory: existingDirectory) else {
+                    continue
+                }
+
+                downloadedPackages.insert(package.id)
+                selectedPackages.insert(package.id)
+                package.isSelected = true
+                package.downloaded = true
+                package.status = .completed
+                package.downloadedSize = package.downloadSize
+                package.progress = 1
+                package.speed = 0
+            }
+        }
+    }
+
+    private func existingDownloadDirectory() -> URL? {
+        let language = StorageData.shared.defaultLanguage
+
+        if let task = globalNetworkManager.downloadTasks.first(where: {
+            $0.productId == productId &&
+            $0.productVersion == version &&
+            $0.language == language &&
+            FileManager.default.fileExists(atPath: $0.directory.path)
+        }) {
+            return task.directory
+        }
+
+        guard StorageData.shared.useDefaultDirectory,
+              !StorageData.shared.defaultDirectory.isEmpty else {
+            return nil
+        }
+
+        let platform = dependenciesToDownload.first(where: { $0.sapCode == productId })?.platform
+            ?? HDPIMParityDecisionEngine.shared.preferredPlatformId(
+                productId: productId,
+                version: version
+            )
+            ?? "unknown"
+        let directoryName = "Adobe Downloader \(productId)_\(version)-\(language)-\(platform)"
+        let directory = URL(fileURLWithPath: StorageData.shared.defaultDirectory)
+            .appendingPathComponent(directoryName)
+
+        return FileManager.default.fileExists(atPath: directory.path) ? directory : nil
+    }
+
+    private func isDownloadedPackage(
+        _ package: Package,
+        in dependency: DependenciesToDownload,
+        existingDirectory: URL
+    ) -> Bool {
+        let packageURL = existingDirectory
+            .appendingPathComponent(dependency.sapCode)
+            .appendingPathComponent(package.fullPackageName)
+
+        guard FileManager.default.fileExists(atPath: packageURL.path) else {
+            return false
+        }
+
+        guard package.downloadSize > 0 else {
+            return true
+        }
+
+        let actualSize = ((try? FileManager.default.attributesOfItem(atPath: packageURL.path)[.size]) as? NSNumber)?.int64Value ?? 0
+        return actualSize == package.downloadSize
     }
 
     private func initializeCollapseIfNeeded() {
@@ -999,7 +1071,7 @@ private struct NavigationCustomPackageSelectorView: View {
     }
 
     private func clearAllSelection() {
-        selectedPackages = requiredPackages
+        selectedPackages = requiredPackages.union(downloadedPackages)
     }
 
     private func selectAllInDependency(_ sapCode: String) {
@@ -1011,7 +1083,7 @@ private struct NavigationCustomPackageSelectorView: View {
 
     private func clearAllInDependency(_ sapCode: String) {
         guard let dependency = dependenciesToDownload.first(where: { $0.sapCode == sapCode }) else { return }
-        for package in dependency.packages where !package.isRequired {
+        for package in dependency.packages where !package.isRequired && !downloadedPackages.contains(package.id) {
             selectedPackages.remove(package.id)
         }
     }
@@ -1023,31 +1095,13 @@ private struct NavigationCustomPackageSelectorView: View {
 
         for dependency in dependenciesToDownload {
             for package in dependency.packages {
-                package.isSelected = package.isRequired || selectedPackages.contains(package.id)
+                package.isSelected = package.isRequired || downloadedPackages.contains(package.id) || selectedPackages.contains(package.id)
             }
         }
 
-        let finalDependencies = dependenciesToDownload.filter { dependency in
-            dependency.packages.contains { $0.isSelected }
-        }
+        let finalDependencies = dependenciesToDownload
 
-        let platform = HDPIMParityDecisionEngine.shared.preferredPlatformId(
-            productId: productId,
-            version: version
-        ) ?? "unknown"
-
-        if globalNetworkManager.isProductInstalled(productId: productId, version: version, platform: platform) {
-            isDownloading = false
-            onInstalledProduct()
-            return
-        }
-
-        if let existingPath = globalNetworkManager.isVersionDownloaded(
-            productId: productId,
-            version: version,
-            language: StorageData.shared.defaultLanguage
-        ) {
-            isDownloading = false
+        if let existingPath = existingDownloadDirectory() {
             onFileExists(existingPath, finalDependencies)
         } else {
             onDownloadStart(finalDependencies)
@@ -1110,6 +1164,7 @@ private struct DependencySection: View {
     let visiblePackages: [Package]
     @Binding var selectedPackages: Set<UUID>
     let requiredPackages: Set<UUID>
+    let downloadedPackages: Set<UUID>
     let isForceExpanded: Bool
     let isCollapsed: Bool
     let onToggleCollapse: (String) -> Void
@@ -1150,8 +1205,10 @@ private struct DependencySection: View {
                         NavigationEnhancedPackageRow(
                             package: package,
                             isSelected: selectedPackages.contains(package.id),
+                            isDownloaded: downloadedPackages.contains(package.id),
+                            isLocked: requiredPackages.contains(package.id) || downloadedPackages.contains(package.id),
                             onToggle: { isSelected in
-                                guard !requiredPackages.contains(package.id) else { return }
+                                guard !requiredPackages.contains(package.id), !downloadedPackages.contains(package.id) else { return }
                                 if isSelected {
                                     selectedPackages.insert(package.id)
                                 } else {
@@ -1409,6 +1466,8 @@ private struct CustomPackageEmptyView: View {
 private struct NavigationEnhancedPackageRow: View {
     let package: Package
     let isSelected: Bool
+    let isDownloaded: Bool
+    let isLocked: Bool
     let onToggle: (Bool) -> Void
     let onCopyPackageInfo: () -> Void
 
@@ -1421,16 +1480,16 @@ private struct NavigationEnhancedPackageRow: View {
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
             Button(action: {
-                guard !isRequiredPackage else { return }
+                guard !isLocked else { return }
                 onToggle(!isSelected)
             }) {
                 Image(systemName: isSelected ? "checkmark.square.fill" : "square")
                     .font(.system(size: 14))
-                    .foregroundColor(isRequiredPackage ? .secondary.opacity(0.6) : (isSelected ? .blue : .secondary))
+                    .foregroundColor(checkboxColor)
             }
             .buttonStyle(PlainButtonStyle())
-            .disabled(isRequiredPackage)
-            .help(isRequiredPackage ? "此包为必需包，无法取消选择" : "点击切换选择状态")
+            .disabled(isLocked)
+            .help(checkboxHelp)
 
             VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 6) {
@@ -1442,6 +1501,10 @@ private struct NavigationEnhancedPackageRow: View {
                         .truncationMode(.middle)
 
                     packageTypeBadge
+
+                    if isDownloaded {
+                        subtleBadge(text: "已下载", color: .green)
+                    }
 
                     if isRequiredPackage {
                         subtleBadge(text: "必需", color: .red)
@@ -1508,6 +1571,26 @@ private struct NavigationEnhancedPackageRow: View {
                 .opacity(0.5),
             alignment: .bottom
         )
+    }
+
+    private var checkboxColor: Color {
+        if isDownloaded {
+            return .green.opacity(0.85)
+        }
+        if isRequiredPackage {
+            return .secondary.opacity(0.6)
+        }
+        return isSelected ? .blue : .secondary
+    }
+
+    private var checkboxHelp: String {
+        if isDownloaded {
+            return "此包已存在于离线源目录，无法取消选择"
+        }
+        if isRequiredPackage {
+            return "此包为必需包，无法取消选择"
+        }
+        return "点击切换选择状态"
     }
 
     @ViewBuilder

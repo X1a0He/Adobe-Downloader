@@ -3818,6 +3818,7 @@
       }
     },
     "此包为必需包，无法取消选择" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -4014,6 +4015,7 @@
 
     },
     "点击切换选择状态" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
