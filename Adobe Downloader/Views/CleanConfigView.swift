@@ -159,6 +159,12 @@ struct CleanupLog: Identifiable {
     }
 
     static func getCleanupDescription(for command: String) -> String {
+        if let title = command.components(separatedBy: " | [Cleanup]").first,
+           title != command,
+           !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return title
+        }
+
         if command.contains("Library/Logs") || command.contains("DiagnosticReports") {
             if command.contains("Adobe Creative Cloud") {
                 return String(localized: "正在清理 Creative Cloud 日志文件...")

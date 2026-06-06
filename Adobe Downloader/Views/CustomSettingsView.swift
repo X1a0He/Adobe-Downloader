@@ -76,7 +76,10 @@ struct CustomSettingsView: View {
 
             ScrollView(showsIndicators: false) {
                 content
-                    .padding(24)
+                    .padding(.top, 42)
+                    .padding(.leading, 24)
+                    .padding(.trailing, 24)
+                    .padding(.bottom, 24)
                     .frame(maxWidth: .infinity, alignment: .top)
                     .transition(.opacity.animation(.easeInOut(duration: 0.15)))
                     .id(selectedTab)

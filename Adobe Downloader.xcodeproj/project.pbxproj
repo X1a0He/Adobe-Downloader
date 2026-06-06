@@ -246,7 +246,7 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
-			shellScript = "set -e\nDEST_DIR=\"${TARGET_BUILD_DIR}/${WRAPPER_NAME}/Contents/Library/LaunchDaemons\"\nmkdir -p \"${DEST_DIR}\"\ncp \"${SRCROOT}/AdobeDownloaderHelperTool/com.x1a0he.macOS.Adobe-Downloader.helper.plist\" \"${DEST_DIR}/com.x1a0he.macOS.Adobe-Downloader.helper.plist\"\n";
+			shellScript = "set -e\nDEST_DIR=\"${TARGET_BUILD_DIR}/${WRAPPER_NAME}/Contents/Library/LaunchDaemons\"\nPLIST_SRC=\"${SRCROOT}/AdobeDownloaderHelperTool/com.x1a0he.macOS.Adobe-Downloader.helper.plist\"\nPLIST_DST=\"${DEST_DIR}/com.x1a0he.macOS.Adobe-Downloader.helper.plist\"\nHELPER_NAME=\"com.x1a0he.macOS.Adobe-Downloader.helper\"\nif [ \"${CONFIGURATION}\" = \"Debug\" ]; then\n    HELPER_PATH=\"${TARGET_BUILD_DIR}/${WRAPPER_NAME}/Contents/Library/LaunchServices/${HELPER_NAME}\"\nelse\n    HELPER_PATH=\"/Applications/${WRAPPER_NAME}/Contents/Library/LaunchServices/${HELPER_NAME}\"\nfi\nmkdir -p \"${DEST_DIR}\"\ncp \"${PLIST_SRC}\" \"${PLIST_DST}\"\n/usr/libexec/PlistBuddy -c \"Set :Program ${HELPER_PATH}\" \"${PLIST_DST}\"\n/usr/libexec/PlistBuddy -c \"Set :ProgramArguments:0 ${HELPER_PATH}\" \"${PLIST_DST}\"\n";
 		};
 /* End PBXShellScriptBuildPhase section */
 

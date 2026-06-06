@@ -11,6 +11,7 @@ private extension CleanupOption {
         switch self {
         case .adobeApps:           return "app.badge.fill"
         case .adobeCreativeCloud:  return "cloud.fill"
+        case .adobeUserData:       return "person.crop.circle.fill"
         case .adobePreferences:    return "slider.horizontal.3"
         case .adobeCaches:         return "internaldrive.fill"
         case .adobeLicenses:       return "key.fill"
@@ -19,6 +20,7 @@ private extension CleanupOption {
         case .adobeKeychain:       return "lock.fill"
         case .adobeGenuineService: return "checkmark.seal.fill"
         case .adobeHosts:          return "network"
+        case .c4dRedGiant:         return "cube.box.fill"
         }
     }
 
@@ -26,6 +28,7 @@ private extension CleanupOption {
         switch self {
         case .adobeApps:           return .red
         case .adobeCreativeCloud:  return .blue
+        case .adobeUserData:       return .mint
         case .adobePreferences:    return .orange
         case .adobeCaches:         return .teal
         case .adobeLicenses:       return .yellow
@@ -34,6 +37,7 @@ private extension CleanupOption {
         case .adobeKeychain:       return .indigo
         case .adobeGenuineService: return .green
         case .adobeHosts:          return .cyan
+        case .c4dRedGiant:         return .pink
         }
     }
 }
@@ -51,23 +55,105 @@ final class CleanupViewModel: ObservableObject {
     @Published var expandedOptions = Set<CleanupOption>()
     @Published var isCancelled = false
     @Published var isLogExpanded = false
+    @Published var estimatedCleanupSize: Int64 = 0
+    @Published var releasedCleanupSize: Int64 = 0
+    @Published var isPreparingPlan = false
+    @Published var prepareProgress = 0.0
+    @Published var prepareMessage = ""
+    #if DEBUG
+    @Published var showDebugPlanConfirmation = false
+    @Published var debugPlanItems: [CleanupPlanItem] = []
+    @Published var debugPlanEstimatedSize: Int64 = 0
+    #endif
 
-    private var commands: [String] = []
+    private let planner = CleanupPlanner()
+    private var cleanupPlan: CleanupPlan?
+    private var planItems: [CleanupPlanItem] = []
+    private var previewItemsByOption: [CleanupOption: [CleanupPlanItem]] = [:]
+
+    func previewItems(for option: CleanupOption) -> [CleanupPlanItem] {
+        #if DEBUG
+        if previewItemsByOption[option] == nil {
+            previewItemsByOption[option] = planner.makePlan(for: [option]).items
+        }
+        return previewItemsByOption[option] ?? []
+        #else
+        return []
+        #endif
+    }
+
+    func prepareCleanup() {
+        guard !selectedOptions.isEmpty else { return }
+        let options = selectedOptions
+        isPreparingPlan = true
+        prepareProgress = 0
+        prepareMessage = String(localized: "正在生成清理计划…")
+
+        Task.detached(priority: .userInitiated) { [planner] in
+            let plan = planner.makePlan(for: options) { progress in
+                Task { @MainActor in
+                    self.prepareProgress = progress.fraction
+                    self.prepareMessage = progress.message
+                }
+            }
+
+            await MainActor.run {
+                self.isPreparingPlan = false
+                self.prepareProgress = 1
+                self.prepareMessage = String(localized: "清理计划生成完成")
+                #if DEBUG
+                self.cleanupPlan = plan
+                self.planItems = plan.items
+                self.estimatedCleanupSize = plan.estimatedBytes
+                self.totalCommands = plan.items.count
+                self.debugPlanItems = plan.items
+                self.debugPlanEstimatedSize = plan.estimatedBytes
+                self.showDebugPlanConfirmation = true
+                #else
+                self.startCleanup(with: plan)
+                #endif
+            }
+        }
+    }
 
     func startCleanup() {
+        if let cleanupPlan {
+            startCleanup(with: cleanupPlan)
+        } else {
+            startCleanup(with: planner.makePlan(for: selectedOptions))
+        }
+    }
+
+    func selectDefaultOptions() {
+        selectedOptions = Set(CleanupOption.defaultSelectedOptions)
+    }
+
+    private func startCleanup(with plan: CleanupPlan) {
         isProcessing = true
         cleanupLogs.removeAll()
         currentCommandIndex = 0
         isCancelled = false
+        releasedCleanupSize = 0
 
-        let userHome = NSHomeDirectory()
-        var collected: [String] = []
-        for option in selectedOptions {
-            let userCommands = option.commands.map { $0.replacingOccurrences(of: "~/", with: "\(userHome)/") }
-            collected.append(contentsOf: userCommands)
+        cleanupPlan = plan
+        planItems = plan.items
+        estimatedCleanupSize = plan.estimatedBytes
+        totalCommands = planItems.count
+
+        #if DEBUG
+        cleanupLogs.append(CleanupLog(
+            timestamp: Date(),
+            command: "[Cleanup][Context] userHome=\(plan.context.userHome) uid=\(plan.context.userUID) loginKeychain=\(plan.context.loginKeychain)",
+            status: .success,
+            message: String(localized: "清理计划已生成")
+        ))
+        #endif
+
+        guard !planItems.isEmpty else {
+            finishCleanup(message: String(localized: "未发现可清理项目"))
+            return
         }
-        commands = collected
-        totalCommands = commands.count
+
         executeNextCommand()
     }
 
@@ -76,14 +162,24 @@ final class CleanupViewModel: ObservableObject {
     }
 
     private func finishCleanup(message: String) {
+        if let cleanupPlan {
+            releasedCleanupSize = planner.releasedSpace(from: cleanupPlan)
+        }
         isProcessing = false
-        alertMessage = message
+        let estimatedText = ByteCountFormatter.string(fromByteCount: estimatedCleanupSize, countStyle: .file)
+        let releasedText = ByteCountFormatter.string(fromByteCount: releasedCleanupSize, countStyle: .file)
+        if estimatedCleanupSize > 0 || releasedCleanupSize > 0 {
+            alertMessage = "\(message)\n预计可清理：\(estimatedText)\n实际释放：\(releasedText)"
+        } else {
+            alertMessage = message
+        }
+        refreshPreviewItems()
         showAlert = true
         selectedOptions.removeAll()
     }
 
     private func executeNextCommand() {
-        guard currentCommandIndex < commands.count else {
+        guard currentCommandIndex < planItems.count else {
             DispatchQueue.main.async {
                 self.finishCleanup(message: self.isCancelled ? String(localized: "清理已取消") : String(localized: "清理完成"))
             }
@@ -95,16 +191,22 @@ final class CleanupViewModel: ObservableObject {
             return
         }
 
-        let command = commands[currentCommandIndex]
-        cleanupLogs.append(CleanupLog(timestamp: Date(), command: command, status: .running, message: String(localized: "正在执行...")))
+        let item = planItems[currentCommandIndex]
+        let runningLog = CleanupLog(
+            timestamp: Date(),
+            command: item.debugSummary,
+            status: .running,
+            message: item.title
+        )
+        cleanupLogs.append(runningLog)
 
         let timeoutTimer = DispatchSource.makeTimerSource(queue: .global())
         timeoutTimer.schedule(deadline: .now() + 30)
         timeoutTimer.setEventHandler { [weak self] in
             guard let self else { return }
-            if let index = self.cleanupLogs.lastIndex(where: { $0.command == command }) {
+            if let index = self.cleanupLogs.lastIndex(where: { $0.id == runningLog.id }) {
                 DispatchQueue.main.async {
-                    self.cleanupLogs[index] = CleanupLog(timestamp: Date(), command: command, status: .error, message: String(localized: "执行结果：执行超时\n执行命令：\(command)"))
+                    self.cleanupLogs[index] = CleanupLog(timestamp: Date(), command: item.debugSummary, status: .error, message: self.failureMessage(for: item, output: String(localized: "执行超时")))
                     self.currentCommandIndex += 1
                     self.executeNextCommand()
                 }
@@ -112,23 +214,36 @@ final class CleanupViewModel: ObservableObject {
         }
         timeoutTimer.resume()
 
-        PrivilegedHelperAdapter.shared.executeCommand(command) { [weak self] (output: String) in
+        PrivilegedHelperAdapter.shared.executeCommand(item.command) { [weak self] (output: String) in
             timeoutTimer.cancel()
             guard let self else { return }
             DispatchQueue.main.async {
-                if let index = self.cleanupLogs.lastIndex(where: { $0.command == command }) {
+                if let index = self.cleanupLogs.lastIndex(where: { $0.id == runningLog.id }) {
                     if self.isCancelled {
-                        self.cleanupLogs[index] = CleanupLog(timestamp: Date(), command: command, status: .cancelled, message: String(localized: "已取消"))
+                        self.cleanupLogs[index] = CleanupLog(timestamp: Date(), command: item.debugSummary, status: .cancelled, message: String(localized: "已取消"))
                     } else {
                         let isSuccess = output.isEmpty || output.lowercased() == "success"
-                        let message = isSuccess ? String(localized: "执行成功") : String(localized: "执行结果：\(output)\n执行命令：\(command)")
-                        self.cleanupLogs[index] = CleanupLog(timestamp: Date(), command: command, status: isSuccess ? .success : .error, message: message)
+                        let message = isSuccess ? String(localized: "执行成功") : self.failureMessage(for: item, output: output)
+                        self.cleanupLogs[index] = CleanupLog(timestamp: Date(), command: item.debugSummary, status: isSuccess ? .success : .error, message: message)
                     }
                 }
                 self.currentCommandIndex += 1
                 self.executeNextCommand()
             }
         }
+    }
+
+    private func refreshPreviewItems() {
+        previewItemsByOption.removeAll()
+    }
+
+    private func failureMessage(for item: CleanupPlanItem, output: String) -> String {
+        #if DEBUG
+        return String(localized: "执行结果：\(output)\n执行命令：\(item.command)")
+        #else
+        let title = CleanupLog.getCleanupDescription(for: item.debugSummary)
+        return String(localized: "执行失败：\(title)")
+        #endif
     }
 }
 
@@ -154,21 +269,86 @@ struct CleanupView: View {
         return totalWidth * CGFloat(min(1.0, max(0.0, Double(viewModel.currentCommandIndex) / Double(viewModel.totalCommands))))
     }
 
+    private func prepareProgressWidth(for totalWidth: CGFloat) -> CGFloat {
+        totalWidth * CGFloat(min(1.0, max(0.04, viewModel.prepareProgress)))
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
             optionsSection
+            if viewModel.isPreparingPlan { preparePlanSection }
             if viewModel.isProcessing { progressSection }
             logSection
             actionBar
         }
         .alert("确认清理", isPresented: $viewModel.showConfirmation) {
             Button("取消", role: .cancel) { }
-            Button("确定", role: .destructive) { viewModel.startCleanup() }
+            Button("确定", role: .destructive) { viewModel.prepareCleanup() }
         } message: {
             Text("这将删除所选的 Adobe 相关文件，该操作不可撤销。清理过程不会影响 Adobe Downloader 的文件和下载数据。是否继续？")
         }
+        #if DEBUG
+        .sheet(isPresented: $viewModel.showDebugPlanConfirmation) {
+            DebugCleanupPlanSheet(
+                items: viewModel.debugPlanItems,
+                estimatedBytes: viewModel.debugPlanEstimatedSize,
+                onCancel: {
+                    viewModel.showDebugPlanConfirmation = false
+                },
+                onConfirm: {
+                    viewModel.showDebugPlanConfirmation = false
+                    viewModel.startCleanup()
+                }
+            )
+        }
+        #endif
         .alert(isPresented: $viewModel.showAlert) {
             Alert(title: Text("清理结果"), message: Text(viewModel.alertMessage), dismissButton: .default(Text("确定")))
+        }
+    }
+
+    private var preparePlanSection: some View {
+        SettingSection(String(localized: "生成清理计划")) {
+            VStack(spacing: 0) {
+                SettingRow(title: String(localized: "正在扫描残留"), icon: "magnifyingglass", iconTint: .blue) {
+                    HStack(spacing: 8) {
+                        ProgressView()
+                            .scaleEffect(0.7)
+                            .frame(width: 16, height: 16)
+                        Text("\(Int(viewModel.prepareProgress * 100))%")
+                            .font(.system(size: 12, weight: .bold))
+                            .foregroundColor(.blue)
+                            .monospacedDigit()
+                    }
+                }
+
+                SettingRowDivider()
+
+                GeometryReader { geo in
+                    ZStack(alignment: .leading) {
+                        RoundedRectangle(cornerRadius: 6).fill(Color.secondary.opacity(0.15)).frame(height: 8)
+                        RoundedRectangle(cornerRadius: 6)
+                            .fill(LinearGradient(colors: [Color.blue.opacity(0.65), Color.blue], startPoint: .leading, endPoint: .trailing))
+                            .frame(width: prepareProgressWidth(for: geo.size.width), height: 8)
+                    }
+                }
+                .frame(height: 8)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 10)
+                .animation(.linear(duration: 0.2), value: viewModel.prepareProgress)
+
+                SettingRowDivider()
+
+                HStack {
+                    Text(viewModel.prepareMessage)
+                        .font(.system(size: 12))
+                        .foregroundColor(.secondary)
+                        .lineLimit(2)
+                    Spacer()
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+            }
         }
     }
 
@@ -180,7 +360,8 @@ struct CleanupView: View {
             ForEach(Array(CleanupOption.allCases.enumerated()), id: \.element.id) { index, option in
                 CleanupOptionRow(
                     option: option,
-                    isProcessing: viewModel.isProcessing,
+                    isProcessing: viewModel.isProcessing || viewModel.isPreparingPlan,
+                    previewItems: viewModel.expandedOptions.contains(option) ? viewModel.previewItems(for: option) : [],
                     selectedOptions: $viewModel.selectedOptions,
                     expandedOptions: $viewModel.expandedOptions
                 )
@@ -252,6 +433,9 @@ struct CleanupView: View {
                             Image(systemName: "terminal.fill").font(.system(size: 11, weight: .medium)).foregroundColor(.indigo)
                         }
                         Text("最近日志").font(.system(size: 13)).foregroundColor(.primary.opacity(0.9))
+                        if viewModel.isPreparingPlan {
+                            SettingsStatusChip(icon: "circle.fill", text: String(localized: "生成中"), tint: .blue)
+                        }
                         if viewModel.isProcessing {
                             SettingsStatusChip(icon: "circle.fill", text: String(localized: "执行中"), tint: .green)
                         }
@@ -284,7 +468,7 @@ struct CleanupView: View {
 
     private var actionBar: some View {
         HStack(spacing: 8) {
-            Button(action: { viewModel.selectedOptions = Set(CleanupOption.allCases) }) {
+            Button(action: { viewModel.selectDefaultOptions() }) {
                 HStack(spacing: 4) {
                     Image(systemName: "checkmark.square").font(.system(size: 10))
                     Text("全选").font(.system(size: 12))
@@ -292,7 +476,7 @@ struct CleanupView: View {
                 .foregroundColor(.white)
             }
             .buttonStyle(BeautifulButtonStyle(baseColor: Color.blue))
-            .disabled(viewModel.isProcessing)
+            .disabled(viewModel.isProcessing || viewModel.isPreparingPlan)
 
             Button(action: { viewModel.selectedOptions.removeAll() }) {
                 HStack(spacing: 4) {
@@ -302,7 +486,7 @@ struct CleanupView: View {
                 .foregroundColor(.primary.opacity(0.85))
             }
             .buttonStyle(BeautifulButtonStyle(baseColor: Color.secondary.opacity(0.2)))
-            .disabled(viewModel.isProcessing)
+            .disabled(viewModel.isProcessing || viewModel.isPreparingPlan)
 
             #if DEBUG
             Button(action: {
@@ -317,7 +501,7 @@ struct CleanupView: View {
                     .font(.system(size: 12)).foregroundColor(.white)
             }
             .buttonStyle(BeautifulButtonStyle(baseColor: Color.purple))
-            .disabled(viewModel.isProcessing)
+            .disabled(viewModel.isProcessing || viewModel.isPreparingPlan)
             #endif
 
             Spacer()
@@ -330,15 +514,89 @@ struct CleanupView: View {
                 .foregroundColor(.white)
             }
             .buttonStyle(BeautifulButtonStyle(baseColor: Color.red))
-            .disabled(viewModel.selectedOptions.isEmpty || viewModel.isProcessing)
-            .opacity(viewModel.selectedOptions.isEmpty || viewModel.isProcessing ? 0.5 : 1)
+            .disabled(viewModel.selectedOptions.isEmpty || viewModel.isProcessing || viewModel.isPreparingPlan)
+            .opacity(viewModel.selectedOptions.isEmpty || viewModel.isProcessing || viewModel.isPreparingPlan ? 0.5 : 1)
         }
     }
 }
 
+#if DEBUG
+private struct DebugCleanupPlanSheet: View {
+    let items: [CleanupPlanItem]
+    let estimatedBytes: Int64
+    let onCancel: () -> Void
+    let onConfirm: () -> Void
+
+    private var estimatedText: String {
+        ByteCountFormatter.string(fromByteCount: estimatedBytes, countStyle: .file)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack {
+                VStack(alignment: .leading, spacing: 4) {
+                    Text("确认清理计划")
+                        .font(.system(size: 16, weight: .semibold))
+                    Text("将执行 \(items.count) 项，预计可清理 \(estimatedText)")
+                        .font(.system(size: 12))
+                        .foregroundColor(.secondary)
+                }
+                Spacer()
+            }
+
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 8) {
+                    if items.isEmpty {
+                        Text("未扫描到当前存在的路径；动态命令会在执行时处理。")
+                            .font(.system(size: 12))
+                            .foregroundColor(.secondary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(10)
+                    } else {
+                        ForEach(items) { item in
+                            VStack(alignment: .leading, spacing: 4) {
+                                Text(item.title)
+                                    .font(.system(size: 12, weight: .semibold))
+                                    .foregroundColor(.primary)
+                                Text(item.resolvedTarget)
+                                    .font(.system(size: 11, design: .monospaced))
+                                    .foregroundColor(.secondary)
+                                    .textSelection(.enabled)
+                                Text(item.command)
+                                    .font(.system(size: 10, design: .monospaced))
+                                    .foregroundColor(.secondary.opacity(0.85))
+                                    .textSelection(.enabled)
+                            }
+                            .padding(10)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .background(Color(NSColor.controlBackgroundColor))
+                            .cornerRadius(6)
+                        }
+                    }
+                }
+                .padding(.vertical, 2)
+            }
+            .frame(minHeight: 280, maxHeight: 420)
+
+            HStack {
+                Spacer()
+                Button("取消", action: onCancel)
+                    .keyboardShortcut(.cancelAction)
+                Button("确认清理", role: .destructive, action: onConfirm)
+                    .keyboardShortcut(.defaultAction)
+                    .disabled(items.isEmpty)
+            }
+        }
+        .padding(18)
+        .frame(width: 760)
+    }
+}
+#endif
+
 private struct CleanupOptionRow: View {
     let option: CleanupOption
     let isProcessing: Bool
+    let previewItems: [CleanupPlanItem]
     @Binding var selectedOptions: Set<CleanupOption>
     @Binding var expandedOptions: Set<CleanupOption>
 
@@ -370,7 +628,7 @@ private struct CleanupOptionRow: View {
 
             #if DEBUG
             if expandedOptions.contains(option) {
-                CommandListView(option: option)
+                CommandListView(option: option, previewItems: previewItems)
             }
             #endif
         }
@@ -379,22 +637,29 @@ private struct CleanupOptionRow: View {
 
 struct CommandListView: View {
     let option: CleanupOption
+    let previewItems: [CleanupPlanItem]
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("将执行的命令：")
+            Text("将执行的清理计划：")
                 .font(.system(size: 12, weight: .medium)).foregroundColor(.secondary)
                 .padding(.top, 2).padding(.horizontal, 12)
 
             LazyVStack(spacing: 6) {
-                ForEach(option.commands, id: \.self) { command in
-                    Text(command)
+                ForEach(previewItems) { item in
+                    Text(item.debugSummary)
                         .font(.system(size: 11, design: .monospaced))
                         .foregroundColor(.white)
                         .padding(10)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .background(Color.black.opacity(0.85))
                         .cornerRadius(6)
+                }
+                if previewItems.isEmpty {
+                    Text("未扫描到当前存在的路径；动态命令会在执行时处理。")
+                        .font(.system(size: 11))
+                        .foregroundColor(.secondary)
+                        .padding(.horizontal, 12)
                 }
             }
             .padding(.horizontal, 12)

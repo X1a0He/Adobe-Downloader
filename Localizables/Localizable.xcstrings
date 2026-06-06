@@ -331,6 +331,9 @@
         }
       }
     },
+    "Adobe 用户数据" : {
+
+    },
     "Adobe 缓存文件" : {
       "localizations" : {
         "en" : {
@@ -380,6 +383,9 @@
 
     },
     "By X1a0He. ❤️ Love from China. 🇨🇳" : {
+
+    },
+    "C4D / Red Giant" : {
 
     },
     "Debug 模式" : {
@@ -1219,6 +1225,9 @@
         }
       }
     },
+    "停止并删除 Cinema 4D、Maxon 和 Red Giant 相关残留" : {
+
+    },
     "允许自定义命令（仅 Debug，高风险）" : {
       "extractionState" : "stale",
       "localizations" : {
@@ -1478,6 +1487,9 @@
           }
         }
       }
+    },
+    "删除当前用户目录中的 Adobe 支持数据、容器、WebKit 和共享数据" : {
+
     },
     "删除所有已安装的 Adobe 应用程序（不包括 Adobe Downloader）" : {
       "localizations" : {
@@ -2154,6 +2166,7 @@
       }
     },
     "将执行的命令：" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -2162,6 +2175,9 @@
           }
         }
       }
+    },
+    "将执行的清理计划：" : {
+
     },
     "尚未设置目录" : {
 
@@ -2669,17 +2685,8 @@
     "执行日志" : {
 
     },
-    "执行结果：%@\n执行命令：%@" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "new",
-            "value" : "Execution result: %1$@\nExecution command: %2$@"
-          }
-        }
-      }
-    },
     "执行结果：执行超时\n执行命令：%@" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -2688,6 +2695,9 @@
           }
         }
       }
+    },
+    "执行超时" : {
+
     },
     "找不到安装程序" : {
       "extractionState" : "stale",
@@ -3211,6 +3221,9 @@
         }
       }
     },
+    "未发现可清理项目" : {
+
+    },
     "未启用" : {
       "localizations" : {
         "en" : {
@@ -3275,6 +3288,9 @@
           }
         }
       }
+    },
+    "未扫描到当前存在的路径；动态命令会在执行时处理。" : {
+
     },
     "未找到 \"%@\" 相关产品" : {
 
@@ -3630,6 +3646,7 @@
 
     },
     "正在执行..." : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -3638,6 +3655,9 @@
           }
         }
       }
+    },
+    "正在扫描残留" : {
+
     },
     "正在清理 Adobe 应用程序..." : {
       "localizations" : {
@@ -3779,6 +3799,9 @@
           }
         }
       }
+    },
+    "正在生成清理计划…" : {
+
     },
     "正在获取包信息" : {
 
@@ -3951,6 +3974,9 @@
         }
       }
     },
+    "清理计划生成完成" : {
+
+    },
     "清理过程不会影响 Adobe Downloader 的文件和下载数据" : {
 
     },
@@ -4071,6 +4097,12 @@
           }
         }
       }
+    },
+    "生成中" : {
+
+    },
+    "生成清理计划" : {
+
     },
     "用于快速验证 Helper 是否正常、是否为 root，以及查看命令输出。" : {
       "extractionState" : "stale",
