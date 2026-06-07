@@ -10,8 +10,12 @@ final class AAMDFileManager {
     private let aamdURL: URL
     private let fileManager = FileManager.default
 
-    init(downloadFileURL: URL) {
-        aamdURL = URL(fileURLWithPath: downloadFileURL.path + ".aamd")
+    init(downloadFileURL: URL, metadataDirectory: URL? = nil) {
+        if let metadataDirectory {
+            aamdURL = metadataDirectory.appendingPathComponent(downloadFileURL.lastPathComponent + ".aamd")
+        } else {
+            aamdURL = URL(fileURLWithPath: downloadFileURL.path + ".aamd")
+        }
     }
 
     func exists() -> Bool {
@@ -28,6 +32,11 @@ final class AAMDFileManager {
     }
 
     func writeMetaInfo() {
+        try? fileManager.createDirectory(
+            at: aamdURL.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+
         let header = "\(AAMDFileManager.headerString)\n"
         guard let data = header.data(using: .utf8) else { return }
 

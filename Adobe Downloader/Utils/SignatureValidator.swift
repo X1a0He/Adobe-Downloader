@@ -74,6 +74,10 @@ class SignatureValidator {
     }
 
     static func validateWithSegments(fileURL: URL, validationInfo: ValidationInfo) throws -> Bool {
+        try firstMismatchedSegment(fileURL: fileURL, validationInfo: validationInfo) == nil
+    }
+
+    static func firstMismatchedSegment(fileURL: URL, validationInfo: ValidationInfo) throws -> Int? {
         let fileHandle = try FileHandle(forReadingFrom: fileURL)
         defer { fileHandle.closeFile() }
 
@@ -89,16 +93,16 @@ class SignatureValidator {
             let segmentData = fileHandle.readData(ofLength: Int(segmentSize))
 
             guard segmentData.count == Int(segmentSize) else {
-                return false
+                return segment.segmentNumber
             }
 
             let hash = segmentHash(data: segmentData, algorithm: validationInfo.algorithm, expectedHash: segment.hash)
             if hash.lowercased() != segment.hash.lowercased() {
-                return false
+                return segment.segmentNumber
             }
         }
 
-        return true
+        return nil
     }
 
     private static func segmentHash(data: Data, algorithm: String, expectedHash: String) -> String {

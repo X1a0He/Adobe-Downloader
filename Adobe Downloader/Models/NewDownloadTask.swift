@@ -92,7 +92,7 @@ class NewDownloadTask: Identifiable, ObservableObject, @unchecked Sendable  {
         self.totalSize = totalSize
         self.totalSpeed = totalSpeed
         self.currentPackage = currentPackage
-        self.displayInstallButton = productId != "APRO"
+        self.displayInstallButton = true
         self.platform = platform
         self.targetArchitecture = targetArchitecture
     }

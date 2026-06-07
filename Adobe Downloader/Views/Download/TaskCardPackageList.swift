@@ -377,6 +377,7 @@ private struct PackageProductRow: View {
 
 private struct PackageItemRow: View {
     @ObservedObject var package: Package
+    @State private var showCopiedAlert = false
 
     private var clampedProgress: Double {
         min(max(package.progress, 0), 1)
@@ -457,10 +458,55 @@ private struct PackageItemRow: View {
                 Text(package.status.description).font(.system(size: 10, weight: .medium))
             }
             .foregroundColor(.green.opacity(0.9))
+        case .failed(let message):
+            HStack(spacing: 5) {
+                Text(package.status.description)
+                    .font(.system(size: 10, weight: .medium))
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                Button(action: { copyPackageFailureInfo(message) }) {
+                    Label(String(localized: "复制"), systemImage: "doc.on.doc")
+                        .font(.system(size: 9, weight: .semibold))
+                }
+                .buttonStyle(.borderless)
+                .help(String(localized: "复制错误信息"))
+                .popover(isPresented: $showCopiedAlert, arrowEdge: .trailing) {
+                    HStack(spacing: 6) {
+                        Image(systemName: "checkmark.circle.fill").foregroundColor(.green)
+                        Text("已复制").font(.system(size: 13, weight: .medium))
+                    }
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                }
+            }
+            .foregroundColor(.red.opacity(0.9))
         default:
             Text(package.status.description)
                 .font(.system(size: 10, weight: .medium))
                 .foregroundColor(.secondary.opacity(0.8))
+        }
+    }
+
+    private func copyPackageFailureInfo(_ message: String) {
+        var lines: [String] = []
+        lines.append("包名: \(package.fullPackageName)")
+        lines.append("版本: \(package.packageVersion)")
+        lines.append("类型: \(package.type)")
+        lines.append("大小: \(package.formattedSize)")
+        lines.append("下载地址: \(package.downloadURL)")
+        if !package.manifestURL.isEmpty {
+            lines.append("Manifest: \(package.manifestURL)")
+        }
+        lines.append("错误: \(message)")
+        if let error = package.lastError {
+            lines.append("错误详情: \(error.localizedDescription)")
+        }
+
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(lines.joined(separator: "\n"), forType: .string)
+        showCopiedAlert = true
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+            showCopiedAlert = false
         }
     }
 }

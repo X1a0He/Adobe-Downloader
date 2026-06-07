@@ -118,6 +118,30 @@ class NetworkManager: ObservableObject {
             } else {
                 try await globalNewDownloadUtils.handleCustomDownload(task: task, customDependencies: customDependencies)
             }
+        } catch NetworkError.cancelled {
+            if productId == "APRO", await globalCancelTracker.isPaused(task.id) {
+                task.setStatus(.paused(DownloadStatus.PauseInfo(
+                    reason: .userRequested,
+                    timestamp: Date(),
+                    resumable: true
+                )))
+                await saveTask(task)
+                await MainActor.run {
+                    updateDockBadge()
+                    objectWillChange.send()
+                }
+            } else {
+                task.setStatus(.failed(DownloadStatus.FailureInfo(
+                    message: NetworkError.cancelled.localizedDescription,
+                    error: NetworkError.cancelled,
+                    timestamp: Date(),
+                    recoverable: true
+                )))
+                await saveTask(task)
+                await MainActor.run {
+                    objectWillChange.send()
+                }
+            }
         } catch {
             task.setStatus(.failed(DownloadStatus.FailureInfo(
                 message: error.localizedDescription,
@@ -148,7 +172,9 @@ class NetworkManager: ObservableObject {
                }
                
                if removeFiles {
-                   try? FileManager.default.removeItem(at: task.directory)
+                   removeFilesForTask(task, includeDownloadedFile: true)
+               } else {
+                   removeFilesForTask(task, includeDownloadedFile: false)
                }
                
                TaskPersistenceManager.shared.removeTask(task)
@@ -200,13 +226,20 @@ class NetworkManager: ObservableObject {
        await MainActor.run {
            downloadTasks.removeAll { task in
                if task.status.isCompleted || task.status.isFailed {
-                   try? FileManager.default.removeItem(at: task.directory)
+                   let shouldRemoveDownloadedFile = task.status.isFailed || StorageData.shared.deleteCompletedTasksWithFiles
+                   removeFilesForTask(task, includeDownloadedFile: shouldRemoveDownloadedFile)
                    return true
                }
                return false
            }
            updateDockBadge()
            objectWillChange.send()
+       }
+   }
+
+   private func removeFilesForTask(_ task: NewDownloadTask, includeDownloadedFile: Bool) {
+       for url in globalNewDownloadUtils.removableArtifacts(for: task, includeDownloadedFile: includeDownloadedFile) {
+           try? FileManager.default.removeItem(at: url)
        }
    }
 
@@ -259,6 +292,10 @@ class NetworkManager: ObservableObject {
                     case .installationFailedWithDetails(let message, let details):
                         errorDetails = details
                         mainError = InstallManager.InstallError.installationFailed(message)
+                    case .installerOpened(let message):
+                        updateInstallationSnapshot(progress: 0.8, status: message)
+                        installationState = .installing(progress: 0.8, status: message)
+                        return
                     default:
                         break
                     }
@@ -317,6 +354,10 @@ class NetworkManager: ObservableObject {
                     if case .installationFailedWithDetails(let message, let details) = installError {
                         errorDetails = details
                         mainError = InstallManager.InstallError.installationFailed(message)
+                    } else if case .installerOpened(let message) = installError {
+                        updateInstallationSnapshot(progress: 0.8, status: message)
+                        installationState = .installing(progress: 0.8, status: message)
+                        return
                     }
                 }
                 
@@ -483,13 +524,12 @@ class NetworkManager: ObservableObject {
         }
         let totalSpeed = activeTasks.reduce(0.0) { $0 + max($1.totalSpeed, 0) }
         let progress = totalSize > 0 ? Double(downloadedSize) / Double(totalSize) : 0
-        let hasCompletedTask = downloadTasks.contains { $0.status.isCompleted }
 
         DockProgressIndicator.shared.update(
             progress: progress,
             taskCount: activeTasks.count,
             speed: totalSpeed,
-            isCompleted: hasCompletedTask
+            isCompleted: false
         )
     }
 

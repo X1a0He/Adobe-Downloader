@@ -17,6 +17,7 @@ struct TaskCard: View {
     @State private var isInstalling = false
     @State private var showHelperAlert = false
     @State private var showCopiedToast = false
+    @State private var copiedToastText = "已复制任务信息"
     @StateObject private var iconLoader = AsyncImageLoader()
 
     private var clampedTotalProgress: Double {
@@ -50,7 +51,11 @@ struct TaskCard: View {
                     .padding(.bottom, 16)
 
             case .failed(let info):
-                FailedInfoView(info: info, progressAtFailure: clampedTotalProgress)
+                FailedInfoView(
+                    info: info,
+                    progressAtFailure: clampedTotalProgress,
+                    onCopyError: { copyFailureInfo(info) }
+                )
                     .padding(.horizontal, 24)
                     .padding(.bottom, 16)
 
@@ -135,7 +140,7 @@ struct TaskCard: View {
                 HStack(spacing: 6) {
                     Image(systemName: "checkmark.circle.fill")
                         .foregroundColor(.green)
-                    Text("已复制任务信息")
+                    Text(copiedToastText)
                         .font(.system(size: 12, weight: .medium))
                 }
                 .padding(.horizontal, 10)
@@ -289,7 +294,7 @@ struct TaskCard: View {
     }
 
     private func openInFinder() {
-        let url = URL(fileURLWithPath: task.directory.path)
+        let url = resolvedTaskDirectoryURL()
         NSWorkspace.shared.selectFile(
             url.path,
             inFileViewerRootedAtPath: url.deletingLastPathComponent().path
@@ -297,11 +302,21 @@ struct TaskCard: View {
     }
 
     private func openProduct() {
-        if task.productId == "APRO" {
-            NSWorkspace.shared.open(task.directory)
-        } else {
-            NSWorkspace.shared.open(task.directory)
+        NSWorkspace.shared.open(resolvedTaskDirectoryURL())
+    }
+
+    private func resolvedTaskDirectoryURL() -> URL {
+        if task.productId == "APRO",
+           task.directory.pathExtension.lowercased() == "dmg",
+           !FileManager.default.fileExists(atPath: task.directory.path) {
+            let extractedURL = task.directory.deletingPathExtension()
+            var isDirectory: ObjCBool = false
+            if FileManager.default.fileExists(atPath: extractedURL.path, isDirectory: &isDirectory),
+               isDirectory.boolValue {
+                return extractedURL
+            }
         }
+        return task.directory
     }
 
     private func copyTaskInfo() {
@@ -315,9 +330,32 @@ struct TaskCard: View {
         lines.append("路径: \(task.directory.path)")
         lines.append("状态: \(task.status.description)")
         lines.append("大小: \(task.formattedTotalSize)")
-        let text = lines.joined(separator: "\n")
+        copyToPasteboard(lines.joined(separator: "\n"), toastText: "已复制任务信息")
+    }
+
+    private func copyFailureInfo(_ info: DownloadStatus.FailureInfo) {
+        var lines: [String] = []
+        lines.append("产品: \(task.displayName) \(task.productVersion)")
+        lines.append("SAP: \(task.productId)")
+        lines.append("平台: \(task.platform)")
+        if !task.language.isEmpty {
+            lines.append("语言: \(task.language)")
+        }
+        lines.append("路径: \(task.directory.path)")
+        lines.append("状态: \(task.status.description)")
+        lines.append("错误: \(info.message)")
+        if let error = info.error {
+            lines.append("错误类型: \(String(describing: type(of: error)))")
+            lines.append("错误详情: \(error.localizedDescription)")
+        }
+        lines.append("时间: \(info.timestamp.formatted(date: .numeric, time: .standard))")
+        copyToPasteboard(lines.joined(separator: "\n"), toastText: "已复制错误信息")
+    }
+
+    private func copyToPasteboard(_ text: String, toastText: String) {
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(text, forType: .string)
+        copiedToastText = toastText
         withAnimation(.easeInOut(duration: 0.2)) {
             showCopiedToast = true
         }
@@ -562,6 +600,7 @@ private struct PausedInfoView: View {
 private struct FailedInfoView: View {
     let info: DownloadStatus.FailureInfo
     let progressAtFailure: Double
+    let onCopyError: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -591,6 +630,13 @@ private struct FailedInfoView: View {
                         .foregroundColor(.red.opacity(0.75))
                 }
                 Spacer()
+                Button(action: onCopyError) {
+                    Label(String(localized: "复制错误"), systemImage: "doc.on.doc")
+                        .font(.system(size: 10, weight: .semibold))
+                }
+                .buttonStyle(.borderless)
+                .foregroundColor(.red.opacity(0.85))
+                .help(String(localized: "复制错误信息"))
                 Text(info.timestamp.formatted(date: .omitted, time: .shortened))
                     .foregroundColor(.secondary.opacity(0.7))
             }

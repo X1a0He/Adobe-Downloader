@@ -18,6 +18,7 @@ final class PDMDownloadEngine {
         packageId: String,
         url: URL,
         destinationURL: URL,
+        metadataDirectory: URL? = nil,
         headers: [String: String],
         expectedTotalSize: Int64 = 0,
         validationURL: String? = nil,
@@ -30,7 +31,19 @@ final class PDMDownloadEngine {
         let enrichedHeaders = enrichHeaders(headerTuples)
 
         if let existingManager = getManager(packageId), existingManager.state.current == .paused {
-            return await existingManager.resumeDownload()
+            let result = await existingManager.resumeDownload(
+                progressHandler: progressHandler,
+                rangeAvailabilityHandler: rangeAvailabilityHandler
+            )
+            switch result {
+            case .completed, .cancelled:
+                removeManager(packageId)
+            case .paused:
+                break
+            case .error:
+                removeManager(packageId)
+            }
+            return result
         }
 
         let communicator = PDMHttpCommunicator()
@@ -65,37 +78,32 @@ final class PDMDownloadEngine {
         if !validationCandidates.isEmpty {
             let validationMgr = PDMValidationManager(communicator: communicator)
             for validationURLString in validationCandidates {
-                validationInfo = validationMgr.fetchValidationInfo(
+                guard let info = validationMgr.fetchValidationInfo(
                     from: validationURLString,
                     headers: enrichedHeaders
-                )
-                if validationInfo != nil {
-                    break
+                ) else {
+                    continue
                 }
+
+                let validationSize = validationTotalSize(info)
+                if expectedTotalSize > 0, validationSize > 0, validationSize != expectedTotalSize {
+                    continue
+                }
+                if totalSize > 0, validationSize > 0, validationSize != totalSize {
+                    continue
+                }
+
+                validationInfo = info
+                if totalSize <= 0, validationSize > 0 {
+                    totalSize = validationSize
+                }
+                break
             }
             guard validationInfo != nil else {
                 return .error(PDMDownloadError(
-                    code: .downloadFailed,
-                    message: "Validation data could not be downloaded or parsed"
+                    code: .signatureValidationFailed,
+                    message: "Validation data could not be downloaded, parsed, or matched to asset size"
                 ))
-            }
-
-            if let info = validationInfo {
-                let validationSize = validationTotalSize(info)
-                if expectedTotalSize > 0, validationSize > 0, validationSize != expectedTotalSize {
-                    return .error(PDMDownloadError(
-                        code: .signatureValidationFailed,
-                        message: "Validation size does not match expected package size"
-                    ))
-                }
-                if totalSize <= 0 {
-                    totalSize = validationSize
-                } else if validationSize > 0, totalSize != validationSize {
-                    return .error(PDMDownloadError(
-                        code: .signatureValidationFailed,
-                        message: "Validation size does not match remote package size"
-                    ))
-                }
             }
         }
 
@@ -118,6 +126,7 @@ final class PDMDownloadEngine {
         let result = await manager.downloadFile(
             url: url,
             destinationURL: destinationURL,
+            metadataDirectory: metadataDirectory,
             headers: enrichedHeaders,
             totalSize: totalSize,
             validationInfo: validationInfo,

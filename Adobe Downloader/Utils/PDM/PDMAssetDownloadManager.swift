@@ -17,6 +17,7 @@ final class PDMAssetDownloadManager {
 
     private var downloadURL: URL?
     private var destinationURL: URL?
+    private var metadataDirectory: URL?
     private var downloadHeaders: [(String, String)] = []
     private var fileSize: Int64 = 0
     private var etag: String = ""
@@ -65,6 +66,7 @@ final class PDMAssetDownloadManager {
     func downloadFile(
         url: URL,
         destinationURL: URL,
+        metadataDirectory: URL? = nil,
         headers: [(String, String)],
         totalSize: Int64,
         validationInfo: ValidationInfo?,
@@ -75,6 +77,7 @@ final class PDMAssetDownloadManager {
 
         self.downloadURL = url
         self.destinationURL = destinationURL
+        self.metadataDirectory = metadataDirectory
         self.downloadHeaders = headers
         self.validationInfo = validationInfo
         self.etag = etag
@@ -85,7 +88,7 @@ final class PDMAssetDownloadManager {
         errorHandler.resetRetryCount()
         resetRetryTracking()
 
-        let aamd = AAMDFileManager(downloadFileURL: destinationURL)
+        let aamd = AAMDFileManager(downloadFileURL: destinationURL, metadataDirectory: metadataDirectory)
         self.aamd = aamd
 
         fileSize = totalSize
@@ -155,12 +158,22 @@ final class PDMAssetDownloadManager {
         return await executeWithRetry(url: url, destinationURL: destinationURL, headers: headers, aamd: aamd)
     }
 
-    func resumeDownload() async -> PDMDownloadResult {
+    func resumeDownload(
+        progressHandler: ((Int64, Int64, Double) -> Void)? = nil,
+        rangeAvailabilityHandler: ((Int64, Bool) -> Void)? = nil
+    ) async -> PDMDownloadResult {
         guard state.current == .paused,
               let url = downloadURL,
               let destURL = destinationURL,
               let aamd = self.aamd else {
             return .error(PDMDownloadError(code: .criticalError, message: "Cannot resume: invalid state"))
+        }
+
+        if let progressHandler {
+            self.progressHandler = progressHandler
+        }
+        if let rangeAvailabilityHandler {
+            self.rangeAvailabilityHandler = rangeAvailabilityHandler
         }
 
         communicator.reset()
