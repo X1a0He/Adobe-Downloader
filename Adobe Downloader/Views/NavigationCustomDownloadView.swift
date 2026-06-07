@@ -864,7 +864,7 @@ private struct NavigationCustomPackageSelectorView: View {
             }
 
             CustomDownloadActionBar(
-                selectedCount: selectedPackages.count,
+                selectedCount: selectedDownloadPackageCount,
                 totalCount: packages.count,
                 totalSizeText: formattedTotalSize,
                 isDownloading: isDownloading,
@@ -955,8 +955,16 @@ private struct NavigationCustomPackageSelectorView: View {
         return selectedPackages.contains(pkg.id)
     }
 
+    private var selectedDownloadPackageIds: Set<UUID> {
+        selectedPackages.subtracting(downloadedPackages)
+    }
+
+    private var selectedDownloadPackageCount: Int {
+        selectedDownloadPackageIds.count
+    }
+
     private var formattedTotalSize: String {
-        let totalSize = selectedPackages.compactMap { id in
+        let totalSize = selectedDownloadPackageIds.compactMap { id in
             packages.first { $0.id == id }?.downloadSize
         }.reduce(0, +)
 
@@ -1103,6 +1111,7 @@ private struct NavigationCustomPackageSelectorView: View {
 
         if let existingPath = existingDownloadDirectory() {
             onFileExists(existingPath, finalDependencies)
+            onCancel()
         } else {
             onDownloadStart(finalDependencies)
             onCancel()
@@ -1181,12 +1190,14 @@ private struct DependencySection: View {
     }
 
     private var selectedCountInGroup: Int {
-        dependency.packages.filter { selectedPackages.contains($0.id) }.count
+        dependency.packages.filter {
+            selectedPackages.contains($0.id) && !downloadedPackages.contains($0.id)
+        }.count
     }
 
     private var totalSizeInGroup: Int64 {
         dependency.packages
-            .filter { selectedPackages.contains($0.id) }
+            .filter { selectedPackages.contains($0.id) && !downloadedPackages.contains($0.id) }
             .reduce(Int64(0)) { $0 + $1.downloadSize }
     }
 
