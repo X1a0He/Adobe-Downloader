@@ -132,9 +132,9 @@ struct DownloadManagerView: View {
             Button(String(localized: "确认"), role: .destructive) { clearFinishedTasks() }
         } message: {
             if StorageData.shared.deleteCompletedTasksWithFiles {
-                Text("确定要删除所有已完成和失败的下载任务吗？\n\n• 已完成的任务：将删除任务记录和本地文件\n• 失败的任务：将删除任务记录和本地文件")
+                Text("确定要删除所有已完成和失败的下载任务吗？\n\n• 所有任务：将删除任务记录和本地文件")
             } else {
-                Text("确定要删除所有已完成和失败的下载任务吗？\n\n• 已完成的任务：仅删除任务记录，保留本地文件\n• 失败的任务：将删除任务记录和本地文件")
+                Text("确定要删除所有已完成和失败的下载任务吗？\n\n• 所有任务：仅删除任务记录，保留本地文件")
             }
         }
     }
@@ -290,11 +290,11 @@ struct DownloadManagerView: View {
     private func removeTask(_ task: NewDownloadTask) {
         let shouldRemoveFiles: Bool
         if case .failed = task.status {
-            shouldRemoveFiles = true
+            shouldRemoveFiles = StorageData.shared.deleteCompletedTasksWithFiles
         } else if case .completed = task.status {
             shouldRemoveFiles = StorageData.shared.deleteCompletedTasksWithFiles
         } else {
-            shouldRemoveFiles = true
+            shouldRemoveFiles = StorageData.shared.deleteCompletedTasksWithFiles
         }
         globalNetworkManager.removeTask(taskId: task.id, removeFiles: shouldRemoveFiles)
     }

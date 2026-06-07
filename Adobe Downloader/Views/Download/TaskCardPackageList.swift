@@ -28,6 +28,8 @@ private enum PackageListFilter: String, CaseIterable, Identifiable {
 
 struct TaskCardPackageList: View {
     let task: NewDownloadTask
+    let onRemovePackage: (String, UUID) -> Void
+    let onRemoveDependency: (String) -> Void
     @State private var expandedProducts: Set<String> = []
     @State private var searchText: String = ""
     @State private var activeFilter: PackageListFilter = .all
@@ -61,11 +63,13 @@ struct TaskCardPackageList: View {
                         let visible = visiblePackages(in: product)
                         if !visible.isEmpty || !isFilteringActive {
                             PackageProductRow(
+                                task: task,
                                 product: product,
                                 visiblePackages: visible,
                                 isExpanded: expandedProducts.contains(product.sapCode),
                                 isMainProduct: product.sapCode == task.productId,
                                 isForceExpanded: isFilteringActive,
+                                canRemove: globalNewDownloadUtils.canRemoveIncrementalDependency(task: task, dependency: product),
                                 onToggle: {
                                     withAnimation(.easeInOut(duration: 0.2)) {
                                         if expandedProducts.contains(product.sapCode) {
@@ -74,6 +78,12 @@ struct TaskCardPackageList: View {
                                             expandedProducts.insert(product.sapCode)
                                         }
                                     }
+                                },
+                                onRemove: {
+                                    onRemoveDependency(product.sapCode)
+                                },
+                                onRemovePackage: { packageId in
+                                    onRemovePackage(product.sapCode, packageId)
                                 }
                             )
                         }
@@ -258,13 +268,18 @@ private struct PackageFilterChip: View {
 }
 
 private struct PackageProductRow: View {
+    let task: NewDownloadTask
     @ObservedObject var product: DependenciesToDownload
     let visiblePackages: [Package]
     let isExpanded: Bool
     let isMainProduct: Bool
     let isForceExpanded: Bool
+    let canRemove: Bool
     let onToggle: () -> Void
+    let onRemove: () -> Void
+    let onRemovePackage: (UUID) -> Void
     @State private var showCopiedAlert = false
+    @State private var showRemoveConfirm = false
 
     private var effectivelyExpanded: Bool {
         isForceExpanded || isExpanded
@@ -347,6 +362,17 @@ private struct PackageProductRow: View {
                     .background(Color.secondary.opacity(0.06))
                     .cornerRadius(4)
 
+                    if canRemove {
+                        Button(action: { showRemoveConfirm = true }) {
+                            Image(systemName: "trash")
+                                .font(.system(size: 10, weight: .semibold))
+                                .foregroundColor(.red.opacity(0.85))
+                                .frame(width: 20, height: 20)
+                        }
+                        .buttonStyle(.plain)
+                        .help(String(localized: "移除本次增量依赖"))
+                    }
+
                     Image(systemName: effectivelyExpanded ? "chevron.down" : "chevron.right")
                         .font(.system(size: 10))
                         .foregroundColor(.secondary)
@@ -366,18 +392,35 @@ private struct PackageProductRow: View {
             if effectivelyExpanded {
                 VStack(spacing: 4) {
                     ForEach(visiblePackages) { package in
-                        PackageItemRow(package: package)
+                        PackageItemRow(
+                            package: package,
+                            canRemove: globalNewDownloadUtils.canRemoveIncrementalPackage(task: task, package: package),
+                            onRemove: {
+                                onRemovePackage(package.id)
+                            }
+                        )
                     }
                 }
                 .padding(.leading, 20)
             }
+        }
+        .alert(String(localized: "确认移除"), isPresented: $showRemoveConfirm) {
+            Button(String(localized: "取消"), role: .cancel) { }
+            Button(String(localized: "移除"), role: .destructive) {
+                onRemove()
+            }
+        } message: {
+            Text(String(localized: "移除该依赖中本次增量新增的包吗？已存在的包会保留。"))
         }
     }
 }
 
 private struct PackageItemRow: View {
     @ObservedObject var package: Package
+    let canRemove: Bool
+    let onRemove: () -> Void
     @State private var showCopiedAlert = false
+    @State private var showRemoveConfirm = false
 
     private var clampedProgress: Double {
         min(max(package.progress, 0), 1)
@@ -407,6 +450,17 @@ private struct PackageItemRow: View {
                 Spacer()
 
                 packageStatusView
+
+                if canRemove {
+                    Button(action: { showRemoveConfirm = true }) {
+                        Image(systemName: "trash")
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundColor(.red.opacity(0.85))
+                            .frame(width: 20, height: 20)
+                    }
+                    .buttonStyle(.plain)
+                    .help(String(localized: "移除本次增量包"))
+                }
             }
             .padding(.vertical, 6)
             .padding(.horizontal, 10)
@@ -437,6 +491,14 @@ private struct PackageItemRow: View {
         }
         .background(.ultraThinMaterial)
         .clipShape(RoundedRectangle(cornerRadius: 8))
+        .alert(String(localized: "确认移除"), isPresented: $showRemoveConfirm) {
+            Button(String(localized: "取消"), role: .cancel) { }
+            Button(String(localized: "移除"), role: .destructive) {
+                onRemove()
+            }
+        } message: {
+            Text(String(localized: "移除该增量包并重新计算任务进度吗？"))
+        }
     }
 
     @ViewBuilder

@@ -390,6 +390,7 @@ class NewDownloadUtils {
                 await MainActor.run {
                     package.isSelected = true
                     package.downloaded = true
+                    package.isBaselineDownloaded = true
                     package.status = .completed
                     package.downloadedSize = package.downloadSize
                     package.progress = 1
@@ -490,6 +491,7 @@ class NewDownloadUtils {
                 package.isSelected = true
                 if localArchiveIsValid {
                     package.downloaded = true
+                    package.isBaselineDownloaded = true
                     package.status = .completed
                     package.downloadedSize = package.downloadSize
                     package.progress = 1
@@ -618,12 +620,13 @@ class NewDownloadUtils {
 
         let packagesSnapshot = allPackages
         await MainActor.run {
-            let totalPackages = packagesSnapshot.count
+            let totalPackages = task.dependenciesToDownload.reduce(0) { $0 + $1.packages.count }
+            let firstPackage = packagesSnapshot.first?.package
             task.totalPackages = totalPackages
-            task.currentPackage = packagesSnapshot.first?.package
+            task.currentPackage = firstPackage
             task.setStatus(.downloading(DownloadStatus.DownloadInfo(
-                fileName: packagesSnapshot.first?.package.fullPackageName ?? "",
-                currentPackageIndex: 0,
+                fileName: firstPackage?.fullPackageName ?? "",
+                currentPackageIndex: firstPackage.map { packageIndexInTask(task: task, package: $0) } ?? 0,
                 totalPackages: totalPackages,
                 startTime: Date(),
                 estimatedTimeRemaining: nil
@@ -633,9 +636,8 @@ class NewDownloadUtils {
 
         await withTaskGroup(of: Void.self) { group in
             let semaphore = AsyncSemaphore(value: maxConcurrency)
-            let totalCount = allPackages.count
 
-            for (index, (package, dependency, _)) in allPackages.enumerated() {
+            for (_, (package, dependency, _)) in allPackages.enumerated() {
                 group.addTask { [weak self] in
                     guard let self = self else { return }
 
@@ -658,10 +660,12 @@ class NewDownloadUtils {
                     await MainActor.run {
                         package.status = .downloading
                         task.currentPackage = package
+                        let currentPackageIndex = self.packageIndexInTask(task: task, package: package)
+                        let totalPackages = task.dependenciesToDownload.reduce(0) { $0 + $1.packages.count }
                         task.setStatus(.downloading(DownloadStatus.DownloadInfo(
                             fileName: package.fullPackageName,
-                            currentPackageIndex: index,
-                            totalPackages: totalCount,
+                            currentPackageIndex: currentPackageIndex,
+                            totalPackages: totalPackages,
                             startTime: Date(),
                             estimatedTimeRemaining: nil
                         )))
@@ -821,6 +825,79 @@ class NewDownloadUtils {
         return task.directory
             .appendingPathComponent(dependency.sapCode)
             .appendingPathComponent(package.fullPackageName)
+    }
+
+    private func packageIndexInTask(task: NewDownloadTask, package: Package) -> Int {
+        let packages = task.dependenciesToDownload.flatMap { $0.packages }
+        return packages.firstIndex { $0.id == package.id } ?? 0
+    }
+
+    private func recalculatePackageCounts(task: NewDownloadTask) {
+        var completedTaskPackages = 0
+        var totalTaskPackages = 0
+
+        for dependency in task.dependenciesToDownload {
+            let completedDependencyPackages = dependency.packages.filter { $0.downloaded }.count
+            dependency.completedPackages = completedDependencyPackages
+            totalTaskPackages += dependency.packages.count
+            completedTaskPackages += completedDependencyPackages
+            dependency.objectWillChange.send()
+        }
+
+        task.completedPackages = completedTaskPackages
+        task.totalPackages = totalTaskPackages
+    }
+
+    private func nextPendingPackage(task: NewDownloadTask) -> Package? {
+        task.dependenciesToDownload
+            .flatMap { $0.packages }
+            .first { !$0.downloaded }
+    }
+
+    private func removeEmptyDependencies(task: NewDownloadTask) {
+        task.dependenciesToDownload.removeAll { $0.packages.isEmpty }
+    }
+
+    private func resetTaskAfterPackageRemoval(task: NewDownloadTask) async {
+        await MainActor.run {
+            removeEmptyDependencies(task: task)
+            recalculatePackageCounts(task: task)
+            task.currentPackage = nextPendingPackage(task: task) ?? task.dependenciesToDownload.flatMap { $0.packages }.first
+            task.objectWillChange.send()
+        }
+
+        await updateTaskProgressDirect(task: task, force: true)
+
+        await MainActor.run {
+            let pendingPackage = nextPendingPackage(task: task)
+            task.currentPackage = pendingPackage ?? task.dependenciesToDownload.flatMap { $0.packages }.first
+
+            if pendingPackage == nil {
+                task.totalSpeed = 0
+                task.setStatus(.completed(DownloadStatus.CompletionInfo(
+                    timestamp: Date(),
+                    totalTime: Date().timeIntervalSince(task.createAt),
+                    totalSize: task.totalSize
+                )))
+            } else if task.status.isActive, let pendingPackage {
+                let totalPackages = task.dependenciesToDownload.reduce(0) { $0 + $1.packages.count }
+                task.setStatus(.downloading(DownloadStatus.DownloadInfo(
+                    fileName: pendingPackage.fullPackageName,
+                    currentPackageIndex: packageIndexInTask(task: task, package: pendingPackage),
+                    totalPackages: totalPackages,
+                    startTime: Date(),
+                    estimatedTimeRemaining: nil
+                )))
+            } else {
+                task.setStatus(.paused(DownloadStatus.PauseInfo(
+                    reason: .userRequested,
+                    timestamp: Date(),
+                    resumable: true
+                )))
+            }
+
+            task.objectWillChange.send()
+        }
     }
 
     private func metadataDirectory(for task: NewDownloadTask, dependency: DependenciesToDownload, package: Package) -> URL? {
@@ -1368,6 +1445,87 @@ class NewDownloadUtils {
             task.totalProgress = totalProgress
             task.totalSpeed = totalSpeed
             task.objectWillChange.send()
+            globalNetworkManager.updateDockBadge()
+            globalNetworkManager.objectWillChange.send()
+        }
+    }
+
+    private func hasBaselinePackages(task: NewDownloadTask) -> Bool {
+        task.dependenciesToDownload.flatMap { $0.packages }.contains { $0.isBaselineDownloaded }
+    }
+
+    func canRemoveIncrementalPackage(task: NewDownloadTask, package: Package) -> Bool {
+        hasBaselinePackages(task: task) && !package.isBaselineDownloaded
+    }
+
+    func canRemoveIncrementalDependency(task: NewDownloadTask, dependency: DependenciesToDownload) -> Bool {
+        hasBaselinePackages(task: task) && dependency.packages.contains { canRemoveIncrementalPackage(task: task, package: $0) }
+    }
+
+    func removeIncrementalPackage(taskId: UUID, dependencySapCode: String, packageId: UUID) async {
+        guard let task = await globalNetworkManager.downloadTasks.first(where: { $0.id == taskId }) else {
+            return
+        }
+
+        guard let dependency = task.dependenciesToDownload.first(where: { $0.sapCode == dependencySapCode }),
+              let package = dependency.packages.first(where: { $0.id == packageId && canRemoveIncrementalPackage(task: task, package: $0) }) else {
+            return
+        }
+
+        let packageIdentifier = generatePackageIdentifier(package: package, task: task, dependency: dependency)
+        PDMDownloadEngine.shared.cancelDownload(packageId: packageIdentifier)
+        let destinationURL = packageDestinationURL(task: task, dependency: dependency, package: package)
+
+        await MainActor.run {
+            if package.downloaded || package.downloadedSize > 0 || package.status == .downloading || package.status == .paused {
+                try? FileManager.default.removeItem(at: destinationURL)
+            }
+            aamdFileManager(task: task, dependency: dependency, package: package, destinationURL: destinationURL).remove()
+            dependency.packages.removeAll { $0.id == packageId }
+        }
+
+        await resetTaskAfterPackageRemoval(task: task)
+        await globalNetworkManager.saveTask(task)
+        await MainActor.run {
+            globalNetworkManager.updateDockBadge()
+            globalNetworkManager.objectWillChange.send()
+        }
+    }
+
+    func removeIncrementalDependency(taskId: UUID, dependencySapCode: String) async {
+        guard let task = await globalNetworkManager.downloadTasks.first(where: { $0.id == taskId }) else {
+            return
+        }
+
+        guard let dependency = task.dependenciesToDownload.first(where: { $0.sapCode == dependencySapCode }) else {
+            return
+        }
+
+        let removablePackages = dependency.packages.filter { canRemoveIncrementalPackage(task: task, package: $0) }
+        guard !removablePackages.isEmpty else {
+            return
+        }
+
+        for package in removablePackages {
+            let packageIdentifier = generatePackageIdentifier(package: package, task: task, dependency: dependency)
+            PDMDownloadEngine.shared.cancelDownload(packageId: packageIdentifier)
+            let destinationURL = packageDestinationURL(task: task, dependency: dependency, package: package)
+            await MainActor.run {
+                if package.downloaded || package.downloadedSize > 0 || package.status == .downloading || package.status == .paused {
+                    try? FileManager.default.removeItem(at: destinationURL)
+                }
+                aamdFileManager(task: task, dependency: dependency, package: package, destinationURL: destinationURL).remove()
+            }
+        }
+
+        await MainActor.run {
+            let removableIds = Set(removablePackages.map(\.id))
+            dependency.packages.removeAll { removableIds.contains($0.id) }
+        }
+
+        await resetTaskAfterPackageRemoval(task: task)
+        await globalNetworkManager.saveTask(task)
+        await MainActor.run {
             globalNetworkManager.updateDockBadge()
             globalNetworkManager.objectWillChange.send()
         }

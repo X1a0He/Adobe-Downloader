@@ -1144,9 +1144,9 @@ struct DeleteCompletedTasksRow: View {
 
     var body: some View {
         SettingRow(
-            title: String(localized: "删除已完成任务时同时删除本地文件"),
+            title: String(localized: "删除任务时同时删除本地文件"),
             subtitle: viewModel.deleteCompletedTasksWithFiles
-                ? String(localized: "清除已完成任务时会一并删除本地安装包")
+                ? String(localized: "删除任务记录时会一并删除本地安装包")
                 : String(localized: "仅删除任务记录，保留本地安装包"),
             icon: "trash.slash.fill",
             iconTint: viewModel.deleteCompletedTasksWithFiles ? .red : .blue

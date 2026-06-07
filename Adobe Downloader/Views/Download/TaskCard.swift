@@ -80,7 +80,7 @@ struct TaskCard: View {
                     .padding(.vertical, 12)
 
                 if isExpanded {
-                    TaskCardPackageList(task: task)
+                    TaskCardPackageList(task: task, onRemovePackage: removePackage, onRemoveDependency: removeDependency)
                         .padding(.horizontal, 24)
                         .padding(.bottom, 16)
                 }
@@ -229,6 +229,25 @@ struct TaskCard: View {
         }
         .buttonStyle(BeautifulButtonStyle(baseColor: action.buttonColor))
         .help(action.buttonLabel)
+    }
+
+    private func removePackage(dependencySapCode: String, packageId: UUID) {
+        Task {
+            await globalNewDownloadUtils.removeIncrementalPackage(
+                taskId: task.id,
+                dependencySapCode: dependencySapCode,
+                packageId: packageId
+            )
+        }
+    }
+
+    private func removeDependency(_ dependencySapCode: String) {
+        Task {
+            await globalNewDownloadUtils.removeIncrementalDependency(
+                taskId: task.id,
+                dependencySapCode: dependencySapCode
+            )
+        }
     }
 
     private func handleAction(_ action: TaskAction) {

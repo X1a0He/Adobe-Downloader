@@ -226,7 +226,7 @@ class NetworkManager: ObservableObject {
        await MainActor.run {
            downloadTasks.removeAll { task in
                if task.status.isCompleted || task.status.isFailed {
-                   let shouldRemoveDownloadedFile = task.status.isFailed || StorageData.shared.deleteCompletedTasksWithFiles
+                   let shouldRemoveDownloadedFile = StorageData.shared.deleteCompletedTasksWithFiles
                    removeFilesForTask(task, includeDownloadedFile: shouldRemoveDownloadedFile)
                    return true
                }

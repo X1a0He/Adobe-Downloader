@@ -1478,7 +1478,28 @@
     "删除任务" : {
 
     },
+    "删除任务时同时删除本地文件" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Delete local files when deleting tasks"
+          }
+        }
+      }
+    },
+    "删除任务记录时会一并删除本地安装包" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Deleting task records will also delete local installers"
+          }
+        }
+      }
+    },
     "删除已完成任务时同时删除本地文件" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -4037,9 +4058,6 @@
     "清除已完成" : {
 
     },
-    "清除已完成任务时会一并删除本地安装包" : {
-
-    },
     "点击切换选择状态" : {
       "extractionState" : "stale",
       "localizations" : {
@@ -4173,6 +4191,7 @@
       }
     },
     "确定要删除所有已完成和失败的下载任务吗？\n\n• 已完成的任务：仅删除任务记录，保留本地文件\n• 失败的任务：将删除任务记录和本地文件" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -4183,11 +4202,32 @@
       }
     },
     "确定要删除所有已完成和失败的下载任务吗？\n\n• 已完成的任务：将删除任务记录和本地文件\n• 失败的任务：将删除任务记录和本地文件" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "Are you sure you want to delete all completed and failed downloads?\n\n• Completed tasks: Delete task records and local files\n• Failed tasks: Delete task records and local files"
+          }
+        }
+      }
+    },
+    "确定要删除所有已完成和失败的下载任务吗？\n\n• 所有任务：仅删除任务记录，保留本地文件" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Are you sure you want to delete all completed and failed downloads?\n\n• All tasks: only task records will be deleted, local files will be kept"
+          }
+        }
+      }
+    },
+    "确定要删除所有已完成和失败的下载任务吗？\n\n• 所有任务：将删除任务记录和本地文件" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Are you sure you want to delete all completed and failed downloads?\n\n• All tasks: task records and local files will be deleted"
           }
         }
       }
@@ -4296,6 +4336,16 @@
         }
       }
     },
+    "确认移除" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Confirm Removal"
+          }
+        }
+      }
+    },
     "确认退出" : {
       "localizations" : {
         "en" : {
@@ -4331,7 +4381,47 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Delete"
+            "value" : "Remove"
+          }
+        }
+      }
+    },
+    "移除本次增量依赖" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Remove this delta dependency"
+          }
+        }
+      }
+    },
+    "移除本次增量包" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Remove this delta package"
+          }
+        }
+      }
+    },
+    "移除该依赖中本次增量新增的包吗？已存在的包会保留。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Remove packages added by this delta in this dependency? Existing packages will be kept."
+          }
+        }
+      }
+    },
+    "移除该增量包并重新计算任务进度吗？" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Remove this delta package and recalculate task progress?"
           }
         }
       }

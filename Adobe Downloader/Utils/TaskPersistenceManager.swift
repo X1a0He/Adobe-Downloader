@@ -81,6 +81,7 @@ class TaskPersistenceManager: @unchecked Sendable {
                             isOfficiallyEligible: package.isOfficiallyEligible,
                             officialFilterReasons: package.officialFilterReasons,
                             isSelected: package.isSelected,
+                            isBaselineDownloaded: package.isBaselineDownloaded,
                             hostValidation: package.hostValidation
                         )
                     }
@@ -197,6 +198,7 @@ class TaskPersistenceManager: @unchecked Sendable {
                         packageHashKey: packageHashKey
                     )
                     package.isSelected = package.isRequired || (packageData.isSelected ?? false) || package.isDefaultSelected || packageData.downloaded
+                    package.isBaselineDownloaded = packageData.isBaselineDownloaded ?? packageData.downloaded
                     package.hostValidation = packageData.hostValidation
                     let clampedDownloadedSize = package.downloadSize > 0
                         ? min(max(packageData.downloadedSize, 0), package.downloadSize)
@@ -490,5 +492,6 @@ private struct PackageData: Codable {
     let isOfficiallyEligible: Bool?
     let officialFilterReasons: [String]?
     let isSelected: Bool?
+    let isBaselineDownloaded: Bool?
     let hostValidation: HDPIMHostValidationSnapshot?
-} 
+}
