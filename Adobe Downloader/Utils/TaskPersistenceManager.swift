@@ -20,9 +20,7 @@ class TaskPersistenceManager: @unchecked Sendable {
     }
     
     private func getTaskFileName(productId: String, version: String, language: String, platform: String) -> String {
-        return productId == "APRO"
-        ? "Adobe Downloader \(productId)_\(version)_\(platform)-task.json"
-            : "Adobe Downloader \(productId)_\(version)-\(language)-\(platform)-task.json"
+        "\(installerOutputName(productId: productId, version: version, language: language, platform: platform))-task.json"
     }
     
     func saveTask(_ task: NewDownloadTask) async {

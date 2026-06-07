@@ -282,3 +282,93 @@ func findProducts(
 ) -> [Product] {
     products(in: scope).filter { $0.id == id }
 }
+
+func isManifestInstallerProduct(_ productId: String) -> Bool {
+    ["APRO", "KCCC"].contains(productId)
+}
+
+func isBlockedVisibleProduct(_ productId: String) -> Bool {
+    ["KCCC"].contains(productId)
+}
+
+func installerOutputName(productId: String, version: String, language: String, platform: String) -> String {
+    if isManifestInstallerProduct(productId) {
+        return "Adobe Downloader \(productId)_\(version)_\(platform).dmg"
+    }
+    return "Adobe Downloader \(productId)_\(version)-\(language)-\(platform)"
+}
+
+func installerSelectedPlatformId(
+    productId: String,
+    version: String,
+    targetArchitecture: HDPIMParityTargetArchitecture = .currentSelection
+) -> String? {
+    guard isManifestInstallerProduct(productId),
+          let product = findProduct(id: productId, version: version, scope: .ccm)
+            ?? findProduct(id: productId, version: version),
+          let match = installerPlatformMatch(
+            product: product,
+            selectedVersion: version,
+            targetArchitecture: targetArchitecture
+          ) else {
+        return HDPIMParityDecisionEngine.shared.preferredPlatformId(
+            productId: productId,
+            version: version,
+            targetArchitecture: targetArchitecture
+        )
+    }
+
+    return match.platform.id
+}
+
+func installerProductVersion(product: Product, languageSet: Product.Platform.LanguageSet, selectedVersion: String) -> String {
+    if !languageSet.productVersion.isEmpty {
+        return languageSet.productVersion
+    }
+    if !selectedVersion.isEmpty {
+        return selectedVersion
+    }
+    return product.version
+}
+
+func installerPlatformMatch(
+    product: Product,
+    selectedVersion: String,
+    targetArchitecture: HDPIMParityTargetArchitecture = .currentSelection
+) -> (platform: Product.Platform, languageSet: Product.Platform.LanguageSet)? {
+    let availablePlatforms = product.platforms.filter {
+        guard let languageSet = $0.languageSet.first else { return false }
+        return !languageSet.manifestURL.isEmpty || !languageSet.lbsURL.isEmpty
+    }
+
+    if product.id == "KCCC",
+       let platform = availablePlatforms.first(where: { $0.id == "osx10" }),
+       let languageSet = platform.languageSet.first {
+        return (platform, languageSet)
+    }
+
+    for platformId in targetArchitecture.platformPreference {
+        if let platform = availablePlatforms.first(where: { $0.id == platformId }),
+           let languageSet = platform.languageSet.first {
+            return (platform, languageSet)
+        }
+    }
+
+    guard let platform = availablePlatforms.first,
+          let languageSet = platform.languageSet.first else {
+        return nil
+    }
+    return (platform, languageSet)
+}
+
+func normalizedInstallerURL(_ value: String, cdn: String = globalCdn) -> String {
+    let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !trimmed.isEmpty else { return "" }
+    guard URL(string: trimmed)?.scheme == nil else {
+        return trimmed
+    }
+
+    let cleanCdn = cdn.hasSuffix("/") ? String(cdn.dropLast()) : cdn
+    let cleanPath = trimmed.hasPrefix("/") ? trimmed : "/\(trimmed)"
+    return cleanCdn + cleanPath
+}

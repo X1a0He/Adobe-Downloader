@@ -137,9 +137,13 @@ struct NavigationCustomDownloadView: View {
             throw NetworkError.invalidData("找不到产品信息")
         }
 
+        if isManifestInstallerProduct(productId) {
+            return makeInstallerPackageInfo(product: product)
+        }
+
         let decision = try await HDPIMParityDecisionEngine.shared.resolveDownloadDecision(
             productId: product.id,
-            version: product.version,
+            version: version,
             requestedLanguage: StorageData.shared.defaultLanguage
         ) { message in
             Task { @MainActor in
@@ -148,6 +152,41 @@ struct NavigationCustomDownloadView: View {
         }
 
         return HDPIMParityDecisionEngine.shared.makeDownloadPresentation(from: decision)
+    }
+
+    private func makeInstallerPackageInfo(product: Product) -> ([Package], [DependenciesToDownload]) {
+        guard let match = installerPlatformMatch(product: product, selectedVersion: version) else {
+            return ([], [])
+        }
+
+        let platform = match.platform
+        let languageSet = match.languageSet
+        let productVersion = installerProductVersion(product: product, languageSet: languageSet, selectedVersion: version)
+        let package = Package(
+            type: "dmg",
+            fullPackageName: installerOutputName(
+                productId: productId,
+                version: version,
+                language: StorageData.shared.defaultLanguage,
+                platform: platform.id
+            ),
+            downloadSize: Int64(max(languageSet.installSize, 0)),
+            downloadURL: languageSet.lbsURL,
+            manifestURL: languageSet.manifestURL,
+            packageVersion: productVersion
+        )
+        package.isSelected = true
+        package.isRequired = true
+        package.isDefaultSelected = true
+
+        let dependency = DependenciesToDownload(
+            sapCode: productId,
+            version: version,
+            buildGuid: languageSet.buildGuid,
+            platform: platform.id
+        )
+        dependency.packages = [package]
+        return ([package], [dependency])
     }
 
     private func createCompletedCustomTask(path: URL, dependencies: [DependenciesToDownload]) async {
@@ -163,7 +202,7 @@ struct NavigationCustomDownloadView: View {
         }
 
         let platform = dependencies.first(where: { $0.sapCode == productId })?.platform
-            ?? HDPIMParityDecisionEngine.shared.preferredPlatformId(
+            ?? installerSelectedPlatformId(
                 productId: productId,
                 version: version
             )
@@ -257,14 +296,17 @@ struct NavigationCustomDownloadView: View {
 
     private func getDestinationURL(productId: String, version: String, language: String, mainPlatform: String?) async throws -> URL {
         let platform = mainPlatform
-            ?? HDPIMParityDecisionEngine.shared.preferredPlatformId(
+            ?? installerSelectedPlatformId(
                 productId: productId,
                 version: version
             )
             ?? "unknown"
-        let installerName = productId == "APRO"
-            ? "Adobe Downloader \(productId)_\(version)_\(platform).dmg"
-            : "Adobe Downloader \(productId)_\(version)-\(language)-\(platform)"
+        let installerName = installerOutputName(
+            productId: productId,
+            version: version,
+            language: language,
+            platform: platform
+        )
 
         if StorageData.shared.useDefaultDirectory && !StorageData.shared.defaultDirectory.isEmpty {
             return URL(fileURLWithPath: StorageData.shared.defaultDirectory)
@@ -1028,12 +1070,17 @@ private struct NavigationCustomPackageSelectorView: View {
         }
 
         let platform = dependenciesToDownload.first(where: { $0.sapCode == productId })?.platform
-            ?? HDPIMParityDecisionEngine.shared.preferredPlatformId(
+            ?? installerSelectedPlatformId(
                 productId: productId,
                 version: version
             )
             ?? "unknown"
-        let directoryName = "Adobe Downloader \(productId)_\(version)-\(language)-\(platform)"
+        let directoryName = installerOutputName(
+            productId: productId,
+            version: version,
+            language: language,
+            platform: platform
+        )
         let directory = URL(fileURLWithPath: StorageData.shared.defaultDirectory)
             .appendingPathComponent(directoryName)
 
@@ -1045,9 +1092,11 @@ private struct NavigationCustomPackageSelectorView: View {
         in dependency: DependenciesToDownload,
         existingDirectory: URL
     ) -> Bool {
-        let packageURL = existingDirectory
-            .appendingPathComponent(dependency.sapCode)
-            .appendingPathComponent(package.fullPackageName)
+        let packageURL = isManifestInstallerProduct(productId)
+            ? existingDirectory
+            : existingDirectory
+                .appendingPathComponent(dependency.sapCode)
+                .appendingPathComponent(package.fullPackageName)
 
         guard FileManager.default.fileExists(atPath: packageURL.path) else {
             return false
@@ -1145,7 +1194,7 @@ private struct NavigationCustomPackageSelectorView: View {
 
         for (index, dependency) in dependenciesToDownload.enumerated() {
             let dependencyInfo: String
-            if dependency.sapCode == "APRO" {
+            if isManifestInstallerProduct(dependency.sapCode) {
                 dependencyInfo = "\(dependency.sapCode) \(dependency.version)"
             } else {
                 dependencyInfo = "\(dependency.sapCode) \(dependency.version) - (\(dependency.buildGuid))"
@@ -1294,7 +1343,7 @@ private struct DependencySection: View {
                         )
                 }
 
-                if dependency.sapCode != "APRO", !dependency.buildGuid.isEmpty {
+                if !isManifestInstallerProduct(dependency.sapCode), !dependency.buildGuid.isEmpty {
                     Button(action: { onCopyBuildGuid(dependency.buildGuid) }) {
                         HStack(spacing: 3) {
                             Image(systemName: "doc.on.doc")

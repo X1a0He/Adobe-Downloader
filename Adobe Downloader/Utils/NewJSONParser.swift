@@ -180,6 +180,7 @@ class NewJSONParser {
                         // sti 的 dependencies 就是空的
                         let newLanguageSet = Product.Platform.LanguageSet(
                             manifestURL: (languageSet["urls"] as? [String: Any])?["manifestURL"] as? String ?? "",
+                            lbsURL: (languageSet["urls"] as? [String: Any])?["lbsURL"] as? String ?? "",
                             dependencies: [],
                             productCode: languageSet["productCode"] as? String ?? "",
                             name: languageSet["name"] as? String ?? "",
@@ -324,6 +325,7 @@ class NewJSONParser {
 
                         var newLanguageSet = Product.Platform.LanguageSet(
                             manifestURL: (languageSet["urls"] as? [String: Any])?["manifestURL"] as? String ?? "",
+                            lbsURL: (languageSet["urls"] as? [String: Any])?["lbsURL"] as? String ?? "",
                             dependencies: [],
                             productCode: languageSet["productCode"] as? String ?? "",
                             name: languageSet["name"] as? String ?? "",
@@ -582,6 +584,7 @@ class NewJSONParser {
     private static func parseXMLLanguageSet(_ languageSetElement: XMLElement) -> Product.Platform.LanguageSet? {
         var languageSet = Product.Platform.LanguageSet(
             manifestURL: xmlChildText(languageSetElement, "urls/manifestURL"),
+            lbsURL: xmlChildText(languageSetElement, "urls/lbsURL"),
             dependencies: [],
             productCode: xmlAttribute(languageSetElement, "productCode"),
             name: xmlAttribute(languageSetElement, "name"),
@@ -760,6 +763,9 @@ extension NewParseResult {
         var merged = lhs
         if merged.manifestURL.isEmpty {
             merged.manifestURL = rhs.manifestURL
+        }
+        if merged.lbsURL.isEmpty {
+            merged.lbsURL = rhs.lbsURL
         }
         if merged.productCode.isEmpty {
             merged.productCode = rhs.productCode

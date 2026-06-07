@@ -72,6 +72,7 @@ struct Product: Codable, Equatable {
 
         struct LanguageSet: Codable, Equatable {
             var manifestURL: String
+            var lbsURL: String
             var dependencies: [Dependency]
             var productCode: String
             var name: String

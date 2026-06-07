@@ -203,7 +203,7 @@ struct TaskCardPackageList: View {
         Button(action: {
             let containerURL = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
             let tasksDirectory = containerURL.appendingPathComponent("Adobe Downloader/tasks", isDirectory: true)
-            let fileName = "\(task.productId == "APRO" ? "Adobe Downloader \(task.productId)_\(task.productVersion)_\(task.platform)" : "Adobe Downloader \(task.productId)_\(task.productVersion)-\(task.language)-\(task.platform)")-task.json"
+            let fileName = "\(installerOutputName(productId: task.productId, version: task.productVersion, language: task.language, platform: task.platform))-task.json"
             let fileURL = tasksDirectory.appendingPathComponent(fileName)
             NSWorkspace.shared.selectFile(fileURL.path, inFileViewerRootedAtPath: tasksDirectory.path)
         }) {
@@ -219,7 +219,7 @@ struct TaskCardPackageList: View {
     private func generateAllProductsInfo() -> String {
         var result = ""
         for (index, product) in task.dependenciesToDownload.enumerated() {
-            if product.sapCode == "APRO" {
+            if isManifestInstallerProduct(product.sapCode) {
                 result += "\(product.sapCode) \(product.version)\n"
             } else {
                 result += "\(product.sapCode) \(product.version) - (\(product.buildGuid))\n"
@@ -301,7 +301,7 @@ private struct PackageProductRow: View {
                         .font(.system(size: 12))
                         .foregroundColor(isMainProduct ? .blue : .blue.opacity(0.7))
 
-                    Text("\(product.sapCode) \(product.version)\(product.sapCode != "APRO" ? " - (\(product.buildGuid))" : "")")
+                    Text("\(product.sapCode) \(product.version)\(!isManifestInstallerProduct(product.sapCode) ? " - (\(product.buildGuid))" : "")")
                         .font(.system(size: 12, weight: .semibold))
                         .foregroundColor(.primary.opacity(0.85))
                         .textSelection(.enabled)
@@ -320,7 +320,7 @@ private struct PackageProductRow: View {
                             )
                     }
 
-                    if product.sapCode != "APRO" {
+                    if !isManifestInstallerProduct(product.sapCode) {
                         Button(action: {
                             NSPasteboard.general.clearContents()
                             NSPasteboard.general.setString(product.buildGuid, forType: .string)

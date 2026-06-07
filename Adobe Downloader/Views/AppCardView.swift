@@ -119,13 +119,16 @@ final class AppCardViewModel: ObservableObject {
     }
 
     func getDestinationURL(version: String, language: String) async throws -> URL {
-        let platform = HDPIMParityDecisionEngine.shared.preferredPlatformId(
+        let platform = installerSelectedPlatformId(
             productId: uniqueProduct.id,
             version: version
         ) ?? "unknown"
-        let installerName = uniqueProduct.id == "APRO"
-            ? "Adobe Downloader \(uniqueProduct.id)_\(version)_\(platform).dmg"
-            : "Adobe Downloader \(uniqueProduct.id)_\(version)-\(language)-\(platform)"
+        let installerName = installerOutputName(
+            productId: uniqueProduct.id,
+            version: version,
+            language: language,
+            platform: platform
+        )
 
         if useDefaultDirectory && !defaultDirectory.isEmpty {
             return URL(fileURLWithPath: defaultDirectory)
@@ -215,7 +218,7 @@ final class AppCardViewModel: ObservableObject {
     }
 
     func isProductInstalled(version: String) -> Bool {
-        let platform = HDPIMParityDecisionEngine.shared.preferredPlatformId(
+        let platform = installerSelectedPlatformId(
             productId: uniqueProduct.id,
             version: version
         ) ?? "unknown"
@@ -243,8 +246,8 @@ final class AppCardViewModel: ObservableObject {
                 showExistingFileAlert = true
             }
         } else {
-            if uniqueProduct.id == "APRO" {
-                await startAPRODownload(version: version, language: language)
+            if isManifestInstallerProduct(uniqueProduct.id) {
+                await startInstallerDownload(version: version, language: language)
             } else {
                 await MainActor.run {
                     selectedVersion = version
@@ -255,7 +258,7 @@ final class AppCardViewModel: ObservableObject {
         }
     }
 
-    func startAPRODownload(version: String, language: String) async {
+    func startInstallerDownload(version: String, language: String) async {
         do {
             let destinationURL = try await getDestinationURL(version: version, language: language)
 
@@ -288,7 +291,7 @@ final class AppCardViewModel: ObservableObject {
             version: pendingVersion,
             language: pendingLanguage,
             displayName: uniqueProduct.displayName,
-            platform: HDPIMParityDecisionEngine.shared.preferredPlatformId(
+            platform: installerSelectedPlatformId(
                 productId: uniqueProduct.id,
                 version: pendingVersion
             ) ?? "unknown",
@@ -306,6 +309,11 @@ final class AppCardViewModel: ObservableObject {
     private var latestVisibleMatch: (Product, Product.Platform)? {
         let products = globalCcmResult.products.filter { $0.id == uniqueProduct.id }
         return products.compactMap { product -> (Product, Product.Platform)? in
+            if isManifestInstallerProduct(uniqueProduct.id),
+               let match = installerPlatformMatch(product: product, selectedVersion: product.version) {
+                return (product, match.platform)
+            }
+
             guard let platform = HDPIMParityDecisionEngine.shared.preferredPlatform(for: product) else {
                 return nil
             }
@@ -318,6 +326,10 @@ final class AppCardViewModel: ObservableObject {
     var uniqueVersionCount: Int {
         let products = globalCcmResult.products.filter { $0.id == uniqueProduct.id }
         let versions = products.compactMap { product -> String? in
+            if isManifestInstallerProduct(uniqueProduct.id) {
+                return installerPlatformMatch(product: product, selectedVersion: product.version) == nil ? nil : product.version
+            }
+
             guard HDPIMParityDecisionEngine.shared.preferredPlatform(for: product) != nil else {
                 return nil
             }

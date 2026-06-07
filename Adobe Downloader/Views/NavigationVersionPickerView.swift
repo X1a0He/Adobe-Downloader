@@ -174,13 +174,16 @@ struct NavigationVersionPickerView: View {
     }
 
     private func getDestinationURL(productId: String, version: String, language: String) async throws -> URL {
-        let platform = HDPIMParityDecisionEngine.shared.preferredPlatformId(
+        let platform = installerSelectedPlatformId(
             productId: productId,
             version: version
         ) ?? "unknown"
-        let installerName = productId == "APRO"
-            ? "Adobe Downloader \(productId)_\(version)_\(platform).dmg"
-            : "Adobe Downloader \(productId)_\(version)-\(language)-\(platform)"
+        let installerName = installerOutputName(
+            productId: productId,
+            version: version,
+            language: language,
+            platform: platform
+        )
 
         if StorageData.shared.useDefaultDirectory && !StorageData.shared.defaultDirectory.isEmpty {
             return URL(fileURLWithPath: StorageData.shared.defaultDirectory)
@@ -616,7 +619,7 @@ private struct VersionListView: View {
             }
         case .installed:
             list = list.filter { entry in
-                let platform = HDPIMParityDecisionEngine.shared.preferredPlatformId(
+                let platform = installerSelectedPlatformId(
                     productId: productId,
                     version: entry.key
                 ) ?? "unknown"
@@ -771,6 +774,7 @@ private struct VersionRow: View, Equatable {
     var body: some View {
         VStack(spacing: 0) {
             VersionHeader(
+                productId: productId,
                 version: version,
                 info: info,
                 isExpanded: isExpanded,
@@ -815,7 +819,7 @@ private struct VersionRow: View, Equatable {
         .onHover { isHovered = $0 }
         .onAppear {
             if cachedExistingPath == nil {
-                let platform = HDPIMParityDecisionEngine.shared.preferredPlatformId(
+                let platform = installerSelectedPlatformId(
                     productId: productId,
                     version: version
                 ) ?? "unknown"
@@ -839,6 +843,7 @@ private struct VersionRow: View, Equatable {
 }
 
 private struct VersionHeader: View {
+    let productId: String
     let version: String
     let info: Product.Platform
     let isExpanded: Bool
@@ -861,6 +866,7 @@ private struct VersionHeader: View {
         Button(action: onSelect) {
             HStack(alignment: .center, spacing: 10) {
                 VersionInfo(
+                    productId: productId,
                     version: version,
                     platform: info.id,
                     info: info,
@@ -1005,8 +1011,18 @@ private struct VersionDetails: View {
         if cachedPackageSizes[version] != nil { return }
         if sizeLoadingVersions.contains(version) { return }
         await MainActor.run {
-            sizeLoadingVersions.insert(version)
+            _ = sizeLoadingVersions.insert(version)
         }
+
+        if isManifestInstallerProduct(productId) {
+            let size = await resolveInstallerSize(version: version)
+            await MainActor.run {
+                cachedPackageSizes[version] = size
+                _ = sizeLoadingVersions.remove(version)
+            }
+            return
+        }
+
         do {
             let decision = try await HDPIMParityDecisionEngine.shared.resolveDownloadDecision(
                 productId: productId,
@@ -1020,12 +1036,87 @@ private struct VersionDetails: View {
             }
             await MainActor.run {
                 cachedPackageSizes[version] = total
-                sizeLoadingVersions.remove(version)
+                _ = sizeLoadingVersions.remove(version)
             }
         } catch {
             await MainActor.run {
-                sizeLoadingVersions.remove(version)
+                _ = sizeLoadingVersions.remove(version)
             }
+        }
+    }
+
+    private func resolveInstallerSize(version: String) async -> Int64 {
+        guard let product = findProduct(id: productId, version: version, scope: .ccm) ?? findProduct(id: productId, version: version),
+              let match = installerPlatformMatch(product: product, selectedVersion: version) else {
+            return Int64(max(info.languageSet.first?.installSize ?? 0, 0))
+        }
+
+        if let manifestSize = await installerManifestAssetSize(match.languageSet.manifestURL) {
+            return manifestSize
+        }
+
+        if let downloadSize = await installerContentLength(match.languageSet.lbsURL) {
+            return downloadSize
+        }
+
+        return Int64(max(match.languageSet.installSize, 0))
+    }
+
+    private func installerManifestAssetSize(_ manifestPath: String) async -> Int64? {
+        let manifestURL = normalizedInstallerURL(manifestPath)
+        guard !manifestURL.isEmpty,
+              let url = URL(string: manifestURL) else {
+            return nil
+        }
+
+        do {
+            var request = URLRequest(url: url)
+            request.httpMethod = "GET"
+            NetworkConstants.downloadHeaders.forEach { request.setValue($0.value, forHTTPHeaderField: $0.key) }
+
+            let (data, response) = try await URLSession.shared.data(for: request)
+            guard let httpResponse = response as? HTTPURLResponse,
+                  (200...299).contains(httpResponse.statusCode) else {
+                return nil
+            }
+
+            let doc = try XMLDocument(data: data)
+            let sizeNodes = try doc.nodes(forXPath: "//asset_size")
+            return sizeNodes.compactMap { node in
+                Int64(node.stringValue?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "")
+            }.first { $0 > 0 }
+        } catch {
+            return nil
+        }
+    }
+
+    private func installerContentLength(_ downloadPath: String) async -> Int64? {
+        let downloadURL = normalizedInstallerURL(downloadPath)
+        guard !downloadURL.isEmpty,
+              let url = URL(string: downloadURL) else {
+            return nil
+        }
+
+        do {
+            var request = URLRequest(url: url)
+            request.httpMethod = "HEAD"
+            NetworkConstants.downloadHeaders.forEach { request.setValue($0.value, forHTTPHeaderField: $0.key) }
+
+            let (_, response) = try await URLSession.shared.data(for: request)
+            guard let httpResponse = response as? HTTPURLResponse,
+                  (200...299).contains(httpResponse.statusCode) else {
+                return nil
+            }
+
+            if let length = httpResponse.value(forHTTPHeaderField: "Content-Length"),
+               let size = Int64(length),
+               size > 0 {
+                return size
+            }
+
+            return httpResponse.expectedContentLength > 0 ? httpResponse.expectedContentLength : nil
+        } catch {
+            return nil
         }
     }
 }
@@ -1068,7 +1159,7 @@ private struct VersionDownloadButton: View {
 
     var body: some View {
         Button(action: {
-            if productId == "APRO" {
+            if isManifestInstallerProduct(productId) {
                 onSelect(version)
             } else {
                 onCustomDownload(version)
@@ -1086,6 +1177,7 @@ private struct VersionDownloadButton: View {
 }
 
 struct VersionInfo: View {
+    let productId: String
     let version: String
     let platform: String
     let info: Product.Platform
@@ -1094,8 +1186,8 @@ struct VersionInfo: View {
     let hasExistingPath: Bool
     let hasDownloadedPackage: Bool
 
-    private var productVersion: String? {
-        info.languageSet.first?.productVersion
+    private var productVersion: String {
+        info.languageSet.first?.productVersion ?? ""
     }
 
     private var buildGuid: String? {
@@ -1121,8 +1213,8 @@ struct VersionInfo: View {
                     DownloadedPackageButton(isVisible: true)
                 }
 
-                if let pv = productVersion, pv != version {
-                    Text("v\(pv)")
+                if !productVersion.isEmpty, productVersion != version {
+                    Text("v\(productVersion)")
                         .font(.system(size: 11))
                         .padding(.horizontal, 5)
                         .padding(.vertical, 1)

@@ -150,7 +150,7 @@ class NewDownloadUtils {
             urls.append(task.directory)
         }
 
-        if task.productId == "APRO" {
+        if isManifestInstallerProduct(task.productId) {
             urls.append(aproPDMWorkingDirectory(for: task))
 
             if task.directory.pathExtension.lowercased() == "dmg" {
@@ -164,7 +164,7 @@ class NewDownloadUtils {
 
     private func aproPDMWorkingDirectory(for task: NewDownloadTask) -> URL {
         let supportDirectory = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
-            .appendingPathComponent("Adobe Downloader/PDM/APRO", isDirectory: true)
+            .appendingPathComponent("Adobe Downloader/PDM/\(task.productId)", isDirectory: true)
         let token = stableDirectoryToken([
             task.productId,
             task.productVersion,
@@ -807,8 +807,8 @@ class NewDownloadUtils {
     }
 
     private func generatePackageIdentifier(package: Package, task: NewDownloadTask, dependency: DependenciesToDownload) -> String {
-        if task.productId == "APRO" {
-            return "AdobeDownloader|APRO|\(task.productVersion)|\(task.language)|\(task.platform)|\(task.directory.standardizedFileURL.path)"
+        if isManifestInstallerProduct(task.productId) {
+            return "AdobeDownloader|\(task.productId)|\(task.productVersion)|\(task.language)|\(task.platform)|\(task.directory.standardizedFileURL.path)"
         }
         return "AdobeDownloader|\(task.productId)|\(task.productVersion)|\(task.language)|\(task.platform)|\(dependency.sapCode)|\(package.id.uuidString)"
     }
@@ -819,7 +819,7 @@ class NewDownloadUtils {
     }
 
     private func packageDestinationURL(task: NewDownloadTask, dependency: DependenciesToDownload, package: Package) -> URL {
-        if task.productId == "APRO" {
+        if isManifestInstallerProduct(task.productId) {
             return task.directory
         }
         return task.directory
@@ -901,7 +901,7 @@ class NewDownloadUtils {
     }
 
     private func metadataDirectory(for task: NewDownloadTask, dependency: DependenciesToDownload, package: Package) -> URL? {
-        task.productId == "APRO" ? aproPDMWorkingDirectory(for: task).appendingPathComponent("Metadata", isDirectory: true) : nil
+        isManifestInstallerProduct(task.productId) ? aproPDMWorkingDirectory(for: task).appendingPathComponent("Metadata", isDirectory: true) : nil
     }
 
     private func aamdFileManager(task: NewDownloadTask, dependency: DependenciesToDownload, package: Package, destinationURL: URL) -> AAMDFileManager {
@@ -1427,6 +1427,9 @@ class NewDownloadUtils {
         let shouldPublish = await taskProgressPublishLimiter.shouldPublish(taskId: task.id, force: force)
         guard shouldPublish else { return }
 
+        let isActive = await MainActor.run { task.status.isActive }
+        guard isActive else { return }
+
         let allPackages = task.dependenciesToDownload.flatMap { $0.packages }
         let totalSize = allPackages.reduce(Int64(0)) { $0 + $1.downloadSize }
         let totalDownloaded = allPackages.reduce(Int64(0)) { partialResult, package in
@@ -1770,10 +1773,10 @@ class NewDownloadUtils {
             globalNetworkManager.objectWillChange.send()
         }
 
-        if task.productId == "APRO" {
+        if isManifestInstallerProduct(task.productId) {
             do {
                 guard let productInfo = findProduct(id: task.productId, version: task.productVersion) ?? findProduct(id: task.productId) else {
-                    throw NetworkError.invalidData("找不到 APRO 产品信息")
+                    throw NetworkError.invalidData("找不到 \(task.productId) 产品信息")
                 }
                 try await downloadAPRO(task: task, productInfo: productInfo)
             } catch NetworkError.cancelled {
@@ -2092,18 +2095,25 @@ class NewDownloadUtils {
     }
 
     func downloadAPRO(task: NewDownloadTask, productInfo: Product) async throws {
-        guard let selectedPlatform = HDPIMParityDecisionEngine.shared.preferredPlatform(for: productInfo),
-              let selectedLanguageSet = selectedPlatform.languageSet.first else {
-            throw NetworkError.unsupportedPlatform("APRO 没有可用平台")
+        guard let match = installerPlatformMatch(product: productInfo, selectedVersion: task.productVersion) else {
+            throw NetworkError.unsupportedPlatform("\(task.productId) 没有可用平台")
         }
+
+        let selectedPlatform = match.platform
+        let selectedLanguageSet = match.languageSet
         let productManifestURL = selectedLanguageSet.manifestURL
-        guard !productManifestURL.isEmpty else {
-            throw NetworkError.invalidData("APRO manifest 为空")
+        let productDownloadURL = selectedLanguageSet.lbsURL
+        guard !productManifestURL.isEmpty || !productDownloadURL.isEmpty else {
+            throw NetworkError.invalidData("\(task.productId) 下载地址为空")
         }
 
         let cleanCdn = globalCdn.hasSuffix("/") ? String(globalCdn.dropLast()) : globalCdn
         let manifestURL = normalizedPackageURL(productManifestURL, cdn: cleanCdn)
-        let productVersion = selectedLanguageSet.productVersion.isEmpty ? task.productVersion : selectedLanguageSet.productVersion
+        let productVersion = installerProductVersion(
+            product: productInfo,
+            languageSet: selectedLanguageSet,
+            selectedVersion: task.productVersion
+        )
         let outputURL = task.directory
         let workingDirectory = aproPDMWorkingDirectory(for: task)
         let metadataDirectory = workingDirectory.appendingPathComponent("Metadata", isDirectory: true)
@@ -2113,9 +2123,14 @@ class NewDownloadUtils {
 
         let aproPackage = Package(
             type: "dmg",
-            fullPackageName: "Adobe Downloader \(task.productId)_\(productVersion)_\(selectedPlatform.id).dmg",
+            fullPackageName: installerOutputName(
+                productId: task.productId,
+                version: task.productVersion,
+                language: task.language,
+                platform: selectedPlatform.id
+            ),
             downloadSize: max(existingPackage?.downloadSize ?? 0, Int64(max(selectedLanguageSet.installSize, 0))),
-            downloadURL: "",
+            downloadURL: productDownloadURL,
             manifestURL: productManifestURL,
             packageVersion: productVersion
         )
@@ -2127,7 +2142,7 @@ class NewDownloadUtils {
 
         let product = DependenciesToDownload(
             sapCode: task.productId,
-            version: productVersion,
+            version: task.productVersion,
             buildGuid: selectedLanguageSet.buildGuid,
             platform: selectedPlatform.id
         )
@@ -2161,101 +2176,154 @@ class NewDownloadUtils {
         try FileManager.default.createDirectory(at: outputURL.deletingLastPathComponent(), withIntermediateDirectories: true)
         try FileManager.default.createDirectory(at: metadataDirectory, withIntermediateDirectories: true)
 
-        let workflow = PDMWorkflowManager(
-            tempDirectory: metadataDirectory,
-            validationServiceBaseURL: pdmValidationServiceBaseURL
-        )
-
         let packageId = generatePackageIdentifier(
             package: aproPackage,
             task: task,
             dependency: task.dependenciesToDownload[0]
         )
 
-        let completedURL = try await workflow.execute(
-            manifestURL: manifestURL,
-            cdnBaseURL: cleanCdn,
-            headers: NetworkConstants.downloadHeaders,
-            destinationDirectory: outputURL.deletingLastPathComponent(),
-            packageIdentifier: packageId,
-            returnExecutedAsset: true,
-            skipAssetActions: true,
-            outputAssetURL: outputURL,
-            assetMetadataDirectory: metadataDirectory,
-            progressHandler: { state, progress in
-                Task {
-                    await MainActor.run {
-                        let normalizedProgress = min(max(progress, 0), 1)
-                        switch state {
-                        case .downloadAssetBits:
-                            aproPackage.status = .downloading
-                            aproPackage.progress = normalizedProgress
-                            if aproPackage.downloadSize > 0 {
-                                aproPackage.downloadedSize = Int64(Double(aproPackage.downloadSize) * normalizedProgress)
-                            }
-                        case .executeAsset:
-                            task.setStatus(.preparing(DownloadStatus.PrepareInfo(
-                                message: "正在校验 Acrobat 安装镜像...",
-                                timestamp: Date(),
-                                stage: .creatingInstaller
-                            )))
-                        default:
-                            break
-                        }
-                        task.totalDownloadedSize = aproPackage.downloadedSize
-                        task.totalProgress = aproPackage.progress
-                        task.objectWillChange.send()
-                    }
-                    await self.updateTaskProgressDirect(task: task)
-                }
-            },
-            assetInfoHandler: { _, assetSize in
-                guard assetSize > 0 else { return }
-                Task {
-                    await MainActor.run {
-                        aproPackage.downloadSize = assetSize
-                        aproPackage.downloadedSize = min(max(aproPackage.downloadedSize, 0), assetSize)
-                        task.totalSize = assetSize
-                        task.totalDownloadedSize = min(max(task.totalDownloadedSize, 0), assetSize)
-                        task.objectWillChange.send()
-                    }
-                    await self.updateTaskProgressDirect(task: task, force: true)
-                }
-            },
-            downloadProgressHandler: { downloadedBytes, totalBytes, speed in
-                Task {
-                    await MainActor.run {
-                        let normalizedTotalBytes = totalBytes > 0 ? totalBytes : aproPackage.downloadSize
-                        if normalizedTotalBytes > 0 {
-                            aproPackage.downloadSize = normalizedTotalBytes
-                            task.totalSize = normalizedTotalBytes
-                        }
-                        aproPackage.status = .downloading
-                        aproPackage.downloadedSize = min(max(downloadedBytes, 0), max(aproPackage.downloadSize, 0))
-                        aproPackage.progress = self.normalizedProgress(
-                            downloadedSize: aproPackage.downloadedSize,
-                            totalSize: aproPackage.downloadSize
-                        )
-                        aproPackage.speed = speed
-                        task.totalDownloadedSize = aproPackage.downloadedSize
-                        task.totalProgress = aproPackage.progress
-                        task.totalSpeed = speed
-                        task.objectWillChange.send()
-                    }
-                    await self.updateTaskProgressDirect(task: task, force: true)
-                }
-            },
-            cancellationCheck: {
-                let isCancelled = await globalCancelTracker.isCancelled(task.id)
-                if isCancelled {
-                    return true
-                }
-                return await globalCancelTracker.isPaused(task.id)
+        let completedURL: URL
+        if productManifestURL.isEmpty {
+            let downloadURL = normalizedPackageURL(productDownloadURL, cdn: cleanCdn)
+            guard let url = URL(string: downloadURL) else {
+                throw NetworkError.invalidURL(downloadURL)
             }
-        )
+
+            let result = await PDMDownloadEngine.shared.downloadFile(
+                packageId: packageId,
+                url: url,
+                destinationURL: outputURL,
+                headers: NetworkConstants.downloadHeaders,
+                expectedTotalSize: aproPackage.downloadSize,
+                validationURL: nil,
+                validationURLs: [],
+                progressHandler: { downloadedBytes, totalBytes, speed in
+                    Task {
+                        await MainActor.run {
+                            guard task.status.isActive else { return }
+                            let normalizedTotalBytes = totalBytes > 0 ? totalBytes : aproPackage.downloadSize
+                            if normalizedTotalBytes > 0 {
+                                aproPackage.downloadSize = normalizedTotalBytes
+                                task.totalSize = normalizedTotalBytes
+                            }
+                            aproPackage.status = .downloading
+                            aproPackage.downloadedSize = min(max(downloadedBytes, 0), max(aproPackage.downloadSize, 0))
+                            aproPackage.progress = self.normalizedProgress(
+                                downloadedSize: aproPackage.downloadedSize,
+                                totalSize: aproPackage.downloadSize
+                            )
+                            aproPackage.speed = speed
+                            task.totalDownloadedSize = aproPackage.downloadedSize
+                            task.totalProgress = aproPackage.progress
+                            task.totalSpeed = speed
+                            task.objectWillChange.send()
+                        }
+                        await self.updateTaskProgressDirect(task: task, force: true)
+                    }
+                }
+            )
+            switch result {
+            case .completed:
+                completedURL = outputURL
+            case .cancelled, .paused:
+                throw NetworkError.cancelled
+            case .error(let error):
+                throw error
+            }
+        } else {
+            let workflow = PDMWorkflowManager(
+                tempDirectory: metadataDirectory,
+                validationServiceBaseURL: pdmValidationServiceBaseURL
+            )
+
+            completedURL = try await workflow.execute(
+                manifestURL: manifestURL,
+                cdnBaseURL: cleanCdn,
+                headers: NetworkConstants.downloadHeaders,
+                destinationDirectory: outputURL.deletingLastPathComponent(),
+                packageIdentifier: packageId,
+                returnExecutedAsset: true,
+                skipAssetActions: true,
+                outputAssetURL: outputURL,
+                assetMetadataDirectory: metadataDirectory,
+                progressHandler: { state, progress in
+                    Task {
+                        await MainActor.run {
+                            guard task.status.isActive else { return }
+                            let normalizedProgress = min(max(progress, 0), 1)
+                            switch state {
+                            case .downloadAssetBits:
+                                aproPackage.status = .downloading
+                                aproPackage.progress = normalizedProgress
+                                if aproPackage.downloadSize > 0 {
+                                    aproPackage.downloadedSize = Int64(Double(aproPackage.downloadSize) * normalizedProgress)
+                                }
+                            case .executeAsset:
+                                task.setStatus(.preparing(DownloadStatus.PrepareInfo(
+                                    message: "正在校验 \(task.displayName) 安装镜像...",
+                                    timestamp: Date(),
+                                    stage: .creatingInstaller
+                                )))
+                            default:
+                                break
+                            }
+                            task.totalDownloadedSize = aproPackage.downloadedSize
+                            task.totalProgress = aproPackage.progress
+                            task.objectWillChange.send()
+                        }
+                        await self.updateTaskProgressDirect(task: task)
+                    }
+                },
+                assetInfoHandler: { _, assetSize in
+                    guard assetSize > 0 else { return }
+                    Task {
+                        await MainActor.run {
+                            guard task.status.isActive else { return }
+                            aproPackage.downloadSize = assetSize
+                            aproPackage.downloadedSize = min(max(aproPackage.downloadedSize, 0), assetSize)
+                            task.totalSize = assetSize
+                            task.totalDownloadedSize = min(max(task.totalDownloadedSize, 0), assetSize)
+                            task.objectWillChange.send()
+                        }
+                        await self.updateTaskProgressDirect(task: task, force: true)
+                    }
+                },
+                downloadProgressHandler: { downloadedBytes, totalBytes, speed in
+                    Task {
+                        await MainActor.run {
+                            guard task.status.isActive else { return }
+                            let normalizedTotalBytes = totalBytes > 0 ? totalBytes : aproPackage.downloadSize
+                            if normalizedTotalBytes > 0 {
+                                aproPackage.downloadSize = normalizedTotalBytes
+                                task.totalSize = normalizedTotalBytes
+                            }
+                            aproPackage.status = .downloading
+                            aproPackage.downloadedSize = min(max(downloadedBytes, 0), max(aproPackage.downloadSize, 0))
+                            aproPackage.progress = self.normalizedProgress(
+                                downloadedSize: aproPackage.downloadedSize,
+                                totalSize: aproPackage.downloadSize
+                            )
+                            aproPackage.speed = speed
+                            task.totalDownloadedSize = aproPackage.downloadedSize
+                            task.totalProgress = aproPackage.progress
+                            task.totalSpeed = speed
+                            task.objectWillChange.send()
+                        }
+                        await self.updateTaskProgressDirect(task: task, force: true)
+                    }
+                },
+                cancellationCheck: {
+                    let isCancelled = await globalCancelTracker.isCancelled(task.id)
+                    if isCancelled {
+                        return true
+                    }
+                    return await globalCancelTracker.isPaused(task.id)
+                }
+            )
+        }
 
         guard completedURL.path == outputURL.path else {
-            throw NetworkError.fileSystemError("Acrobat 下载输出路径不一致", nil)
+            throw NetworkError.fileSystemError("\(task.productId) 下载输出路径不一致", nil)
         }
 
         if let completedSize = fileSizeIfExists(outputURL), completedSize > 0 {
@@ -2268,6 +2336,7 @@ class NewDownloadUtils {
             aproPackage.speed = 0
             aproPackage.status = .completed
             aproPackage.downloaded = true
+            product.completedPackages = product.packages.filter { $0.downloaded }.count
             task.completedPackages = 1
             task.totalPackages = 1
             task.totalDownloadedSize = aproPackage.downloadSize
@@ -2279,6 +2348,7 @@ class NewDownloadUtils {
                 totalTime: Date().timeIntervalSince(task.createAt),
                 totalSize: task.totalSize
             )))
+            product.objectWillChange.send()
             task.objectWillChange.send()
             globalNetworkManager.updateDockBadge()
             globalNetworkManager.objectWillChange.send()

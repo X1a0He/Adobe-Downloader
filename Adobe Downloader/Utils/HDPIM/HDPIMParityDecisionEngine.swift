@@ -282,6 +282,15 @@ final class HDPIMParityDecisionEngine {
         guard !products.isEmpty else {
             return findProducts(id: productId)
                 .compactMap { product in
+                    if isManifestInstallerProduct(productId),
+                       let match = installerPlatformMatch(
+                        product: product,
+                        selectedVersion: product.version,
+                        targetArchitecture: targetArchitecture
+                       ) {
+                        return (key: product.version, value: match.platform)
+                    }
+
                     guard let platform = preferredPlatform(for: product, targetArchitecture: targetArchitecture) else {
                         return nil
                     }
@@ -294,6 +303,16 @@ final class HDPIMParityDecisionEngine {
 
         var versionPlatformMap: [String: Product.Platform] = [:]
         for product in products {
+            if isManifestInstallerProduct(productId),
+               let match = installerPlatformMatch(
+                product: product,
+                selectedVersion: product.version,
+                targetArchitecture: targetArchitecture
+               ) {
+                versionPlatformMap[product.version] = match.platform
+                continue
+            }
+
             guard let platform = preferredPlatform(for: product, targetArchitecture: targetArchitecture) else {
                 continue
             }

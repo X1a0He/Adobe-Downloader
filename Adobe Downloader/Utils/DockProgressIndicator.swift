@@ -29,16 +29,7 @@ class DockProgressIndicator {
                 return
             }
 
-            NSApp.dockTile.badgeLabel = nil
-            if isCompleted {
-                self.updateCustomProgress(
-                    1,
-                    taskCount: 0,
-                    isCompleted: true
-                )
-            } else {
-                self.clearNow()
-            }
+            self.clearNow()
         }
     }
 

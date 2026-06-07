@@ -325,7 +325,7 @@ struct TaskCard: View {
     }
 
     private func resolvedTaskDirectoryURL() -> URL {
-        if task.productId == "APRO",
+        if isManifestInstallerProduct(task.productId),
            task.directory.pathExtension.lowercased() == "dmg",
            !FileManager.default.fileExists(atPath: task.directory.path) {
             let extractedURL = task.directory.deletingPathExtension()

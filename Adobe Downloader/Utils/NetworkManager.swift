@@ -94,7 +94,7 @@ class NetworkManager: ObservableObject {
             totalSize: 0,
             totalSpeed: 0,
             platform: customDependencies.first(where: { $0.sapCode == productId })?.platform
-                ?? HDPIMParityDecisionEngine.shared.preferredPlatformId(
+                ?? installerSelectedPlatformId(
                     productId: productId,
                     version: selectedVersion
                 )
@@ -113,13 +113,13 @@ class NetworkManager: ObservableObject {
         await saveTask(task)
         
         do {
-            if productId == "APRO" {
+            if isManifestInstallerProduct(productId) {
                 try await globalNewDownloadUtils.downloadAPRO(task: task, productInfo: productInfo)
             } else {
                 try await globalNewDownloadUtils.handleCustomDownload(task: task, customDependencies: customDependencies)
             }
         } catch NetworkError.cancelled {
-            if productId == "APRO", await globalCancelTracker.isPaused(task.id) {
+            if isManifestInstallerProduct(productId), await globalCancelTracker.isPaused(task.id) {
                 task.setStatus(.paused(DownloadStatus.PauseInfo(
                     reason: .userRequested,
                     timestamp: Date(),
@@ -488,13 +488,16 @@ class NetworkManager: ObservableObject {
             !$0.status.isCompleted
         }) { return task.directory }
 
-        let platform = HDPIMParityDecisionEngine.shared.preferredPlatformId(
+        let platform = installerSelectedPlatformId(
             productId: productId,
             version: version
         ) ?? "unknown"
-        let fileName = productId == "APRO"
-            ? "Adobe Downloader \(productId)_\(version)_\(platform).dmg"
-            : "Adobe Downloader \(productId)_\(version)-\(language)-\(platform)"
+        let fileName = installerOutputName(
+            productId: productId,
+            version: version,
+            language: language,
+            platform: platform
+        )
 
         if useDefaultDirectory && !defaultDirectory.isEmpty {
             let defaultPath = URL(fileURLWithPath: defaultDirectory)

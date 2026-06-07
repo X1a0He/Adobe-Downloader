@@ -72,7 +72,10 @@ class NewNetworkService {
             globalRawProducts = products
 
             let validProducts = products.filter {
-                HDPIMParityDecisionEngine.shared.hasVisibleVersion(product: $0)
+                guard !isBlockedVisibleProduct($0.id) else {
+                    return false
+                }
+                return HDPIMParityDecisionEngine.shared.hasVisibleVersion(product: $0)
             }
 
             var uniqueProductsDict = [String: UniqueProduct]()
