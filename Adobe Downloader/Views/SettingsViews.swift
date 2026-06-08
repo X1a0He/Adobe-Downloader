@@ -209,7 +209,7 @@ struct AboutAppView: View {
                     VStack(spacing: 4) {
                         Text("Adobe Downloader \(appVersion)")
                             .font(.system(size: AboutViewConstants.titleFontSize, weight: .semibold))
-                        Text("By X1a0He. ❤️ Love from China. 🇨🇳")
+                        Text("By X1a0He.")
                             .font(.system(size: AboutViewConstants.subtitleFontSize))
                             .foregroundColor(.secondary)
                     }
