@@ -96,6 +96,17 @@ class PIMXParser {
         )
     }
 
+    func parseUninstallCommands(pimxURL: URL) throws -> [PIMXCommandDescriptor] {
+        let xmlData = try Self.loadXMLData(from: pimxURL)
+        let xmlDoc = try XMLDocument(data: xmlData, options: [])
+
+        guard let root = xmlDoc.rootElement() else {
+            throw PIMXError.invalidXML("PIMX 根节点不存在: \(pimxURL.path)")
+        }
+
+        return try parseCommands(root: root)
+    }
+
     private func parseAssets(root: XMLElement) throws -> (commands: [PIMXCommandDescriptor], assetReferences: [PIMXAssetReference]) {
         var commands: [PIMXCommandDescriptor] = []
         var assetReferences: [PIMXAssetReference] = []
@@ -309,8 +320,11 @@ class PIMXParser {
             case "DeleteDirectory":
                 let source = (try element.nodes(forXPath: "Source").first?.stringValue)
                     ?? element.attribute(forName: "source")?.stringValue ?? ""
-                if !source.isEmpty {
-                    commands.append(.deleteDirectory(source: propertyTable.expandPath(source)))
+                let target = (try element.nodes(forXPath: "Target").first?.stringValue)
+                    ?? element.attribute(forName: "target")?.stringValue ?? ""
+                let path = source.isEmpty ? target : source
+                if !path.isEmpty {
+                    commands.append(.deleteDirectory(source: propertyTable.expandPath(path)))
                 }
 
             case "Touch":

@@ -23,8 +23,10 @@ struct Dependency {
 struct DependencyReference {
     let dependencySapCode: String
     let dependencyVersion: String
+    let dependencyProcessorFamily: HDPIMProcessorFamily
     let referencingSapCode: String
     let referencingVersion: String
+    let referencingProcessorFamily: HDPIMProcessorFamily
     let referenceType: String
 }
 

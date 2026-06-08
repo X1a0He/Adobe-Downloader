@@ -7,6 +7,7 @@ enum HelperOperation: Codable, Equatable {
     case setPermissions(path: String, mode: Int)
     case executeShell(command: String)
     case hdpimInstall(productDir: String, userHome: String, executablePath: String?)
+    case hdpimUninstall(request: HDPIMUninstallHelperRequest, userHome: String, executablePath: String?)
     case cancelOperation
     case getVersion
 
@@ -14,7 +15,7 @@ enum HelperOperation: Codable, Equatable {
         switch self {
         case .installPackage, .uninstallPath, .copyFile, .setPermissions:
             return true
-        case .executeShell, .hdpimInstall, .cancelOperation, .getVersion:
+        case .executeShell, .hdpimInstall, .hdpimUninstall, .cancelOperation, .getVersion:
             return false
         }
     }
@@ -33,10 +34,46 @@ enum HelperOperation: Codable, Equatable {
             return "Execute: \(command.prefix(50))..."
         case .hdpimInstall(let productDir, _, _):
             return "HDPIM install: \(URL(fileURLWithPath: productDir).lastPathComponent)"
+        case .hdpimUninstall(let request, _, _):
+            return "HDPIM uninstall: \(request.description)"
         case .cancelOperation:
             return "Cancel operation"
         case .getVersion:
             return "Get version"
+        }
+    }
+}
+
+struct HDPIMUninstallHelperRequest: Codable, Equatable {
+    enum Target: String, Codable {
+        case product
+        case module
+        case packages
+    }
+
+    struct PackageKey: Codable, Equatable {
+        let packageName: String
+        let packageVersion: String
+    }
+
+    let sapCode: String
+    let version: String
+    let processorFamily: String
+    let target: Target
+    let moduleIds: [String]
+    let packageKeys: [PackageKey]
+
+    var description: String {
+        switch target {
+        case .product:
+            return "\(sapCode) \(version) \(processorFamily)"
+        case .module:
+            return "\(sapCode) \(version) modules=\(moduleIds.joined(separator: ","))"
+        case .packages:
+            let packages = packageKeys
+                .map { "\($0.packageName)@\($0.packageVersion)" }
+                .joined(separator: ",")
+            return "\(sapCode) \(version) packages=\(packages)"
         }
     }
 }

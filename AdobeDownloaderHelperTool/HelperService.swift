@@ -79,6 +79,18 @@ private final class HelperServiceImpl: NSObject, HelperXPCProtocol {
                 result = .failure("启动失败: \(error.localizedDescription)")
             }
 
+        case .hdpimUninstall(let request, let userHome, let executablePath):
+            do {
+                try ProcessManager.shared.startHDPIMUninstall(
+                    request: request,
+                    userHome: userHome,
+                    executablePath: executablePath
+                )
+                result = .success("Started")
+            } catch {
+                result = .failure("启动失败: \(error.localizedDescription)")
+            }
+
         case .cancelOperation:
             ProcessManager.shared.cancel()
             result = .success("Cancelled")

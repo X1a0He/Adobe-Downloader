@@ -56,6 +56,22 @@ extension HelperManager {
         try await client.executeInstallation(operation, progress: progress)
     }
 
+    func executeHDPIMUninstall(
+        request: HDPIMUninstallHelperRequest,
+        userHome: String,
+        executablePath: String? = nil,
+        progress: @escaping (String) -> Void
+    ) async throws {
+        let client = try getClient()
+        let operation = HelperOperation.hdpimUninstall(
+            request: request,
+            userHome: userHome,
+            executablePath: executablePath
+        )
+
+        try await client.executeInstallation(operation, progress: progress)
+    }
+
     func cancelCurrentOperation() async throws {
         let client = try getClient()
         let operation = HelperOperation.cancelOperation

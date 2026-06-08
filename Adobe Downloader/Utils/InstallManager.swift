@@ -8,7 +8,7 @@ import Darwin
 import AppKit
 
 actor InstallManager {
-    private final class InstallOutputState {
+    final class InstallOutputState {
         var pending = ""
         var latestProgress = 0.0
         var lastStructuredError: String?
@@ -160,11 +160,12 @@ actor InstallManager {
         try await install(at: appPath, progressHandler: progressHandler, logHandler: logHandler)
     }
 
-    private static func consumeHelperOutput(
+    static func consumeHelperOutput(
         _ output: String,
         state: InstallOutputState,
         progressHandler: @escaping (Double, String) -> Void,
-        logHandler: ((String) -> Void)?
+        logHandler: ((String) -> Void)?,
+        failureStatusPrefix: String = "安装失败"
     ) {
         state.pending.append(output.replacingOccurrences(of: "\r\n", with: "\n"))
 
@@ -206,7 +207,7 @@ actor InstallManager {
                 state.lastStructuredError = message
                 logHandler?(message)
                 Task { @MainActor in
-                    progressHandler(state.latestProgress, "安装失败: \(message)")
+                    progressHandler(state.latestProgress, "\(failureStatusPrefix): \(message)")
                 }
                 continue
             }

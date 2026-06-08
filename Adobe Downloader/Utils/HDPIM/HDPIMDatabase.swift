@@ -41,22 +41,24 @@ enum HDPIMInstallStatus: String {
     case installed = "1"
 }
 
-enum HDPIMProcessorFamily: String {
+enum HDPIMProcessorFamily: String, Hashable {
     case bit32 = "32Bit"
     case bit64 = "64Bit"
     case arm64Bit = "Arm64Bit"
 
-    static func from(platform: String) -> HDPIMProcessorFamily {
-        let normalized = platform.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
-        switch normalized {
-        case "MACARM64":
-            return .arm64Bit
-        case "OSX", "OSX10":
-            return .bit32
-        default:
-            return .bit64
-        }
-    }
+	static func from(platform: String) -> HDPIMProcessorFamily {
+		let normalized = platform.trimmingCharacters(in: .whitespacesAndNewlines).uppercased()
+		switch normalized {
+		case "MACARM64", "ARM64BIT", "ARM64", "AARCH64":
+			return .arm64Bit
+		case "OSX", "32BIT", "I386", "X86":
+			return .bit32
+		case "OSX10", "64BIT", "X64", "X86_64":
+			return .bit64
+		default:
+			return .bit64
+		}
+	}
 }
 
 enum HDPIMProductMetaKey: String {
@@ -258,7 +260,9 @@ final class HDPIMDatabase {
     private var db: OpaquePointer?
     private let dbPath: URL
 
-    var dbHandle: OpaquePointer? { db }
+	var dbHandle: OpaquePointer? { db }
+
+	var isOpen: Bool { db != nil }
 
     private init() {
         let appSupport = URL(fileURLWithPath: "/Library/Application Support", isDirectory: true)
@@ -268,11 +272,15 @@ final class HDPIMDatabase {
         dbPath = capsDir.appendingPathComponent("hdpim.db")
     }
 
-    func open() throws {
-        try FileManager.default.createDirectory(
-            at: dbPath.deletingLastPathComponent(),
-            withIntermediateDirectories: true
-        )
+	func open() throws {
+		if db != nil {
+			return
+		}
+
+		try FileManager.default.createDirectory(
+			at: dbPath.deletingLastPathComponent(),
+			withIntermediateDirectories: true
+		)
 
         if sqlite3_open_v2(dbPath.path, &db, SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE, nil) != SQLITE_OK {
             throw HDPIMDatabaseError.openFailed(lastErrorMessage())
@@ -286,12 +294,16 @@ final class HDPIMDatabase {
             close()
             throw error
         }
-    }
+	}
 
-    func openReadOnly() throws {
-        if sqlite3_open_v2(dbPath.path, &db, SQLITE_OPEN_READONLY, nil) != SQLITE_OK {
-            throw HDPIMDatabaseError.openFailed(lastErrorMessage())
-        }
+	func openReadOnly() throws {
+		if db != nil {
+			return
+		}
+
+		if sqlite3_open_v2(dbPath.path, &db, SQLITE_OPEN_READONLY, nil) != SQLITE_OK {
+			throw HDPIMDatabaseError.openFailed(lastErrorMessage())
+		}
         sqlite3_busy_timeout(db, 1000)
     }
 
@@ -415,14 +427,18 @@ final class HDPIMDatabase {
                 try deletePackageReference(for: key.sapCode, version: key.version, processorFamily: key.processorFamily)
                 try deletePackageMeta(for: key.sapCode, version: key.version, processorFamily: key.processorFamily)
                 try deletePackageInfo(for: key.sapCode, version: key.version, processorFamily: key.processorFamily)
-                try deleteProductMeta(
+                try deleteProductRecords(
                     sapCode: key.sapCode,
-                    version: latestInstalledVersionSlot,
-                    processorFamily: key.processorFamily,
-                    key: HDPIMProductMetaKey.latestInstalledVersion.rawValue
+                    version: key.version,
+                    processorFamily: key.processorFamily
                 )
-                try deleteProductMeta(for: key.sapCode, version: key.version, processorFamily: key.processorFamily)
-                try deleteProductInfo(for: key.sapCode, version: key.version, processorFamily: key.processorFamily)
+                if latestInstalledVersionSlot != key.version {
+                    try deleteProductRecords(
+                        sapCode: key.sapCode,
+                        version: latestInstalledVersionSlot,
+                        processorFamily: key.processorFamily
+                    )
+                }
             }
             try commitTransaction(name: "HDPIMDatabase-removeInstallation")
         } catch {
@@ -637,13 +653,135 @@ final class HDPIMDatabase {
                 )
             )
         }
-        return records
-    }
+		return records
+	}
 
-    func getInstalledPackageNames(
-        sapCode: String,
-        version: String,
-        processorFamily: HDPIMProcessorFamily
+	func getInstalledPackageContexts(
+		sapCode: String,
+		version: String,
+		processorFamily: HDPIMProcessorFamily,
+		moduleIds: Set<String> = [],
+		packageNames: Set<String> = []
+	) -> [HDPIMNativePackageContext] {
+		let sql = """
+		SELECT p.SAPCode,
+		       p.ProductVersion,
+		       p.ProcessorFamily,
+		       p.PackageName,
+		       p.PackageVersion,
+		       COALESCE(pm_install.Value, '')
+		FROM \(Schema.packageInstallationInfo) p
+		INNER JOIN \(Schema.productInstallationInfo) prod
+		  ON prod.SAPCode = p.SAPCode
+		 AND prod.ProductVersion = p.ProductVersion
+		 AND prod.ProcessorFamily = p.ProcessorFamily
+		 AND prod.Status = ?
+		LEFT JOIN \(Schema.productInstallationMetaInfo) pm_install
+		  ON pm_install.SAPCode = p.SAPCode
+		 AND pm_install.ProductVersion = p.ProductVersion
+		 AND pm_install.ProcessorFamily = p.ProcessorFamily
+		 AND pm_install.Key = ?
+		WHERE p.SAPCode = ? AND p.ProductVersion = ? AND p.ProcessorFamily = ?
+		ORDER BY p.PackageName, p.PackageVersion;
+		"""
+
+		var stmt: OpaquePointer?
+		guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+			return []
+		}
+		defer { sqlite3_finalize(stmt) }
+
+		bindText(HDPIMInstallStatus.installed.rawValue, index: 1, to: stmt)
+		bindText(HDPIMProductExtraMetaKey.installDir, index: 2, to: stmt)
+		bindText(sapCode, index: 3, to: stmt)
+		bindText(version, index: 4, to: stmt)
+		bindText(processorFamily.rawValue, index: 5, to: stmt)
+
+		var packages: [HDPIMNativePackageContext] = []
+		while sqlite3_step(stmt) == SQLITE_ROW {
+			let packageName = columnText(stmt, index: 3)
+			let packageVersion = columnText(stmt, index: 4)
+			if !packageNames.isEmpty, !packageNames.contains(packageName) {
+				continue
+			}
+
+			let context = makeInstalledPackageContext(
+				sapCode: columnText(stmt, index: 0),
+				productVersion: columnText(stmt, index: 1),
+				processorFamily: HDPIMProcessorFamily.from(platform: columnText(stmt, index: 2)),
+				packageName: packageName,
+				packageVersion: packageVersion,
+				installDir: columnText(stmt, index: 5)
+			)
+
+			if !moduleIds.isEmpty {
+				let packageModules = Set(splitMetaValues(context.module ?? ""))
+				if packageModules.isDisjoint(with: moduleIds) {
+					continue
+				}
+			}
+
+			packages.append(context)
+		}
+
+		return packages.sorted { lhs, rhs in
+			if lhs.sequenceNumber != rhs.sequenceNumber {
+				return lhs.sequenceNumber < rhs.sequenceNumber
+			}
+			if lhs.packageName != rhs.packageName {
+				return lhs.packageName < rhs.packageName
+			}
+			return AppStatics.compareVersions(lhs.packageVersion, rhs.packageVersion) < 0
+		}
+	}
+
+	func getInstalledModuleIds(
+		sapCode: String,
+		version: String,
+		processorFamily: HDPIMProcessorFamily
+	) -> [String] {
+		guard let raw = getProductMeta(
+			sapCode: sapCode,
+			version: version,
+			processorFamily: processorFamily,
+			key: HDPIMProductExtraMetaKey.modules
+		) else {
+			return []
+		}
+		return splitMetaValues(raw)
+	}
+
+	func updateInstalledModules(
+		sapCode: String,
+		version: String,
+		processorFamily: HDPIMProcessorFamily,
+		removing moduleIds: Set<String>
+	) throws -> [String] {
+		let remainingModules = getInstalledModuleIds(
+			sapCode: sapCode,
+			version: version,
+			processorFamily: processorFamily
+		)
+		.filter { !moduleIds.contains($0) }
+
+		try insertProductMeta(
+			.init(
+				sapCode: sapCode,
+				productVersion: version,
+				processorFamily: processorFamily,
+				key: HDPIMProductExtraMetaKey.modules,
+				value: remainingModules.joined(separator: ","),
+				appendIfNeeded: false
+			)
+		)
+
+		return remainingModules
+	}
+
+	func getInstalledPackageNames(
+		sapCode: String,
+		version: String,
+		processorFamily: HDPIMProcessorFamily
     ) -> [String] {
         let sql = """
         SELECT p.PackageName
@@ -868,6 +1006,78 @@ final class HDPIMDatabase {
     ) -> String? {
         try? fetchProductMetaValue(sapCode: sapCode, version: version, processorFamily: processorFamily, key: key)
     }
+
+	func getResolvedProductLaunchPath(
+		sapCode: String,
+		version: String,
+		processorFamily: HDPIMProcessorFamily
+	) -> String {
+		if let bookmarkValue = getProductMeta(
+			sapCode: sapCode,
+			version: version,
+			processorFamily: processorFamily,
+			key: HDPIMProductExtraMetaKey.launchPathBookmarkData
+		), let bookmarkPath = resolvedBookmarkPath(from: bookmarkValue), !bookmarkPath.isEmpty {
+			return bookmarkPath
+		}
+
+		let rawLaunchPath = getProductMeta(
+			sapCode: sapCode,
+			version: version,
+			processorFamily: processorFamily,
+			key: HDPIMProductMetaKey.appLaunch.rawValue
+		)?
+			.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+		guard !rawLaunchPath.isEmpty else {
+			return ""
+		}
+
+		let propertyTable = HDPIMPropertyTable()
+		propertyTable.setupSystemDirectories()
+		let installDir = getProductMeta(
+			sapCode: sapCode,
+			version: version,
+			processorFamily: processorFamily,
+			key: HDPIMProductExtraMetaKey.installDir
+		)?
+			.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+		if !installDir.isEmpty {
+			propertyTable.setInstallDir(installDir)
+			propertyTable.setProductInstallDir(installDir)
+		}
+
+		let expandedPath = propertyTable
+			.expandPath(rawLaunchPath)
+			.trimmingCharacters(in: .whitespacesAndNewlines)
+		return expandedPath.isEmpty ? rawLaunchPath : expandedPath
+	}
+
+	func packageMetaValueExists(key: String, value: String) -> Bool {
+		let trimmedValue = value.trimmingCharacters(in: .whitespacesAndNewlines)
+		guard !trimmedValue.isEmpty else {
+			return false
+		}
+
+		let sql = """
+		SELECT COUNT(*)
+		FROM \(Schema.packageInstallationMetaInfo)
+		WHERE Key = ? AND Value = ?;
+		"""
+
+		var stmt: OpaquePointer?
+		guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+			return false
+		}
+		defer { sqlite3_finalize(stmt) }
+
+		bindText(key, index: 1, to: stmt)
+		bindText(trimmedValue, index: 2, to: stmt)
+
+		if sqlite3_step(stmt) == SQLITE_ROW {
+			return sqlite3_column_int(stmt, 0) > 0
+		}
+		return false
+	}
 
     func setProductMeta(
         sapCode: String,
@@ -1581,10 +1791,10 @@ final class HDPIMDatabase {
         return columnOptionalText(stmt, index: 0)
     }
 
-    private func hasPackageRecord(
-        sapCode: String,
-        productVersion: String,
-        processorFamily: HDPIMProcessorFamily,
+	private func hasPackageRecord(
+		sapCode: String,
+		productVersion: String,
+		processorFamily: HDPIMProcessorFamily,
         packageName: String,
         packageVersion: String
     ) throws -> Bool {
@@ -1610,11 +1820,125 @@ final class HDPIMDatabase {
             return false
         }
 
-        return sqlite3_column_int(stmt, 0) > 0
-    }
+		return sqlite3_column_int(stmt, 0) > 0
+	}
 
-    private func mergeMetaValues(existing: String?, newValue: String) -> String {
-        guard let existing, !existing.isEmpty else {
+	private func hasPackageReference(_ package: HDPIMNativePackageContext) -> Bool {
+		let sql = """
+		SELECT COUNT(*)
+		FROM \(Schema.packageReferenceInfo)
+		WHERE PackageName = ? AND PackageVersion = ? AND SAPCode = ? AND ProductVersion = ? AND ProcessorFamily = ?;
+		"""
+
+		var stmt: OpaquePointer?
+		guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+			return false
+		}
+		defer { sqlite3_finalize(stmt) }
+
+		bindText(package.packageName, index: 1, to: stmt)
+		bindText(package.packageVersion, index: 2, to: stmt)
+		bindText(package.sapCode, index: 3, to: stmt)
+		bindText(package.productVersion, index: 4, to: stmt)
+		bindText(package.processorFamily.rawValue, index: 5, to: stmt)
+
+		guard sqlite3_step(stmt) == SQLITE_ROW else {
+			return false
+		}
+		return sqlite3_column_int(stmt, 0) > 0
+	}
+
+	private func makeInstalledPackageContext(
+		sapCode: String,
+		productVersion: String,
+		processorFamily: HDPIMProcessorFamily,
+		packageName: String,
+		packageVersion: String,
+		installDir: String
+	) -> HDPIMNativePackageContext {
+		let packageType = (try? fetchPackageMetaValue(
+			sapCode: sapCode,
+			version: productVersion,
+			processorFamily: processorFamily,
+			packageName: packageName,
+			packageVersion: packageVersion,
+			key: HDPIMPackageMetaKey.type.rawValue
+		)) ?? ""
+		let packageProcessorFamily = (try? fetchPackageMetaValue(
+			sapCode: sapCode,
+			version: productVersion,
+			processorFamily: processorFamily,
+			packageName: packageName,
+			packageVersion: packageVersion,
+			key: HDPIMPackageMetaKey.processorFamily.rawValue
+		)) ?? ""
+		let sequenceValue = (try? fetchPackageMetaValue(
+			sapCode: sapCode,
+			version: productVersion,
+			processorFamily: processorFamily,
+			packageName: packageName,
+			packageVersion: packageVersion,
+			key: HDPIMPackageMetaKey.sequenceNumber.rawValue
+		)) ?? "0"
+		let targetFolderValue = (try? fetchPackageMetaValue(
+			sapCode: sapCode,
+			version: productVersion,
+			processorFamily: processorFamily,
+			packageName: packageName,
+			packageVersion: packageVersion,
+			key: HDPIMPackageMetaKey.targetFolderList.rawValue
+		)) ?? ""
+		let package = HDPIMNativePackageContext(
+			sapCode: sapCode,
+			productVersion: productVersion,
+			platform: processorFamily.rawValue,
+			packageName: packageName,
+			packageVersion: packageVersion,
+			packageType: packageType,
+			packageProcessorFamily: packageProcessorFamily,
+			sequenceNumber: Int(sequenceValue) ?? 0,
+			installDir: installDir,
+			uninstallPIMXPath: (try? fetchPackageMetaValue(sapCode: sapCode, version: productVersion, processorFamily: processorFamily, packageName: packageName, packageVersion: packageVersion, key: HDPIMPackageMetaKey.uninstallPIMX.rawValue)) ?? nil,
+			uninstallPIMXHash: (try? fetchPackageMetaValue(sapCode: sapCode, version: productVersion, processorFamily: processorFamily, packageName: packageName, packageVersion: packageVersion, key: HDPIMPackageMetaKey.uninstallPIMXHash.rawValue)) ?? nil,
+			uninstallPIMXHash256: (try? fetchPackageMetaValue(sapCode: sapCode, version: productVersion, processorFamily: processorFamily, packageName: packageName, packageVersion: packageVersion, key: HDPIMPackageMetaKey.uninstallPIMXHash256.rawValue)) ?? nil,
+			repairPIMXPath: (try? fetchPackageMetaValue(sapCode: sapCode, version: productVersion, processorFamily: processorFamily, packageName: packageName, packageVersion: packageVersion, key: HDPIMPackageMetaKey.repairPIMX.rawValue)) ?? nil,
+			repairPIMXHash: (try? fetchPackageMetaValue(sapCode: sapCode, version: productVersion, processorFamily: processorFamily, packageName: packageName, packageVersion: packageVersion, key: HDPIMPackageMetaKey.repairPIMXHash.rawValue)) ?? nil,
+			repairPIMXHash256: (try? fetchPackageMetaValue(sapCode: sapCode, version: productVersion, processorFamily: processorFamily, packageName: packageName, packageVersion: packageVersion, key: HDPIMPackageMetaKey.repairPIMXHash256.rawValue)) ?? nil,
+			installSize: (try? fetchPackageMetaValue(sapCode: sapCode, version: productVersion, processorFamily: processorFamily, packageName: packageName, packageVersion: packageVersion, key: HDPIMPackageMetaKey.installSize.rawValue)) ?? "0",
+			targetFolders: splitMetaValues(targetFolderValue),
+			ribsCoexistenceCode: (try? fetchPackageMetaValue(sapCode: sapCode, version: productVersion, processorFamily: processorFamily, packageName: packageName, packageVersion: packageVersion, key: HDPIMPackageExtraMetaKey.ribsCoexistenceCode.rawValue)) ?? nil,
+			module: (try? fetchPackageMetaValue(sapCode: sapCode, version: productVersion, processorFamily: processorFamily, packageName: packageName, packageVersion: packageVersion, key: HDPIMPackageExtraMetaKey.module.rawValue)) ?? nil,
+			uwpInfoXML: (try? fetchPackageMetaValue(sapCode: sapCode, version: productVersion, processorFamily: processorFamily, packageName: packageName, packageVersion: packageVersion, key: HDPIMPackageExtraMetaKey.uwpInfoXML.rawValue)) ?? nil,
+			isShared: false
+		)
+
+		return HDPIMNativePackageContext(
+			sapCode: package.sapCode,
+			productVersion: package.productVersion,
+			platform: package.platform,
+			packageName: package.packageName,
+			packageVersion: package.packageVersion,
+			packageType: package.packageType,
+			packageProcessorFamily: package.packageProcessorFamily,
+			sequenceNumber: package.sequenceNumber,
+			installDir: package.installDir,
+			uninstallPIMXPath: package.uninstallPIMXPath,
+			uninstallPIMXHash: package.uninstallPIMXHash,
+			uninstallPIMXHash256: package.uninstallPIMXHash256,
+			repairPIMXPath: package.repairPIMXPath,
+			repairPIMXHash: package.repairPIMXHash,
+			repairPIMXHash256: package.repairPIMXHash256,
+			installSize: package.installSize,
+			targetFolders: package.targetFolders,
+			ribsCoexistenceCode: package.ribsCoexistenceCode,
+			module: package.module,
+			uwpInfoXML: package.uwpInfoXML,
+			isShared: hasPackageReference(package)
+		)
+	}
+
+	private func mergeMetaValues(existing: String?, newValue: String) -> String {
+		guard let existing, !existing.isEmpty else {
             return newValue
         }
         let existingSet = Set(existing.split(separator: ",").map { $0.trimmingCharacters(in: .whitespacesAndNewlines) })
@@ -1653,6 +1977,15 @@ final class HDPIMDatabase {
         try deleteLatestInstalledVersionMeta(for: product)
         try deleteProductMeta(for: product.sapCode, version: product.codexVersion, processorFamily: product.processorFamily)
         try deleteProductInfo(for: product.sapCode, version: product.codexVersion, processorFamily: product.processorFamily)
+    }
+
+    private func deleteProductRecords(
+        sapCode: String,
+        version: String,
+        processorFamily: HDPIMProcessorFamily
+    ) throws {
+        try deleteProductMeta(for: sapCode, version: version, processorFamily: processorFamily)
+        try deleteProductInfo(for: sapCode, version: version, processorFamily: processorFamily)
     }
 
     private func deleteLatestInstalledVersionMeta(for product: HDPIMNativeProductContext) throws {
@@ -1960,6 +2293,25 @@ final class HDPIMDatabase {
         }
         return bookmarkData.base64EncodedString()
     }
+
+	private func resolvedBookmarkPath(from value: String) -> String? {
+		let trimmedValue = value.trimmingCharacters(in: .whitespacesAndNewlines)
+		guard !trimmedValue.isEmpty,
+		      let data = Data(base64Encoded: trimmedValue) else {
+			return nil
+		}
+
+		var isStale = false
+		guard let url = try? URL(
+			resolvingBookmarkData: data,
+			options: [],
+			relativeTo: nil,
+			bookmarkDataIsStale: &isStale
+		) else {
+			return nil
+		}
+		return url.path
+	}
 
     private func splitMetaValues(_ value: String) -> [String] {
         value

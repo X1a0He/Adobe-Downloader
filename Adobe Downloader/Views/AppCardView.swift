@@ -46,6 +46,7 @@ final class AppCardViewModel: ObservableObject {
     @Published var pendingVersion = ""
     @Published var pendingLanguage = ""
     @Published var showRedownloadConfirm = false
+    @Published var installedProducts: [HDPIMInstalledProductForUninstall] = []
 
     let uniqueProduct: UniqueProduct
 
@@ -116,6 +117,10 @@ final class AppCardViewModel: ObservableObject {
             self.isDownloading = hasActiveTask
             self.objectWillChange.send()
         }
+    }
+
+    func refreshInstallState() {
+        installedProducts = HDPIMUninstaller.installedProducts(sapCode: uniqueProduct.id)
     }
 
     func getDestinationURL(version: String, language: String) async throws -> URL {
@@ -360,11 +365,31 @@ final class AppCardViewModel: ObservableObject {
     }
 
     var downloadButtonTitle: String {
-        isDownloading ? String(localized: "下载中") : String(localized: "下载")
+        if isDownloading {
+            return String(localized: "下载中")
+        }
+        if isInstalled {
+            return String(localized: "管理")
+        }
+        return String(localized: "下载")
     }
 
     var downloadButtonIcon: String {
-        isDownloading ? "hourglass.circle.fill" : "arrow.down.circle"
+        if isDownloading {
+            return "hourglass.circle.fill"
+        }
+        if isInstalled {
+            return "checkmark.seal.fill"
+        }
+        return "arrow.down.circle"
+    }
+
+    var isInstalled: Bool {
+        !installedProducts.isEmpty
+    }
+
+    var installedVersionCount: Int {
+        Set(installedProducts.map(\.version)).count
     }
 
     var activeDownloadTask: NewDownloadTask? {
@@ -482,6 +507,7 @@ struct AppCardView: View {
         .modifier(AlertModifier(viewModel: viewModel, confirmRedownload: true))
         .onAppear {
             viewModel.updateDownloadingStatus()
+            viewModel.refreshInstallState()
         }
         .onChange(of: globalNetworkManager.downloadTasks.count) { _ in
             viewModel.updateDownloadingStatus()
@@ -552,10 +578,16 @@ private struct DotBadgeRow: View {
 
     private func makeBadges() -> [AnyView] {
         var list: [AnyView] = []
-        if viewModel.isAnyVersionDownloaded {
+        if viewModel.isInstalled {
+            let text = viewModel.installedVersionCount > 1
+                ? "已安装 \(viewModel.installedVersionCount) 版本"
+                : "已安装"
+            list.append(AnyView(DotBadge(text: text, tint: .green)))
+        }
+        if viewModel.isAnyVersionDownloaded && list.count < 2 {
             list.append(AnyView(DotBadge(text: "已下载", tint: .green)))
         }
-        if !viewModel.isArchitectureCompatible {
+        if !viewModel.isArchitectureCompatible && list.count < 2 {
             list.append(AnyView(DotBadge(text: "需切架构", tint: .orange)))
         }
         if viewModel.uniqueVersionCount > 1 && list.count < 2 {
@@ -640,18 +672,38 @@ private struct DownloadActionButton: View {
     var body: some View {
         Button(action: { viewModel.showVersionPicker = true }) {
             HStack(spacing: 4) {
-                Image(systemName: viewModel.isDownloading ? "hourglass.circle.fill" : "arrow.down.circle.fill")
+                Image(systemName: viewModel.downloadButtonIcon)
                     .font(.system(size: 12))
-                Text(viewModel.isDownloading ? String(localized: "下载中") : String(localized: "下载"))
+                Text(viewModel.downloadButtonTitle)
                     .font(.system(size: AppCardConstants.buttonFontSize, weight: .semibold))
             }
             .foregroundColor(.white)
             .frame(maxWidth: .infinity, minHeight: AppCardConstants.buttonHeight)
             .contentShape(Rectangle())
         }
-        .buttonStyle(BeautifulButtonStyle(baseColor: viewModel.isDownloading ? Color.gray.opacity(0.6) : Color.blue))
+        .buttonStyle(BeautifulButtonStyle(baseColor: buttonColor))
         .disabled(viewModel.isDownloading)
-        .help(viewModel.isDownloading ? String(localized: "已有下载任务进行中，可在下载管理查看进度") : String(localized: "选择版本并下载"))
+        .help(helpText)
+    }
+
+    private var buttonColor: Color {
+        if viewModel.isDownloading {
+            return Color.gray.opacity(0.6)
+        }
+        if viewModel.isInstalled {
+            return Color.green
+        }
+        return Color.blue
+    }
+
+    private var helpText: String {
+        if viewModel.isDownloading {
+            return String(localized: "已有下载任务进行中，可在下载管理查看进度")
+        }
+        if viewModel.isInstalled {
+            return String(localized: "管理已安装版本或卸载")
+        }
+        return String(localized: "选择版本并下载")
     }
 }
 
@@ -662,7 +714,9 @@ struct SheetModifier: ViewModifier {
 
     func body(content: Content) -> some View {
         content
-            .sheet(isPresented: $viewModel.showVersionPicker) {
+            .sheet(isPresented: $viewModel.showVersionPicker, onDismiss: {
+                viewModel.refreshInstallState()
+            }) {
                 if findProduct(id: viewModel.uniqueProduct.id) != nil {
                     NavigationVersionPickerView(productId: viewModel.uniqueProduct.id) { version in
                         Task {

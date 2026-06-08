@@ -11,7 +11,7 @@ final class OperationExecutor {
             guard SecurityValidator.validatePath(path) else {
                 return .failure("路径验证失败: \(path)")
             }
-            return executeShellCommand("/bin/rm -rf \"\(path)\"")
+            return removeItem(at: path)
 
         case .copyFile(let source, let destination):
             guard SecurityValidator.validatePath(source),
@@ -67,5 +67,37 @@ final class OperationExecutor {
         } catch {
             return .failure("执行失败: \(error.localizedDescription)")
         }
+    }
+
+    private static func removeItem(at path: String) -> HelperOperationResult {
+        let cleanPath = path
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .trimmingCharacters(in: .init(charactersIn: "\"'"))
+
+        guard !isProtectedRemovalRoot(cleanPath) else {
+            return .failure("禁止删除共享根目录: \(cleanPath)")
+        }
+
+        guard FileManager.default.fileExists(atPath: cleanPath) else {
+            return .success("Success")
+        }
+
+        do {
+            try FileManager.default.removeItem(atPath: cleanPath)
+            return .success("Success")
+        } catch {
+            return .failure("删除失败: \(error.localizedDescription)")
+        }
+    }
+
+    private static func isProtectedRemovalRoot(_ path: String) -> Bool {
+        [
+            "/Applications",
+            "/Library/Application Support/Adobe",
+            "/Library/Application Support",
+            "/Library",
+            "/tmp",
+            "/"
+        ].contains(path)
     }
 }

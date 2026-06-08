@@ -749,19 +749,21 @@ private struct VersionRow: View, Equatable {
     let onToggle: (String) -> Void
     let onCustomDownload: (String) -> Void
 
-    static func == (lhs: VersionRow, rhs: VersionRow) -> Bool {
-        lhs.productId == rhs.productId &&
-        lhs.version == rhs.version &&
-        lhs.isExpanded == rhs.isExpanded &&
-        lhs.isGroupLatest == rhs.isGroupLatest &&
-        lhs.isOverallLatest == rhs.isOverallLatest &&
-        lhs.cachedPackageSizes[rhs.version] == rhs.cachedPackageSizes[rhs.version] &&
-        lhs.sizeLoadingVersions.contains(rhs.version) == rhs.sizeLoadingVersions.contains(rhs.version)
-    }
+	static func == (lhs: VersionRow, rhs: VersionRow) -> Bool {
+		lhs.productId == rhs.productId &&
+		lhs.version == rhs.version &&
+		lhs.isExpanded == rhs.isExpanded &&
+		lhs.isGroupLatest == rhs.isGroupLatest &&
+		lhs.isOverallLatest == rhs.isOverallLatest &&
+		lhs.installedProduct == rhs.installedProduct &&
+		lhs.cachedPackageSizes[rhs.version] == rhs.cachedPackageSizes[rhs.version] &&
+		lhs.sizeLoadingVersions.contains(rhs.version) == rhs.sizeLoadingVersions.contains(rhs.version)
+	}
 
-    @State private var cachedExistingPath: URL? = nil
-    @State private var cachedDownloadedPath: URL? = nil
-    @State private var isHovered = false
+	@State private var cachedExistingPath: URL? = nil
+	@State private var cachedDownloadedPath: URL? = nil
+	@State private var installedProduct: HDPIMInstalledProductForUninstall? = nil
+	@State private var isHovered = false
 
     private var existingPath: URL? {
         cachedExistingPath
@@ -790,17 +792,19 @@ private struct VersionRow: View, Equatable {
                 Divider()
                     .padding(.horizontal, 4)
 
-                VersionDetails(
-                    productId: productId,
-                    info: info,
-                    version: version,
-                    cachedPackageSizes: $cachedPackageSizes,
-                    sizeLoadingVersions: $sizeLoadingVersions,
-                    onSelect: onSelect,
-                    onCustomDownload: onCustomDownload
-                )
-            }
-        }
+				VersionDetails(
+					productId: productId,
+					info: info,
+					version: version,
+					installedProduct: installedProduct,
+					cachedPackageSizes: $cachedPackageSizes,
+					sizeLoadingVersions: $sizeLoadingVersions,
+					onSelect: onSelect,
+					onCustomDownload: onCustomDownload,
+					onUninstallFinished: refreshInstallState
+				)
+			}
+		}
         .padding(.horizontal)
         .background(
             RoundedRectangle(cornerRadius: VersionPickerConstants.cornerRadius)
@@ -817,29 +821,31 @@ private struct VersionRow: View, Equatable {
         .animation(.easeInOut(duration: 0.2), value: isExpanded)
         .animation(.easeInOut(duration: 0.15), value: isHovered)
         .onHover { isHovered = $0 }
-        .onAppear {
-            if cachedExistingPath == nil {
-                let platform = installerSelectedPlatformId(
-                    productId: productId,
-                    version: version
-                ) ?? "unknown"
-                let installed = globalNetworkManager.isProductInstalled(
-                    productId: productId,
-                    version: version,
-                    platform: platform
-                )
-                cachedExistingPath = installed ? URL(fileURLWithPath: "/") : nil
-            }
+		.onAppear {
+			refreshInstallState()
 
-            if cachedDownloadedPath == nil {
-                cachedDownloadedPath = globalNetworkManager.isVersionDownloaded(
+			if cachedDownloadedPath == nil {
+				cachedDownloadedPath = globalNetworkManager.isVersionDownloaded(
                     productId: productId,
                     version: version,
                     language: defaultLanguage
                 )
-            }
-        }
-    }
+			}
+		}
+	}
+
+	private func refreshInstallState() {
+		let platform = installerSelectedPlatformId(
+			productId: productId,
+			version: version
+		) ?? "unknown"
+		let processorFamily = HDPIMProcessorFamily.from(platform: platform)
+		installedProduct = HDPIMUninstaller.installedProducts(
+			sapCode: productId,
+			version: version
+		).first { $0.processorFamily == processorFamily }
+		cachedExistingPath = installedProduct == nil ? nil : URL(fileURLWithPath: "/")
+	}
 }
 
 private struct VersionHeader: View {
@@ -901,13 +907,15 @@ private struct VersionHeader: View {
 }
 
 private struct VersionDetails: View {
-    let productId: String
-    let info: Product.Platform
-    let version: String
-    @Binding var cachedPackageSizes: [String: Int64]
-    @Binding var sizeLoadingVersions: Set<String>
-    let onSelect: (String) -> Void
-    let onCustomDownload: (String) -> Void
+	let productId: String
+	let info: Product.Platform
+	let version: String
+	let installedProduct: HDPIMInstalledProductForUninstall?
+	@Binding var cachedPackageSizes: [String: Int64]
+	@Binding var sizeLoadingVersions: Set<String>
+	let onSelect: (String) -> Void
+	let onCustomDownload: (String) -> Void
+	let onUninstallFinished: () -> Void
 
     private var hasRawDependencies: Bool {
         !(info.languageSet.first?.dependencies.isEmpty ?? true)
@@ -927,17 +935,27 @@ private struct VersionDetails: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: VersionPickerConstants.verticalSpacing) {
-            VersionSizeEstimateView(
-                version: version,
-                cachedPackageSizes: $cachedPackageSizes,
+			VersionSizeEstimateView(
+				version: version,
+				cachedPackageSizes: $cachedPackageSizes,
                 sizeLoadingVersions: $sizeLoadingVersions
             )
             .task(id: version) {
                 await preloadSize(for: version)
-            }
+			}
 
-            if shouldShowDependencySection || hasModules {
-                VStack(alignment: .leading, spacing: 8) {
+			if let installedProduct {
+				InstalledProductUninstallSection(
+					productId: productId,
+					version: version,
+					info: info,
+					installedProduct: installedProduct,
+					onUninstallFinished: onUninstallFinished
+				)
+			}
+
+			if shouldShowDependencySection || hasModules {
+				VStack(alignment: .leading, spacing: 8) {
                     if shouldShowDependencySection {
                         HStack(spacing: 5) {
                             Image(systemName: "shippingbox.fill")
@@ -1122,9 +1140,9 @@ private struct VersionDetails: View {
 }
 
 private struct VersionSizeEstimateView: View {
-    let version: String
-    @Binding var cachedPackageSizes: [String: Int64]
-    @Binding var sizeLoadingVersions: Set<String>
+	let version: String
+	@Binding var cachedPackageSizes: [String: Int64]
+	@Binding var sizeLoadingVersions: Set<String>
 
     var body: some View {
         HStack(spacing: 6) {
@@ -1148,12 +1166,374 @@ private struct VersionSizeEstimateView: View {
             }
         }
         .padding(.vertical, 2)
-    }
+	}
+}
+
+private enum PendingUninstallAction: Identifiable, Equatable {
+	case product
+	case modules(Set<String>)
+	case package(HDPIMPackageUninstallKey)
+
+	var id: String {
+		switch self {
+		case .product:
+			return "product"
+		case .modules(let moduleIds):
+			return "modules|\(moduleIds.sorted().joined(separator: ","))"
+		case .package(let packageKey):
+			return "package|\(packageKey.id)"
+		}
+	}
+
+	var title: String {
+		switch self {
+		case .product:
+			return "卸载产品"
+		case .modules(let moduleIds):
+			return moduleIds.count > 1 ? "移除多个模块" : "移除模块"
+		case .package:
+			return "卸载包"
+		}
+	}
+}
+
+private struct InstalledProductUninstallSection: View {
+	let productId: String
+	let version: String
+	let info: Product.Platform
+	let installedProduct: HDPIMInstalledProductForUninstall
+	let onUninstallFinished: () -> Void
+
+	@ObservedObject private var networkManager = globalNetworkManager
+	@State private var pendingAction: PendingUninstallAction?
+	@State private var showUninstallProgress = false
+	@State private var showPackageUninstall = false
+	@State private var selectedModuleIds: Set<String> = []
+
+	private var displayName: String {
+		findProduct(id: productId, version: version)?.displayName ?? productId
+	}
+
+	private var installedModuleRows: [(id: String, displayName: String, deploymentType: String)] {
+		installedProduct.modules.map { moduleId in
+			let catalog = info.modules.first { $0.id == moduleId }
+			return (
+				id: moduleId,
+				displayName: catalog?.displayName.isEmpty == false ? catalog?.displayName ?? moduleId : moduleId,
+				deploymentType: catalog?.deploymentType ?? ""
+			)
+		}
+	}
+
+	private var packageCountText: String {
+		"\(installedProduct.packages.count) 个包"
+	}
+
+	private var canSelectMultipleModules: Bool {
+		installedModuleRows.count > 1
+	}
+
+	private var selectedModuleCountText: String {
+		selectedModuleIds.isEmpty ? "未选择模块" : "已选择 \(selectedModuleIds.count) 个模块"
+	}
+
+	private var selectableModuleIds: Set<String> {
+		Set(installedModuleRows.map(\.id))
+	}
+
+	private struct InstalledPackageRow: Identifiable {
+		let key: HDPIMPackageUninstallKey
+		let package: HDPIMNativePackageContext
+
+		var id: String {
+			key.id
+		}
+	}
+
+	private var installedPackageRows: [InstalledPackageRow] {
+		installedProduct.packages.sorted { lhs, rhs in
+			if lhs.sequenceNumber != rhs.sequenceNumber {
+				return lhs.sequenceNumber < rhs.sequenceNumber
+			}
+			if lhs.packageName != rhs.packageName {
+				return lhs.packageName < rhs.packageName
+			}
+			return AppStatics.compareVersions(lhs.packageVersion, rhs.packageVersion) < 0
+		}.map { package in
+			InstalledPackageRow(
+				key: HDPIMPackageUninstallKey(
+					packageName: package.packageName,
+					packageVersion: package.packageVersion
+				),
+				package: package
+			)
+		}
+	}
+
+	var body: some View {
+		VStack(alignment: .leading, spacing: 10) {
+			HStack(spacing: 8) {
+				Image(systemName: "checkmark.seal.fill")
+					.font(.system(size: 12))
+					.foregroundColor(.green)
+				Text("已安装")
+					.font(.system(size: 12, weight: .semibold))
+					.foregroundColor(.primary.opacity(0.9))
+				Text(packageCountText)
+					.font(.system(size: 11))
+					.foregroundColor(.secondary)
+				if !installedProduct.installDir.isEmpty {
+					Text(installedProduct.installDir)
+						.font(.system(size: 10))
+						.foregroundColor(.secondary.opacity(0.8))
+						.lineLimit(1)
+						.truncationMode(.middle)
+						.textSelection(.enabled)
+				}
+				Spacer()
+				Button(role: .destructive) {
+					pendingAction = .product
+				} label: {
+					Label("卸载产品", systemImage: "trash")
+				}
+				.buttonStyle(.bordered)
+				.controlSize(.small)
+				.disabled(isUninstalling)
+			}
+
+			if !installedModuleRows.isEmpty {
+				VStack(alignment: .leading, spacing: 4) {
+					if canSelectMultipleModules {
+						HStack(spacing: 8) {
+							Button {
+								if selectedModuleIds.count == installedModuleRows.count {
+									selectedModuleIds.removeAll()
+								} else {
+									selectedModuleIds = Set(installedModuleRows.map(\.id))
+								}
+							} label: {
+								Label(
+									selectedModuleIds.count == installedModuleRows.count ? "清空" : "全选",
+									systemImage: selectedModuleIds.count == installedModuleRows.count ? "checkmark.square.fill" : "square"
+								)
+							}
+							.buttonStyle(.borderless)
+							.controlSize(.small)
+							.disabled(isUninstalling)
+
+							Text(selectedModuleCountText)
+								.font(.system(size: 10))
+								.foregroundColor(.secondary)
+
+							Spacer()
+
+							Button(role: .destructive) {
+								pendingAction = .modules(selectedModuleIds.intersection(selectableModuleIds))
+							} label: {
+								Label("移除选中", systemImage: "minus.circle.fill")
+							}
+							.buttonStyle(.bordered)
+							.controlSize(.small)
+							.disabled(isUninstalling || selectedModuleIds.isEmpty)
+						}
+						.padding(.bottom, 2)
+					}
+
+					ForEach(installedModuleRows, id: \.id) { module in
+						HStack(spacing: 8) {
+							if canSelectMultipleModules {
+								Button {
+									toggleModuleSelection(module.id)
+								} label: {
+									Image(systemName: selectedModuleIds.contains(module.id) ? "checkmark.square.fill" : "square")
+										.font(.system(size: 12))
+										.foregroundColor(selectedModuleIds.contains(module.id) ? .accentColor : .secondary)
+										.frame(width: 14)
+								}
+								.buttonStyle(.plain)
+								.disabled(isUninstalling)
+							}
+							Image(systemName: "puzzlepiece.extension.fill")
+								.font(.system(size: 10))
+								.foregroundColor(.purple.opacity(0.85))
+								.frame(width: 14)
+							Text(module.displayName)
+								.font(.system(size: 12, weight: .medium))
+								.foregroundColor(.primary.opacity(0.85))
+							if !module.deploymentType.isEmpty {
+								Text(module.deploymentType)
+									.font(.system(size: 10))
+									.foregroundColor(.secondary)
+							}
+							Spacer()
+							Button(role: .destructive) {
+								pendingAction = .modules([module.id])
+							} label: {
+								Label("移除", systemImage: "minus.circle")
+							}
+							.buttonStyle(.borderless)
+							.controlSize(.small)
+							.disabled(isUninstalling)
+						}
+						.padding(.vertical, 3)
+					}
+				}
+				.padding(.leading, 2)
+			}
+
+			if !installedPackageRows.isEmpty {
+				DisclosureGroup(isExpanded: $showPackageUninstall) {
+					VStack(alignment: .leading, spacing: 4) {
+						ForEach(installedPackageRows) { row in
+							let package = row.package
+							HStack(spacing: 8) {
+								Image(systemName: "shippingbox.fill")
+									.font(.system(size: 10))
+									.foregroundColor(.orange.opacity(0.85))
+									.frame(width: 14)
+								VStack(alignment: .leading, spacing: 1) {
+									Text(package.packageName)
+										.font(.system(size: 12, weight: .medium))
+										.foregroundColor(.primary.opacity(0.85))
+										.lineLimit(1)
+										.truncationMode(.middle)
+									Text(package.packageVersion)
+										.font(.system(size: 10))
+										.foregroundColor(.secondary)
+										.lineLimit(1)
+								}
+								if let module = package.module, !module.isEmpty {
+									Text(module)
+										.font(.system(size: 10))
+										.foregroundColor(.secondary)
+										.lineLimit(1)
+										.truncationMode(.middle)
+								}
+								Spacer()
+							}
+							.padding(.vertical, 3)
+						}
+					}
+					.padding(.top, 4)
+				} label: {
+					HStack(spacing: 6) {
+						Image(systemName: "shippingbox")
+							.font(.system(size: 10))
+							.foregroundColor(.secondary)
+						Text("已安装包")
+							.font(.system(size: 12, weight: .medium))
+							.foregroundColor(.primary.opacity(0.85))
+					}
+				}
+				.padding(.leading, 2)
+			}
+		}
+		.padding(10)
+		.background(
+			RoundedRectangle(cornerRadius: 6)
+				.fill(Color.green.opacity(0.08))
+		)
+		.overlay(
+			RoundedRectangle(cornerRadius: 6)
+				.stroke(Color.green.opacity(0.18), lineWidth: 0.5)
+		)
+		.alert(item: $pendingAction) { action in
+			Alert(
+				title: Text(action.title),
+				message: Text(confirmMessage(for: action)),
+				primaryButton: .destructive(Text("确认")) {
+					startUninstall(action)
+				},
+				secondaryButton: .cancel()
+			)
+		}
+		.sheet(isPresented: $showUninstallProgress, onDismiss: {
+			if case .completed = networkManager.uninstallState {
+				onUninstallFinished()
+			}
+		}) {
+			InstallProgressView(
+				data: networkManager.makeUninstallProgressViewData(productName: displayName),
+				onCancel: {
+					showUninstallProgress = false
+					if case .completed = networkManager.uninstallState {
+						onUninstallFinished()
+					}
+				}
+			)
+		}
+	}
+
+	private var isUninstalling: Bool {
+		if case .installing = networkManager.uninstallState {
+			return true
+		}
+		return false
+	}
+
+	private func toggleModuleSelection(_ moduleId: String) {
+		if selectedModuleIds.contains(moduleId) {
+			selectedModuleIds.remove(moduleId)
+		} else {
+			selectedModuleIds.insert(moduleId)
+		}
+	}
+
+	private func confirmMessage(for action: PendingUninstallAction) -> String {
+		switch action {
+		case .product:
+			return "将按 HDPIM 产品卸载流程移除 \(displayName) \(version)。"
+		case .modules(let moduleIds):
+			let names = moduleIds.sorted().joined(separator: "、")
+			if moduleIds.count > 1 {
+				return "将按 HDPIM 模块卸载流程移除 \(moduleIds.count) 个模块：\(names)。"
+			}
+			return "将按 HDPIM 模块卸载流程移除模块 \(names)。"
+		case .package(let packageKey):
+			return "将按 HDPIM 包级卸载流程移除包 \(packageKey.packageName) \(packageKey.packageVersion)。"
+		}
+	}
+
+	private func startUninstall(_ action: PendingUninstallAction) {
+		if case .package = action {
+			pendingAction = nil
+			return
+		}
+
+		showUninstallProgress = true
+		Task {
+			switch action {
+			case .product:
+				await networkManager.uninstallProduct(
+					sapCode: installedProduct.sapCode,
+					version: installedProduct.version,
+					processorFamily: installedProduct.processorFamily,
+					productName: displayName
+				)
+			case .modules(let moduleIds):
+				await networkManager.uninstallModules(
+					sapCode: installedProduct.sapCode,
+					version: installedProduct.version,
+					processorFamily: installedProduct.processorFamily,
+					moduleIds: moduleIds,
+					productName: displayName
+				)
+			case .package(let packageKey):
+				await networkManager.uninstallPackages(
+					sapCode: installedProduct.sapCode,
+					version: installedProduct.version,
+					processorFamily: installedProduct.processorFamily,
+					packageKeys: [packageKey],
+					productName: displayName
+				)
+			}
+		}
+	}
 }
 
 private struct VersionDownloadButton: View {
-    let productId: String
-    let version: String
+	let productId: String
+	let version: String
     let onSelect: (String) -> Void
     let onCustomDownload: (String) -> Void
 

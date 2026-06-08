@@ -6,6 +6,7 @@ final class SecurityValidator {
     static let allowedPaths: [String] = [
         "/Library/Application Support/Adobe",
         "/Applications",
+        "/.adobeTemp",
         "/tmp"
     ]
 
@@ -26,18 +27,22 @@ final class SecurityValidator {
         guard !cleanPath.isEmpty else { return false }
 
         for forbidden in forbiddenPaths {
-            if cleanPath.hasPrefix(forbidden) {
+            if isPath(cleanPath, inside: forbidden) {
                 return false
             }
         }
 
         for allowed in allowedPaths {
-            if cleanPath.hasPrefix(allowed) {
+            if isPath(cleanPath, inside: allowed) {
                 return true
             }
         }
 
         return false
+    }
+
+    private static func isPath(_ path: String, inside root: String) -> Bool {
+        path == root || path.hasPrefix("\(root)/")
     }
 
     static func validateClientConnection(_ connection: NSXPCConnection) -> Bool {

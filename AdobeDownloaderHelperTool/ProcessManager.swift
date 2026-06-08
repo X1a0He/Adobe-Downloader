@@ -18,6 +18,31 @@ final class ProcessManager {
         userHome: String,
         executablePath: String?
     ) throws {
+        try startHDPIMProcess(
+            arguments: ["--hdpim-install", productDir],
+            userHome: userHome,
+            executablePath: executablePath
+        )
+    }
+
+    func startHDPIMUninstall(
+        request: HDPIMUninstallHelperRequest,
+        userHome: String,
+        executablePath: String?
+    ) throws {
+        let requestData = try JSONEncoder().encode(request)
+        try startHDPIMProcess(
+            arguments: ["--hdpim-uninstall", requestData.base64EncodedString()],
+            userHome: userHome,
+            executablePath: executablePath
+        )
+    }
+
+    private func startHDPIMProcess(
+        arguments: [String],
+        userHome: String,
+        executablePath: String?
+    ) throws {
         let executableURL: URL
         if let path = executablePath {
             executableURL = URL(fileURLWithPath: path)
@@ -36,7 +61,7 @@ final class ProcessManager {
         try? FileManager.default.removeItem(at: cancelURL)
 
         process.executableURL = executableURL
-        process.arguments = ["--hdpim-install", productDir]
+        process.arguments = arguments
         process.environment = createEnvironment(userHome: userHome, cancelFileURL: cancelURL)
         process.standardOutput = outPipe
         process.standardError = errPipe

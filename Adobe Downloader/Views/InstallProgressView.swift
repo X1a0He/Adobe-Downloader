@@ -11,6 +11,64 @@ enum InstallProgressOutcome: Equatable {
     case failed
 }
 
+enum InstallProgressOperation: Equatable {
+    case install
+    case uninstall
+
+    var actionName: String {
+        switch self {
+        case .install:
+            return "安装"
+        case .uninstall:
+            return "卸载"
+        }
+    }
+
+    var runningBadge: String {
+        "\(actionName)中"
+    }
+
+    var completedBadge: String {
+        "\(actionName)完成"
+    }
+
+    var failedBadge: String {
+        "\(actionName)失败"
+    }
+
+    var completedStatusText: String {
+        "\(actionName)已完成"
+    }
+
+    var phaseSectionTitle: String {
+        "\(actionName)阶段"
+    }
+
+    var infoSectionTitle: String {
+        "\(actionName)信息"
+    }
+
+    var logPanelTitle: String {
+        "\(actionName)日志"
+    }
+
+    var emptyLogTitle: String {
+        "暂无\(actionName)日志"
+    }
+
+    var emptyLogMessage: String {
+        "\(actionName)进行后，这里会实时展示输出内容。"
+    }
+
+    var copiedLogsMessage: String {
+        "\(actionName)日志已复制到剪贴板"
+    }
+
+    var commandTitle: String {
+        "\(actionName)命令"
+    }
+}
+
 enum InstallProgressPhase: Int, CaseIterable {
     case preparing
     case parsing
@@ -36,6 +94,17 @@ enum InstallProgressPhase: Int, CaseIterable {
         }
     }
 
+    func title(for operation: InstallProgressOperation) -> String {
+        switch (self, operation) {
+        case (.parsing, .uninstall):
+            return "分析"
+        case (.installing, .uninstall):
+            return "卸载"
+        default:
+            return title
+        }
+    }
+
     var icon: String {
         switch self {
         case .preparing:
@@ -52,6 +121,13 @@ enum InstallProgressPhase: Int, CaseIterable {
             return "checkmark.seal"
         }
     }
+
+    func icon(for operation: InstallProgressOperation) -> String {
+        if operation == .uninstall, self == .installing {
+            return "trash"
+        }
+        return icon
+    }
 }
 
 struct InstallProgressViewData {
@@ -63,6 +139,7 @@ struct InstallProgressViewData {
     let errorDetails: String?
     let phase: InstallProgressPhase
     let outcome: InstallProgressOutcome
+    let operation: InstallProgressOperation
     let currentPackageName: String?
     private let contextStatus: String
 
@@ -75,6 +152,7 @@ struct InstallProgressViewData {
         errorDetails: String?,
         phase: InstallProgressPhase,
         outcome: InstallProgressOutcome,
+        operation: InstallProgressOperation = .install,
         contextStatus: String? = nil
     ) {
         self.productName = productName
@@ -85,6 +163,7 @@ struct InstallProgressViewData {
         self.errorDetails = errorDetails
         self.phase = phase
         self.outcome = outcome
+        self.operation = operation
         self.contextStatus = contextStatus ?? status
         self.currentPackageName = InstallProgressTextParser.currentPackageName(from: self.contextStatus, logs: logs)
     }
@@ -106,7 +185,10 @@ struct InstallProgressViewData {
     }
 
     var summaryTitle: String {
-        isRunning ? productName : statusTitle
+        if isRunning {
+            return operation == .uninstall ? statusTitle : productName
+        }
+        return statusTitle
     }
 
     var shouldShowCurrentPackage: Bool {
@@ -116,14 +198,18 @@ struct InstallProgressViewData {
         return phase == .extracting || phase == .installing
     }
 
+    var currentPhaseTitle: String {
+        phase.title(for: operation)
+    }
+
     var statusTitle: String {
         switch outcome {
         case .completed:
-            return "\(productName) 安装完成"
+            return "\(productName) \(operation.completedBadge)"
         case .failed:
-            return "\(productName) 安装失败"
+            return "\(productName) \(operation.failedBadge)"
         case .running:
-            return "正在安装 \(productName)"
+            return "正在\(operation.actionName) \(productName)"
         }
     }
 
@@ -134,7 +220,7 @@ struct InstallProgressViewData {
         case .failed:
             return "xmark.circle.fill"
         case .running:
-            return "arrow.down.circle.fill"
+            return operation == .uninstall ? "trash.circle.fill" : "arrow.down.circle.fill"
         }
     }
 
@@ -152,9 +238,9 @@ struct InstallProgressViewData {
     var statusBadge: String {
         switch outcome {
         case .completed:
-            return "安装完成"
+            return operation.completedBadge
         case .failed:
-            return "安装失败"
+            return operation.failedBadge
         case .running:
             return "\(Int(normalizedProgress * 100))%"
         }
@@ -169,13 +255,13 @@ enum InstallProgressTextParser {
     static func phase(from status: String, logs: [String], outcome: InstallProgressOutcome) -> InstallProgressPhase {
         let source = phaseSource(from: status, logs: logs, outcome: outcome)
 
-        if outcome == .completed || source.contains("安装完成") || source.contains("没有需要安装的包") {
+        if outcome == .completed || source.contains("安装完成") || source.contains("卸载完成") || source.contains("没有需要安装的包") {
             return .finishing
         }
         if source.contains("回滚") || source.contains("清理") {
             return .finishing
         }
-        if source.contains("正在安装") || source.contains("正在处理:") {
+        if source.contains("正在安装") || source.contains("正在卸载") || source.contains("正在处理:") {
             return .installing
         }
         if source.contains("解压") {
@@ -187,7 +273,7 @@ enum InstallProgressTextParser {
         if source.contains("解析 driver.xml") || source.contains("收集包信息") {
             return .parsing
         }
-        if source.contains("准备安装") || source.contains("重试安装") || source.contains("临时安装目录") {
+        if source.contains("分析 HDPIM 卸载") || source.contains("准备安装") || source.contains("准备卸载") || source.contains("重试安装") || source.contains("临时安装目录") {
             return .preparing
         }
         return .preparing
@@ -210,7 +296,7 @@ enum InstallProgressTextParser {
     }
 
     private static func hasPhaseKeyword(_ text: String) -> Bool {
-        let keywords = ["准备安装", "重试安装", "解析 driver.xml", "收集包信息", "备份", "解压", "正在安装", "正在处理:", "清理", "回滚", "安装完成"]
+        let keywords = ["准备安装", "准备卸载", "重试安装", "解析 driver.xml", "收集包信息", "分析 HDPIM 卸载", "备份", "解压", "正在安装", "正在卸载", "正在处理:", "清理", "回滚", "安装完成", "卸载完成"]
         return keywords.contains { text.contains($0) }
     }
 
@@ -220,6 +306,10 @@ enum InstallProgressTextParser {
         }
 
         if let packageName = extractSegment(after: "正在安装 ", in: text) {
+            return packageName
+        }
+
+        if let packageName = extractSegment(after: "正在卸载 ", in: text) {
             return packageName
         }
 
@@ -251,6 +341,15 @@ enum InstallProgressTextParser {
 private enum InstallProgressPanel: String, CaseIterable {
     case overview = "进度详情"
     case logs = "安装日志"
+
+    func title(for operation: InstallProgressOperation) -> String {
+        switch self {
+        case .overview:
+            return rawValue
+        case .logs:
+            return operation.logPanelTitle
+        }
+    }
 }
 
 struct InstallProgressView: View {
@@ -283,13 +382,13 @@ struct InstallProgressView: View {
             if let currentPackageName = data.currentPackageName,
                data.shouldShowCurrentPackage,
                !data.isCompleted {
-                CurrentPackageSection(packageName: currentPackageName, phase: data.phase)
+                CurrentPackageSection(packageName: currentPackageName, phase: data.phase, operation: data.operation)
             }
 
             VStack(spacing: 14) {
                 Picker("", selection: $selectedPanel) {
                     ForEach(InstallProgressPanel.allCases, id: \.self) { panel in
-                        Text(panel.rawValue)
+                        Text(panel.title(for: data.operation))
                             .tag(panel)
                     }
                 }
@@ -358,7 +457,7 @@ private struct InstallSummarySection: View {
                     Spacer()
 
                     if data.isRunning {
-                        Text("安装中")
+                        Text(data.operation.runningBadge)
                             .font(.system(size: 12, weight: .medium))
                             .foregroundColor(.secondary)
                     } else if data.isCompleted || data.isFailed {
@@ -447,12 +546,12 @@ private struct InstallPhaseSection: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(alignment: .center) {
-                Label("安装阶段", systemImage: "point.3.connected.trianglepath.dotted")
+                Label(data.operation.phaseSectionTitle, systemImage: "point.3.connected.trianglepath.dotted")
                     .font(.system(size: 14, weight: .semibold))
 
                 Spacer()
 
-                Text(data.phase.title)
+                Text(data.currentPhaseTitle)
                     .font(.system(size: 12, weight: .medium))
                     .foregroundColor(data.statusColor)
                     .padding(.horizontal, 8)
@@ -465,6 +564,7 @@ private struct InstallPhaseSection: View {
                 ForEach(InstallProgressPhase.allCases, id: \.self) { phase in
                     InstallPhaseItem(
                         phase: phase,
+                        operation: data.operation,
                         state: phaseState(for: phase)
                     )
                 }
@@ -553,6 +653,7 @@ private enum InstallPhaseItemState {
 
 private struct InstallPhaseItem: View {
     let phase: InstallProgressPhase
+    let operation: InstallProgressOperation
     let state: InstallPhaseItemState
 
     var body: some View {
@@ -562,10 +663,10 @@ private struct InstallPhaseItem: View {
                     .fill(state.backgroundColor)
 
                 VStack(spacing: 6) {
-                    Image(systemName: phase.icon)
+                    Image(systemName: phase.icon(for: operation))
                         .font(.system(size: 14, weight: .semibold))
 
-                    Text(phase.title)
+                    Text(phase.title(for: operation))
                         .font(.system(size: 12, weight: .semibold))
                         .lineLimit(1)
                         .minimumScaleFactor(0.9)
@@ -586,6 +687,7 @@ private struct InstallPhaseItem: View {
 private struct CurrentPackageSection: View {
     let packageName: String
     let phase: InstallProgressPhase
+    let operation: InstallProgressOperation
 
     var body: some View {
         HStack(spacing: 10) {
@@ -603,7 +705,7 @@ private struct CurrentPackageSection: View {
 
             Spacer()
 
-            Text(phase.title)
+            Text(phase.title(for: operation))
                 .font(.system(size: 11, weight: .medium))
                 .foregroundColor(.blue)
                 .padding(.horizontal, 8)
@@ -630,10 +732,10 @@ private struct InstallOverviewPanel: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             BeautifulGroupBox(label: {
-                Label("安装信息", systemImage: "info.circle")
+                Label(data.operation.infoSectionTitle, systemImage: "info.circle")
             }) {
                 VStack(alignment: .leading, spacing: 10) {
-                    InstallInfoRow(title: "当前阶段", value: data.phase.title)
+                    InstallInfoRow(title: "当前阶段", value: data.currentPhaseTitle)
 
                     if data.isRunning {
                         InstallInfoRow(title: "当前状态", value: data.phaseStatus)
@@ -645,7 +747,7 @@ private struct InstallOverviewPanel: View {
                     }
 
                     if data.isCompleted {
-                        InstallInfoRow(title: "状态", value: "安装已完成")
+                        InstallInfoRow(title: "状态", value: data.operation.completedStatusText)
                     } else if data.isFailed {
                         InstallInfoRow(title: "最后状态", value: data.phaseStatus)
                     }
@@ -729,7 +831,7 @@ private struct InstallLogPanel: View {
 
             VStack(alignment: .leading, spacing: 10) {
                 HStack(spacing: 8) {
-                    Label("安装日志", systemImage: "text.alignleft")
+                    Label(data.operation.logPanelTitle, systemImage: "text.alignleft")
                         .font(.system(size: 13, weight: .semibold))
 
                     Text("(\(data.logs.count))")
@@ -753,10 +855,10 @@ private struct InstallLogPanel: View {
                             .font(.system(size: 24))
                             .foregroundColor(.secondary.opacity(0.6))
 
-                        Text("暂无安装日志")
+                        Text(data.operation.emptyLogTitle)
                             .font(.system(size: 13, weight: .medium))
 
-                        Text("安装进行后，这里会实时展示输出内容。")
+                        Text(data.operation.emptyLogMessage)
                             .font(.system(size: 12))
                             .foregroundColor(.secondary)
                     }
@@ -802,7 +904,7 @@ private struct InstallLogPanel: View {
                     HStack(spacing: 6) {
                         Image(systemName: "checkmark.circle.fill")
                             .foregroundColor(.green)
-                        Text("安装日志已复制到剪贴板")
+                        Text(data.operation.copiedLogsMessage)
                             .font(.system(size: 11))
                             .foregroundColor(.green)
                     }
@@ -854,7 +956,7 @@ private struct InstallActionSection: View {
                 .disabled(data.logs.isEmpty)
 
                 if !data.installCommand.isEmpty {
-                    CommandPopover(command: data.installCommand)
+                    CommandPopover(command: data.installCommand, operation: data.operation)
                 }
 
                 if let onRetry = onRetry {
@@ -915,7 +1017,7 @@ private struct InstallActionSection: View {
 
     private func copyLogs() {
         copyText(data.logs.joined(separator: "\n"))
-        showCopiedMessage("安装日志已复制到剪贴板")
+        showCopiedMessage(data.operation.copiedLogsMessage)
     }
 
     private func showCopiedMessage(_ message: String) {
@@ -928,6 +1030,7 @@ private struct InstallActionSection: View {
 
 private struct CommandPopover: View {
     let command: String
+    let operation: InstallProgressOperation
 
     @State private var showPopover = false
     @State private var showCopiedAlert = false
@@ -942,7 +1045,7 @@ private struct CommandPopover: View {
         .popover(isPresented: $showPopover, arrowEdge: .bottom) {
             VStack(alignment: .leading, spacing: 12) {
                 HStack {
-                    Text("安装命令")
+                    Text(operation.commandTitle)
                         .font(.headline)
                         .foregroundColor(.primary)
 
