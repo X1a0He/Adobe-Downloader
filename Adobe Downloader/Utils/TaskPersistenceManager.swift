@@ -140,6 +140,30 @@ class TaskPersistenceManager: @unchecked Sendable {
         
         return tasks
     }
+
+    func taskArtifactsAreValid(_ task: NewDownloadTask) -> Bool {
+        let products = task.dependenciesToDownload
+        guard products.contains(where: { !$0.packages.isEmpty }) else {
+            return false
+        }
+
+        for product in products {
+            for package in product.packages {
+                let savedAsCompleted = package.downloaded || package.status == .completed
+                guard restoredPackageArchiveSize(
+                    productId: task.productId,
+                    package: package,
+                    taskDirectory: task.directory,
+                    sapCode: product.sapCode,
+                    savedAsCompleted: savedAsCompleted
+                ) != nil else {
+                    return false
+                }
+            }
+        }
+
+        return true
+    }
     
     private func loadTask(from url: URL) async -> NewDownloadTask? {
         do {
@@ -154,6 +178,7 @@ class TaskPersistenceManager: @unchecked Sendable {
                     return true
                 }
             }()
+            var recoveredFromLocalArchive = false
             
             let products = taskData.productsToDownload.map { productData -> DependenciesToDownload in
                 let parsedPackageMetadata = packageMetadataByFullPackageName(applicationJson: productData.applicationJson)
@@ -204,13 +229,20 @@ class TaskPersistenceManager: @unchecked Sendable {
                     package.speed = 0
 
                     let savedAsCompleted = packageData.downloaded || packageData.status == .completed
-                    let completedArchiveIsValid = savedAsCompleted && restoredPackageArchiveIsValid(
+                    let restoredArchiveSize = restoredPackageArchiveSize(
+                        productId: taskData.sapCode,
                         package: package,
                         taskDirectory: taskData.directory,
-                        sapCode: productData.sapCode
+                        sapCode: productData.sapCode,
+                        savedAsCompleted: savedAsCompleted
                     )
 
-                    if savedAsCompleted && completedArchiveIsValid {
+                    if let restoredArchiveSize {
+                        let originalDownloadSize = package.downloadSize
+                        if package.downloadSize <= 0 || !package.manifestURL.isEmpty {
+                            package.downloadSize = restoredArchiveSize
+                        }
+                        recoveredFromLocalArchive = recoveredFromLocalArchive || !savedAsCompleted || originalDownloadSize != package.downloadSize
                         package.downloaded = true
                         package.status = .completed
                         package.downloadedSize = package.downloadSize
@@ -225,35 +257,56 @@ class TaskPersistenceManager: @unchecked Sendable {
                     }
                     return package
                 }
+                product.completedPackages = product.packages.filter { $0.downloaded }.count
                 
                 return product
             }
             
-            let hasPendingPackages = products.flatMap { $0.packages }.contains { !$0.downloaded }
+            let allPackages = products.flatMap { $0.packages }
+            let hasPendingPackages = allPackages.contains { !$0.downloaded }
+            let totalSize = allPackages.reduce(Int64(0)) { $0 + $1.downloadSize }
+            let totalDownloadedSize = allPackages.reduce(Int64(0)) { result, package in
+                result + min(max(package.downloadedSize, 0), package.downloadSize)
+            }
             let initialStatus: DownloadStatus
-            switch taskData.totalStatus {
-            case .completed(let info):
-                initialStatus = hasPendingPackages
-                    ? .paused(DownloadStatus.PauseInfo(
+            if !allPackages.isEmpty && !hasPendingPackages {
+                switch taskData.totalStatus {
+                case .completed(let info):
+                    initialStatus = .completed(DownloadStatus.CompletionInfo(
+                        timestamp: info.timestamp,
+                        totalTime: info.totalTime,
+                        totalSize: totalSize
+                    ))
+                default:
+                    initialStatus = .completed(DownloadStatus.CompletionInfo(
+                        timestamp: Date(),
+                        totalTime: Date().timeIntervalSince(taskData.createAt),
+                        totalSize: totalSize
+                    ))
+                }
+            } else {
+                switch taskData.totalStatus {
+                case .completed:
+                    initialStatus = .paused(DownloadStatus.PauseInfo(
                         reason: .other(String(localized: "下载包完整性校验未通过")),
                         timestamp: Date(),
                         resumable: true
                     ))
-                    : .completed(info)
-            case .failed(let info):
-                initialStatus = .failed(info)
-            case .downloading:
-                initialStatus = .paused(DownloadStatus.PauseInfo(
-                    reason: .other(String(localized: "程序退出")),
-                    timestamp: Date(),
-                    resumable: true
-                ))
-            default:
-                initialStatus = .paused(DownloadStatus.PauseInfo(
-                    reason: .other(String(localized: "程序重启后自动暂停")),
-                    timestamp: Date(),
-                    resumable: true
-                ))
+                case .failed(let info):
+                    initialStatus = .failed(info)
+                case .downloading:
+                    initialStatus = .paused(DownloadStatus.PauseInfo(
+                        reason: .other(String(localized: "程序退出")),
+                        timestamp: Date(),
+                        resumable: true
+                    ))
+                default:
+                    initialStatus = .paused(DownloadStatus.PauseInfo(
+                        reason: .other(String(localized: "程序重启后自动暂停")),
+                        timestamp: Date(),
+                        resumable: true
+                    ))
+                }
             }
             
             let restoredTargetArchitecture = taskData.targetArchitecture ?? fallbackTargetArchitecture(
@@ -274,7 +327,7 @@ class TaskPersistenceManager: @unchecked Sendable {
                 totalDownloadedSize: taskData.totalDownloadedSize,
                 totalSize: taskData.totalSize,
                 totalSpeed: 0,
-                currentPackage: products.first?.packages.first,
+                currentPackage: allPackages.first { !$0.downloaded } ?? allPackages.first,
                 platform: taskData.platform,
                 targetArchitecture: restoredTargetArchitecture
             )
@@ -283,20 +336,16 @@ class TaskPersistenceManager: @unchecked Sendable {
             task.completedPackages = products.reduce(0) { result, product in
                 result + product.packages.filter { $0.downloaded }.count
             }
-            let totalSize = products
-                .flatMap { $0.packages }
-                .reduce(Int64(0)) { $0 + $1.downloadSize }
-            let totalDownloadedSize = products
-                .flatMap { $0.packages }
-                .reduce(Int64(0)) { result, package in
-                    result + min(max(package.downloadedSize, 0), package.downloadSize)
-                }
             task.totalSize = totalSize
             task.totalDownloadedSize = totalSize > 0 ? min(max(totalDownloadedSize, 0), totalSize) : 0
             task.totalProgress = totalSize > 0
                 ? Double(task.totalDownloadedSize) / Double(totalSize)
                 : 0
-            
+
+            if recoveredFromLocalArchive {
+                await saveTask(task)
+            }
+
             return task
         } catch {
             print("Error loading task from \(url): \(error)")
@@ -318,30 +367,46 @@ class TaskPersistenceManager: @unchecked Sendable {
         return packages
     }
 
-    private func restoredPackageArchiveIsValid(package: Package, taskDirectory: URL, sapCode: String) -> Bool {
-        guard !package.fullPackageName.isEmpty else {
-            return false
-        }
-
-        let fileURL = taskDirectory
-            .appendingPathComponent(sapCode)
-            .appendingPathComponent(package.fullPackageName)
-
-        guard FileManager.default.fileExists(atPath: fileURL.path) else {
-            return false
-        }
-
-        do {
-            let attributes = try FileManager.default.attributesOfItem(atPath: fileURL.path)
-            let actualSize = (attributes[.size] as? NSNumber)?.int64Value ?? 0
-            if package.downloadSize > 0, actualSize != package.downloadSize {
-                return false
+    private func restoredPackageArchiveSize(productId: String, package: Package, taskDirectory: URL, sapCode: String, savedAsCompleted: Bool) -> Int64? {
+        if package.fullPackageName.isEmpty {
+            guard savedAsCompleted, fileManager.fileExists(atPath: taskDirectory.path) else {
+                return nil
             }
-
-            return true
-        } catch {
-            return false
+            return itemSizeIfExists(at: taskDirectory)
         }
+
+        let fileURL = isManifestInstallerProduct(productId)
+            ? taskDirectory
+            : taskDirectory
+                .appendingPathComponent(sapCode)
+                .appendingPathComponent(package.fullPackageName)
+
+        guard let actualSize = itemSizeIfExists(at: fileURL) else {
+            return nil
+        }
+
+        if package.downloadSize > 0, actualSize != package.downloadSize {
+            return nil
+        }
+        if package.downloadSize <= 0, actualSize <= 0 {
+            return nil
+        }
+
+        return actualSize
+    }
+
+    private func itemSizeIfExists(at url: URL) -> Int64? {
+        var isDirectory: ObjCBool = false
+        guard fileManager.fileExists(atPath: url.path, isDirectory: &isDirectory) else {
+            return nil
+        }
+
+        if isDirectory.boolValue {
+            return nil
+        }
+
+        let attributes = try? fileManager.attributesOfItem(atPath: url.path)
+        return (attributes?[.size] as? NSNumber)?.int64Value
     }
     
     func removeTask(_ task: NewDownloadTask) {

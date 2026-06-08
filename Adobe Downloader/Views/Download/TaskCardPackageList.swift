@@ -33,6 +33,9 @@ struct TaskCardPackageList: View {
     @State private var expandedProducts: Set<String> = []
     @State private var searchText: String = ""
     @State private var activeFilter: PackageListFilter = .all
+    @State private var showCopiedToast = false
+    @State private var copiedToastText = ""
+    @State private var copyToastTask: Task<Void, Never>?
 
     private var hasLotsOfPackages: Bool {
         task.totalPackages > 8
@@ -84,6 +87,9 @@ struct TaskCardPackageList: View {
                                 },
                                 onRemovePackage: { packageId in
                                     onRemovePackage(product.sapCode, packageId)
+                                },
+                                onCopyFeedback: { message in
+                                    showCopyToast(message)
                                 }
                             )
                         }
@@ -99,6 +105,23 @@ struct TaskCardPackageList: View {
                 RoundedRectangle(cornerRadius: 12)
                     .strokeBorder(Color.secondary.opacity(0.15), lineWidth: 1)
             )
+        }
+        .overlay(alignment: .top) {
+            if showCopiedToast {
+                HStack(spacing: 6) {
+                    Image(systemName: "checkmark.circle.fill")
+                        .foregroundColor(.green)
+                    Text(copiedToastText)
+                        .font(.system(size: 12, weight: .medium))
+                }
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
+                .background(.ultraThinMaterial)
+                .clipShape(Capsule())
+                .overlay(Capsule().strokeBorder(.white.opacity(0.2), lineWidth: 0.5))
+                .padding(.top, 4)
+                .transition(.move(edge: .top).combined(with: .opacity))
+            }
         }
     }
 
@@ -174,27 +197,31 @@ struct TaskCardPackageList: View {
         }
     }
 
-    @State private var showCopyAllAlert = false
-
     private var copyAllButton: some View {
         Button(action: {
             NSPasteboard.general.clearContents()
             NSPasteboard.general.setString(generateAllProductsInfo(), forType: .string)
-            showCopyAllAlert = true
-            DispatchQueue.main.asyncAfter(deadline: .now() + 2) { showCopyAllAlert = false }
+            showCopyToast(String(localized: "已复制所有信息"))
         }) {
             Label(String(localized: "复制所有信息"), systemImage: "doc.on.clipboard")
                 .font(.system(size: 12, weight: .medium))
                 .foregroundColor(.white)
         }
         .buttonStyle(GlassButtonStyle(tint: .green))
-        .popover(isPresented: $showCopyAllAlert, arrowEdge: .leading) {
-            HStack(spacing: 6) {
-                Image(systemName: "checkmark.circle.fill").foregroundColor(.green)
-                Text("已复制所有信息").font(.system(size: 13, weight: .medium))
+    }
+
+    private func showCopyToast(_ message: String) {
+        copyToastTask?.cancel()
+        copiedToastText = message
+        withAnimation(.easeInOut(duration: 0.2)) {
+            showCopiedToast = true
+        }
+        copyToastTask = Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 1_800_000_000)
+            guard !Task.isCancelled else { return }
+            withAnimation(.easeInOut(duration: 0.2)) {
+                showCopiedToast = false
             }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 6)
         }
     }
 
@@ -278,7 +305,7 @@ private struct PackageProductRow: View {
     let onToggle: () -> Void
     let onRemove: () -> Void
     let onRemovePackage: (UUID) -> Void
-    @State private var showCopiedAlert = false
+    let onCopyFeedback: (String) -> Void
     @State private var showRemoveConfirm = false
 
     private var effectivelyExpanded: Bool {
@@ -324,8 +351,7 @@ private struct PackageProductRow: View {
                         Button(action: {
                             NSPasteboard.general.clearContents()
                             NSPasteboard.general.setString(product.buildGuid, forType: .string)
-                            showCopiedAlert = true
-                            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) { showCopiedAlert = false }
+                            onCopyFeedback(String(localized: "已复制 buildGuid"))
                         }) {
                             Image(systemName: "doc.on.doc")
                                 .font(.system(size: 10))
@@ -333,14 +359,6 @@ private struct PackageProductRow: View {
                         }
                         .buttonStyle(GlassButtonStyle(tint: .blue))
                         .help(String(localized: "复制 buildGuid"))
-                        .popover(isPresented: $showCopiedAlert, arrowEdge: .trailing) {
-                            HStack(spacing: 6) {
-                                Image(systemName: "checkmark.circle.fill").foregroundColor(.green)
-                                Text("已复制").font(.system(size: 13, weight: .medium))
-                            }
-                            .padding(.horizontal, 10)
-                            .padding(.vertical, 6)
-                        }
                     }
 
                     Spacer()
@@ -397,7 +415,8 @@ private struct PackageProductRow: View {
                             canRemove: globalNewDownloadUtils.canRemoveIncrementalPackage(task: task, package: package),
                             onRemove: {
                                 onRemovePackage(package.id)
-                            }
+                            },
+                            onCopyFeedback: onCopyFeedback
                         )
                     }
                 }
@@ -419,7 +438,7 @@ private struct PackageItemRow: View {
     @ObservedObject var package: Package
     let canRemove: Bool
     let onRemove: () -> Void
-    @State private var showCopiedAlert = false
+    let onCopyFeedback: (String) -> Void
     @State private var showRemoveConfirm = false
 
     private var clampedProgress: Double {
@@ -532,14 +551,6 @@ private struct PackageItemRow: View {
                 }
                 .buttonStyle(.borderless)
                 .help(String(localized: "复制错误信息"))
-                .popover(isPresented: $showCopiedAlert, arrowEdge: .trailing) {
-                    HStack(spacing: 6) {
-                        Image(systemName: "checkmark.circle.fill").foregroundColor(.green)
-                        Text("已复制").font(.system(size: 13, weight: .medium))
-                    }
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 6)
-                }
             }
             .foregroundColor(.red.opacity(0.9))
         default:
@@ -566,9 +577,6 @@ private struct PackageItemRow: View {
 
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(lines.joined(separator: "\n"), forType: .string)
-        showCopiedAlert = true
-        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
-            showCopiedAlert = false
-        }
+        onCopyFeedback(String(localized: "已复制错误信息"))
     }
 }

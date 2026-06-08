@@ -484,9 +484,13 @@ class NetworkManager: ObservableObject {
         if let task = downloadTasks.first(where: {
             $0.productId == productId &&
             $0.productVersion == version &&
-            $0.language == language &&
-            !$0.status.isCompleted
-        }) { return task.directory }
+            $0.language == language
+        }) {
+            if task.status.isCompleted {
+                return TaskPersistenceManager.shared.taskArtifactsAreValid(task) ? task.directory : nil
+            }
+            return task.directory
+        }
 
         let platform = installerSelectedPlatformId(
             productId: productId,
