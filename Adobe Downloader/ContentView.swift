@@ -43,7 +43,6 @@ struct ContentView: View {
             )
             .background(Color(.clear))
             .animation(.easeInOut, value: networkManager.loadingState)
-            .animation(.easeInOut, value: filteredProducts)
         }
         .background(Color(.clear))
         .sheet(isPresented: $showDownloadManager) {

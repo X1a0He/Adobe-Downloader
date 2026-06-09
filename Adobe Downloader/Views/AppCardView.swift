@@ -19,6 +19,83 @@ private enum AppCardConstants {
     static let buttonFontSize: CGFloat = 13
 }
 
+private struct AppCardMetrics {
+    let uniqueVersionCount: Int
+    let latestDependenciesCount: Int
+    let latestMinOSVersion: String
+    let latestModulesCount: Int
+    let isArchitectureCompatible: Bool
+    let minOSMajor: Int?
+    let minOSDisplayFormatted: String
+    let requiresHighOS: Bool
+    let shouldHideVersionMetric: Bool
+}
+
+@MainActor
+private enum AppCardMetricsCache {
+    private static var storage: [String: AppCardMetrics] = [:]
+
+    static func metrics(for uniqueProduct: UniqueProduct) -> AppCardMetrics {
+        if let metrics = storage[uniqueProduct.id] {
+            return metrics
+        }
+
+        let products = globalCcmResult.products.filter { $0.id == uniqueProduct.id }
+        let visibleMatches = products.compactMap { product -> (Product, Product.Platform)? in
+            if isManifestInstallerProduct(uniqueProduct.id),
+               let match = installerPlatformMatch(product: product, selectedVersion: product.version) {
+                return (product, match.platform)
+            }
+
+            guard let platform = HDPIMParityDecisionEngine.shared.preferredPlatform(for: product) else {
+                return nil
+            }
+            return (product, platform)
+        }
+        let latestVisibleMatch = visibleMatches.sorted {
+            AppStatics.compareVersions($0.0.version, $1.0.version) > 0
+        }.first
+        let rawMinOS = latestVisibleMatch?.1.range.first?.min ?? ""
+        let minOSParts = rawMinOS.split(whereSeparator: { $0 == "-" || $0 == "." }).map(String.init)
+        let minOSDisplayFormatted: String
+        switch minOSParts.count {
+        case 0:
+            minOSDisplayFormatted = ""
+        case 1:
+            minOSDisplayFormatted = minOSParts[0]
+        default:
+            minOSDisplayFormatted = "\(minOSParts[0]).\(minOSParts[1])"
+        }
+        let minOSMajor = Int(minOSParts.first ?? "")
+        let uniqueVersionCount = Set(visibleMatches.map(\.0.version)).count
+        let metrics = AppCardMetrics(
+            uniqueVersionCount: uniqueVersionCount,
+            latestDependenciesCount: latestVisibleMatch?.1.languageSet.first?.dependencies.count ?? 0,
+            latestMinOSVersion: rawMinOS.replacingOccurrences(of: "-", with: ""),
+            latestModulesCount: latestVisibleMatch?.1.modules.count ?? 0,
+            isArchitectureCompatible: !visibleMatches.isEmpty,
+            minOSMajor: minOSMajor,
+            minOSDisplayFormatted: minOSDisplayFormatted,
+            requiresHighOS: (minOSMajor ?? 0) >= 14,
+            shouldHideVersionMetric: uniqueVersionCount > 1
+        )
+        storage[uniqueProduct.id] = metrics
+        return metrics
+    }
+}
+
+@MainActor
+private enum AppCardInstallStateCache {
+    private static var productsBySapCode: [String: [HDPIMInstalledProductForUninstall]]?
+
+    static func products(for sapCode: String, force: Bool = false) -> [HDPIMInstalledProductForUninstall] {
+        if productsBySapCode == nil || force {
+            productsBySapCode = Dictionary(grouping: HDPIMUninstaller.installedProducts(), by: \.sapCode)
+        }
+        return productsBySapCode?[sapCode] ?? []
+    }
+}
+
 final class IconCache {
     static let shared = IconCache()
     private var cache = NSCache<NSString, NSImage>()
@@ -52,6 +129,8 @@ final class AppCardViewModel: ObservableObject {
 
     @Published var isDownloading = false
     private let userDefaults = UserDefaults.standard
+    private let metrics: AppCardMetrics
+    private var didRefreshInstallState = false
 
     private var useDefaultDirectory: Bool {
         StorageData.shared.useDefaultDirectory
@@ -65,6 +144,7 @@ final class AppCardViewModel: ObservableObject {
 
     init(uniqueProduct: UniqueProduct) {
         self.uniqueProduct = uniqueProduct
+        self.metrics = AppCardMetricsCache.metrics(for: uniqueProduct)
 
         Task { @MainActor in
             setupObservers()
@@ -83,13 +163,13 @@ final class AppCardViewModel: ObservableObject {
 
                 if hasActiveTask != self.isDownloading {
                     self.isDownloading = hasActiveTask
-                    self.objectWillChange.send()
                 }
             }
             .store(in: &cancellables)
 
         globalNetworkManager.objectWillChange
             .receive(on: RunLoop.main)
+            .throttle(for: .milliseconds(250), scheduler: RunLoop.main, latest: true)
             .sink { [weak self] _ in
                 self?.updateDownloadingStatus()
             }
@@ -115,12 +195,15 @@ final class AppCardViewModel: ObservableObject {
 
         if hasActiveTask != self.isDownloading {
             self.isDownloading = hasActiveTask
-            self.objectWillChange.send()
         }
     }
 
-    func refreshInstallState() {
-        installedProducts = HDPIMUninstaller.installedProducts(sapCode: uniqueProduct.id)
+    func refreshInstallState(force: Bool = false) {
+        if didRefreshInstallState && !force {
+            return
+        }
+        didRefreshInstallState = true
+        installedProducts = AppCardInstallStateCache.products(for: uniqueProduct.id, force: force)
     }
 
     func getDestinationURL(version: String, language: String) async throws -> URL {
@@ -311,49 +394,20 @@ final class AppCardViewModel: ObservableObject {
         }
     }
 
-    private var latestVisibleMatch: (Product, Product.Platform)? {
-        let products = globalCcmResult.products.filter { $0.id == uniqueProduct.id }
-        return products.compactMap { product -> (Product, Product.Platform)? in
-            if isManifestInstallerProduct(uniqueProduct.id),
-               let match = installerPlatformMatch(product: product, selectedVersion: product.version) {
-                return (product, match.platform)
-            }
-
-            guard let platform = HDPIMParityDecisionEngine.shared.preferredPlatform(for: product) else {
-                return nil
-            }
-            return (product, platform)
-        }.sorted {
-            AppStatics.compareVersions($0.0.version, $1.0.version) > 0
-        }.first
-    }
-
     var uniqueVersionCount: Int {
-        let products = globalCcmResult.products.filter { $0.id == uniqueProduct.id }
-        let versions = products.compactMap { product -> String? in
-            if isManifestInstallerProduct(uniqueProduct.id) {
-                return installerPlatformMatch(product: product, selectedVersion: product.version) == nil ? nil : product.version
-            }
-
-            guard HDPIMParityDecisionEngine.shared.preferredPlatform(for: product) != nil else {
-                return nil
-            }
-            return product.version
-        }
-        return Set(versions).count
+        metrics.uniqueVersionCount
     }
 
     var latestDependenciesCount: Int {
-        latestVisibleMatch?.1.languageSet.first?.dependencies.count ?? 0
+        metrics.latestDependenciesCount
     }
 
     var latestMinOSVersion: String {
-        let raw = latestVisibleMatch?.1.range.first?.min ?? ""
-        return raw.replacingOccurrences(of: "-", with: "")
+        metrics.latestMinOSVersion
     }
 
     var latestModulesCount: Int {
-        latestVisibleMatch?.1.modules.count ?? 0
+        metrics.latestModulesCount
     }
 
     var hasValidIcon: Bool {
@@ -407,32 +461,23 @@ final class AppCardViewModel: ObservableObject {
     }
 
     var isArchitectureCompatible: Bool {
-        !HDPIMParityDecisionEngine.shared.visibleVersions(productId: uniqueProduct.id).isEmpty
+        metrics.isArchitectureCompatible
     }
 
     var minOSMajor: Int? {
-        let raw = latestVisibleMatch?.1.range.first?.min ?? ""
-        let cleaned = raw.replacingOccurrences(of: "-", with: ".")
-        let head = cleaned.split(separator: ".").first.map(String.init) ?? ""
-        return Int(head)
+        metrics.minOSMajor
     }
 
     var minOSDisplayFormatted: String {
-        let raw = latestVisibleMatch?.1.range.first?.min ?? ""
-        let parts = raw.split(whereSeparator: { $0 == "-" || $0 == "." }).map(String.init)
-        switch parts.count {
-        case 0: return ""
-        case 1: return parts[0]
-        default: return "\(parts[0]).\(parts[1])"
-        }
+        metrics.minOSDisplayFormatted
     }
 
     var requiresHighOS: Bool {
-        (minOSMajor ?? 0) >= 14
+        metrics.requiresHighOS
     }
 
     var shouldHideVersionMetric: Bool {
-        uniqueVersionCount > 1
+        metrics.shouldHideVersionMetric
     }
 }
 
@@ -715,7 +760,7 @@ struct SheetModifier: ViewModifier {
     func body(content: Content) -> some View {
         content
             .sheet(isPresented: $viewModel.showVersionPicker, onDismiss: {
-                viewModel.refreshInstallState()
+                viewModel.refreshInstallState(force: true)
             }) {
                 if findProduct(id: viewModel.uniqueProduct.id) != nil {
                     NavigationVersionPickerView(productId: viewModel.uniqueProduct.id) { version in
