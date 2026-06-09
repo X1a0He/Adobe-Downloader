@@ -94,17 +94,7 @@ struct ToolbarView: ToolbarContent {
     
     var body: some ToolbarContent {
         ToolbarItemGroup(placement: .navigation) {
-            HStack(spacing: 8) {
-                Picker("API", selection: $currentApiVersion) {
-                    Text("v4").tag("4")
-                    Text("v5").tag("5")
-                    Text("v6").tag("6")
-                }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-                .controlSize(.small)
-                .frame(width: 126)
-            }
+            ToolbarAPIVersionPicker(currentApiVersion: $currentApiVersion)
             .help("切换 API 版本")
             .disabled(isRefreshing)
         }
@@ -129,6 +119,88 @@ struct ToolbarView: ToolbarContent {
                 Label("设置", systemImage: "gearshape")
             }
             .help("打开设置")
+        }
+    }
+}
+
+private struct ToolbarAPIVersionPicker: View {
+    @Binding var currentApiVersion: String
+
+    var body: some View {
+        ToolbarSegmentedControl(
+            selection: $currentApiVersion,
+            items: [
+                .init(title: "v4", value: "4"),
+                .init(title: "v5", value: "5"),
+                .init(title: "v6", value: "6")
+            ]
+        )
+        .fixedSize()
+    }
+}
+
+private struct ToolbarSegmentedControlItem {
+    let title: String
+    let value: String
+}
+
+private struct ToolbarSegmentedControl: NSViewRepresentable {
+    @Binding var selection: String
+    let items: [ToolbarSegmentedControlItem]
+
+    func makeNSView(context: Context) -> NSSegmentedControl {
+        let control = NSSegmentedControl(
+            labels: items.map(\.title),
+            trackingMode: .selectOne,
+            target: context.coordinator,
+            action: #selector(Coordinator.valueChanged(_:))
+        )
+        control.segmentStyle = .texturedRounded
+        control.controlSize = .small
+        control.font = .systemFont(ofSize: NSFont.smallSystemFontSize)
+
+        for index in items.indices {
+            control.setWidth(34, forSegment: index)
+        }
+
+        context.coordinator.items = items
+        return control
+    }
+
+    func updateNSView(_ nsView: NSSegmentedControl, context: Context) {
+        context.coordinator.selection = $selection
+        context.coordinator.items = items
+
+        if nsView.segmentCount != items.count {
+            nsView.segmentCount = items.count
+        }
+
+        let selectedIndex = items.firstIndex { $0.value == selection } ?? 0
+        for index in items.indices {
+            nsView.setLabel(items[index].title, forSegment: index)
+            nsView.setWidth(34, forSegment: index)
+            nsView.setSelected(index == selectedIndex, forSegment: index)
+        }
+    }
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(selection: $selection, items: items)
+    }
+
+    final class Coordinator: NSObject {
+        var selection: Binding<String>
+        var items: [ToolbarSegmentedControlItem]
+
+        init(selection: Binding<String>, items: [ToolbarSegmentedControlItem]) {
+            self.selection = selection
+            self.items = items
+        }
+
+        @objc func valueChanged(_ sender: NSSegmentedControl) {
+            let index = sender.selectedSegment
+            if items.indices.contains(index) {
+                selection.wrappedValue = items[index].value
+            }
         }
     }
 }

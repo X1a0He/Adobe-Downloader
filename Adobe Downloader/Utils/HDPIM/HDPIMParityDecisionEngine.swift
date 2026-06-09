@@ -220,7 +220,9 @@ final class HDPIMParityDecisionEngine {
     private init() {}
 
     private func log(_ message: String) {
+        #if DEBUG
         print("[HDPIM Decision] \(message)")
+        #endif
     }
 
     func visiblePlatformText(
