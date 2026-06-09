@@ -536,6 +536,13 @@ private struct GeneralSettingsAlerts: ViewModifier {
     }
 
     private func startDownloadSetup() {
+        guard viewModel.helperConnectionStatus == .connected else {
+            viewModel.isSuccess = false
+            viewModel.alertMessage = String(localized: "Helper 未启用或未连接，无法下载 IPCBox 和 HDBox。请先在 Helper 设置中点击「重新启用」，前往系统设置 → 登录项与扩展打开 Adobe Downloader.app，重启 App 后再点击「重新启用」或「重新连接」。")
+            viewModel.showAlert = true
+            return
+        }
+
         viewModel.isDownloadingSetup = true
         viewModel.isCancelled = false
 

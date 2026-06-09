@@ -25,6 +25,16 @@ struct QAView: View {
                         question: String(localized: "如何修复安装失败的问题？"),
                         answer: String(localized: "如果安装失败，您可以尝试以下步骤：\n1. 确保已正确启用并连接 Helper\n2. 检查磁盘剩余空间是否充足\n3. 尝试重新下载并安装\n如果问题仍然存在，可以尝试重新启用 Helper。")
                     )
+
+                    QAItem(
+                        question: String(localized: "Helper 无法安装或显示未安装怎么办？"),
+                        answer: String(localized: "请按以下步骤处理：\n1. 在 Helper 设置中点击「重新启用」\n2. 前往系统设置 → 登录项与扩展\n3. 找到 Adobe Downloader.app 并打开开关\n4. 重启 Adobe Downloader\n5. 再次点击「重新启用」或「重新连接」")
+                    )
+
+                    QAItem(
+                        question: String(localized: "为什么需要 IPCBox 和 HDBox？"),
+                        answer: String(localized: "X1a0He CC 会下载 IPCBox 和 HDBox 组件，因为部分官方安装功能需要 HDBox，Photoshop 相关安装流程需要 IPCBox。未启用 Helper 时无法下载这些组件。")
+                    )
                 }
             }
             .padding()
