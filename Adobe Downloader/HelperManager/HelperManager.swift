@@ -110,12 +110,32 @@ final class HelperManager: ObservableObject {
     }
 
     private func isRunningFromValidLocation() -> Bool {
+        if isHelperProgramInsideCurrentBundle() {
+            return true
+        }
+
         #if DEBUG
         return true
         #else
-        let bundlePath = Bundle.main.bundleURL.path
+        let bundlePath = Bundle.main.bundleURL.resolvingSymlinksInPath().path
         return bundlePath.hasPrefix("/Applications/")
         #endif
+    }
+
+    private func isHelperProgramInsideCurrentBundle() -> Bool {
+        let plistURL = Bundle.main.bundleURL
+            .appendingPathComponent("Contents/Library/LaunchDaemons")
+            .appendingPathComponent(Self.daemonPlistName)
+
+        guard let data = try? Data(contentsOf: plistURL),
+              let plist = try? PropertyListSerialization.propertyList(from: data, options: [], format: nil) as? [String: Any],
+              let programPath = plist["Program"] as? String else {
+            return false
+        }
+
+        let bundlePath = Bundle.main.bundleURL.resolvingSymlinksInPath().path
+        let helperPath = URL(fileURLWithPath: programPath).resolvingSymlinksInPath().path
+        return helperPath.hasPrefix(bundlePath + "/")
     }
 
     private func saveInstalledVersion() {

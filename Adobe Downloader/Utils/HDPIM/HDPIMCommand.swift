@@ -217,8 +217,12 @@ class HDPIMCommandEngine {
                 return CreateDirectoryCommand(path: path, pimxPath: pimxPath)
             case .deleteFile(let target):
                 return DeleteFileCommand(target: target)
-            case .deleteDirectory(let source):
-                return DeleteDirectoryCommand(source: source)
+            case .deleteDirectory(let source, let isRecursiveDelete, let isUserPreferences):
+                return DeleteDirectoryCommand(
+                    source: source,
+                    isRecursiveDelete: isRecursiveDelete,
+                    isUserPreferences: isUserPreferences
+                )
             case .createSymlink(let source, let target, let pimxTarget):
                 return CreateSymlinkCommand(source: source, target: target, pimxTargetPath: pimxTarget)
             case .permission(let path, let mode):

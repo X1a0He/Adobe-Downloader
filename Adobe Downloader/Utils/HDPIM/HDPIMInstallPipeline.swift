@@ -1088,7 +1088,7 @@ class HDPIMInstallPipeline {
                     .setDisplayAttributes(let target, _),
                     .touch(let target):
                 return BackupTargetCandidate(path: target, isDirectoryLike: false)
-            case .deleteDirectory(let target),
+            case .deleteDirectory(let target, _, _),
                     .permission(let target, _),
                     .owner(let target, _, _),
                     .folderIcon(let target, _):

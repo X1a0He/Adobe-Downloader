@@ -12,7 +12,7 @@ enum PIMXCommandDescriptor {
     case createDirectory(path: String, pimxPath: String)
     case mergeDirectory(source: String, target: String, pimxTarget: String)
     case deleteFile(target: String)
-    case deleteDirectory(source: String)
+    case deleteDirectory(source: String, isRecursiveDelete: Bool, isUserPreferences: Bool)
     case createSymlink(source: String, target: String, pimxTarget: String)
 
     case permission(path: String, mode: String)
@@ -104,7 +104,19 @@ class PIMXParser {
             throw PIMXError.invalidXML("PIMX 根节点不存在: \(pimxURL.path)")
         }
 
-        return try parseCommands(root: root)
+        return try parseCommands(root: root).compactMap(uninstallCommand)
+    }
+
+    private func uninstallCommand(from descriptor: PIMXCommandDescriptor) -> PIMXCommandDescriptor? {
+        switch descriptor {
+        case .runProgram(_, _, let uninstall):
+            if let uninstall {
+                return .runProgram(execution: uninstall, repair: nil, uninstall: nil)
+            }
+            return nil
+        default:
+            return descriptor
+        }
     }
 
     private func parseAssets(root: XMLElement) throws -> (commands: [PIMXCommandDescriptor], assetReferences: [PIMXAssetReference]) {
@@ -324,7 +336,13 @@ class PIMXParser {
                     ?? element.attribute(forName: "target")?.stringValue ?? ""
                 let path = source.isEmpty ? target : source
                 if !path.isEmpty {
-                    commands.append(.deleteDirectory(source: propertyTable.expandPath(path)))
+                    let isRecursiveDelete = boolAttribute(element.attribute(forName: "isRecursiveDelete")?.stringValue)
+                    let isUserPreferences = boolAttribute(element.attribute(forName: "isUserPreferences")?.stringValue)
+                    commands.append(.deleteDirectory(
+                        source: propertyTable.expandPath(path),
+                        isRecursiveDelete: isRecursiveDelete,
+                        isUserPreferences: isUserPreferences
+                    ))
                 }
 
             case "Touch":

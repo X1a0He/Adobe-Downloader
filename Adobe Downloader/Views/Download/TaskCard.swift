@@ -116,7 +116,7 @@ struct TaskCard: View {
         } message: {
             Text("Helper 未启用或未连接，请先在设置中启用并连接 Helper")
         }
-        .sheet(isPresented: $isInstalling) {
+        .sheet(isPresented: $isInstalling, onDismiss: clearInstallationSheetState) {
             let installViewData = globalNetworkManager.makeInstallProgressViewData(productName: task.displayName)
             InstallProgressView(
                 data: installViewData,
@@ -266,6 +266,10 @@ struct TaskCard: View {
         } else {
             onAction(action)
         }
+    }
+
+    private func clearInstallationSheetState() {
+        globalNetworkManager.clearInstallationSheetState()
     }
 
     private var packageToggle: some View {

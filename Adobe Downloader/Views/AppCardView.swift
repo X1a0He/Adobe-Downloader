@@ -87,10 +87,12 @@ private enum AppCardMetricsCache {
 @MainActor
 private enum AppCardInstallStateCache {
     private static var productsBySapCode: [String: [HDPIMInstalledProductForUninstall]]?
+	private static var loadedRevision: Int?
 
-    static func products(for sapCode: String, force: Bool = false) -> [HDPIMInstalledProductForUninstall] {
-        if productsBySapCode == nil || force {
+    static func products(for sapCode: String, revision: Int, force: Bool = false) -> [HDPIMInstalledProductForUninstall] {
+        if productsBySapCode == nil || force || loadedRevision != revision {
             productsBySapCode = Dictionary(grouping: HDPIMUninstaller.installedProducts(), by: \.sapCode)
+			loadedRevision = revision
         }
         return productsBySapCode?[sapCode] ?? []
     }
@@ -174,6 +176,15 @@ final class AppCardViewModel: ObservableObject {
                 self?.updateDownloadingStatus()
             }
             .store(in: &cancellables)
+
+		globalNetworkManager.$installStateRevision
+			.dropFirst()
+			.removeDuplicates()
+			.receive(on: RunLoop.main)
+			.sink { [weak self] _ in
+				self?.refreshInstallState(force: true)
+			}
+			.store(in: &cancellables)
     }
 
     private func isTaskActive(_ status: DownloadStatus) -> Bool {
@@ -198,12 +209,16 @@ final class AppCardViewModel: ObservableObject {
         }
     }
 
-    func refreshInstallState(force: Bool = false) {
+    func refreshInstallState(force: Bool = false, reloadCache: Bool = false) {
         if didRefreshInstallState && !force {
             return
         }
         didRefreshInstallState = true
-        installedProducts = AppCardInstallStateCache.products(for: uniqueProduct.id, force: force)
+        installedProducts = AppCardInstallStateCache.products(
+			for: uniqueProduct.id,
+			revision: globalNetworkManager.installStateRevision,
+			force: reloadCache
+		)
     }
 
     func getDestinationURL(version: String, language: String) async throws -> URL {
@@ -760,7 +775,7 @@ struct SheetModifier: ViewModifier {
     func body(content: Content) -> some View {
         content
             .sheet(isPresented: $viewModel.showVersionPicker, onDismiss: {
-                viewModel.refreshInstallState(force: true)
+                viewModel.refreshInstallState(force: true, reloadCache: true)
             }) {
                 if findProduct(id: viewModel.uniqueProduct.id) != nil {
                     NavigationVersionPickerView(productId: viewModel.uniqueProduct.id) { version in

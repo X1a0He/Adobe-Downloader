@@ -62,7 +62,7 @@ class HDPIMPropertyTable {
     }
 
     func setupSystemDirectories() {
-        let home = NSHomeDirectory()
+        let home = HDPIMRuntimeEnvironment.userHomeDirectory()
 
         properties["ffcenvironment"] = "PROD"
         properties["prefmigration"] = "true"

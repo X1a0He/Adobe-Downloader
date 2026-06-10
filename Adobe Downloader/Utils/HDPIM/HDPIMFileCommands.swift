@@ -36,6 +36,44 @@ private func removeItemIfExists(at path: String) async throws {
     }
 }
 
+private func removeEmptyDirectoryIfExists(at path: String) async throws {
+    var info = stat()
+    if lstat(path, &info) == 0 {
+        guard (info.st_mode & S_IFMT) == S_IFDIR else {
+            return
+        }
+        if rmdir(path) != 0 {
+            let error = NSError(domain: NSPOSIXErrorDomain, code: Int(errno), userInfo: nil)
+            guard error.code != Int(ENOENT) && error.code != Int(ENOTEMPTY) else {
+                return
+            }
+            throw error
+        }
+    }
+}
+
+private func isProtectedRecursiveDeleteRoot(_ path: String) -> Bool {
+    let trimmedPath = path.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !trimmedPath.isEmpty else {
+        return true
+    }
+
+    let normalized = URL(fileURLWithPath: trimmedPath).standardizedFileURL.path
+        .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+    let normalizedPath = "/" + normalized
+    return [
+        "/",
+        "/Library",
+        "/Library/Application Support",
+        "/Library/Application Support/Adobe",
+        "/Applications",
+        NSHomeDirectory(),
+        NSHomeDirectory() + "/Library",
+        NSHomeDirectory() + "/Library/Application Support",
+        NSHomeDirectory() + "/Library/Preferences"
+    ].contains(normalizedPath)
+}
+
 private func ensureParentDirectoryExists(for path: String) async throws {
     let parent = (path as NSString).deletingLastPathComponent
     guard !parent.isEmpty else { return }
@@ -341,15 +379,27 @@ class DeleteFileCommand: HDPIMCommand {
 
 class DeleteDirectoryCommand: HDPIMCommand {
     let source: String
+    let isRecursiveDelete: Bool
+    let isUserPreferences: Bool
     var commandName: String { "DeleteDirectory" }
     var commandDetails: String? { source }
 
-    init(source: String) {
+    init(source: String, isRecursiveDelete: Bool, isUserPreferences: Bool) {
         self.source = source
+        self.isRecursiveDelete = isRecursiveDelete
+        self.isUserPreferences = isUserPreferences
     }
 
     func execute() async throws {
-        try? await removeItemIfExists(at: source)
+        if isRecursiveDelete || isUserPreferences {
+            guard !isProtectedRecursiveDeleteRoot(source) else {
+                return
+            }
+            try? await removeItemIfExists(at: source)
+            return
+        }
+
+        try? await removeEmptyDirectoryIfExists(at: source)
     }
 
     func rollBack() async throws { }

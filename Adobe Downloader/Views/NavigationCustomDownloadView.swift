@@ -1607,6 +1607,7 @@ private struct NavigationEnhancedPackageRow: View {
                 }
                 #endif
 
+                #if DEBUG
                 if !package.isOfficiallyEligible, !package.officialFilterReasonText.isEmpty {
                     Text("\(package.officialFilterReasonText)")
                         .font(.system(size: 10, weight: .medium))
@@ -1614,6 +1615,7 @@ private struct NavigationEnhancedPackageRow: View {
                         .textSelection(.enabled)
                         .lineLimit(2)
                 }
+                #endif
             }
         }
         .padding(.horizontal, 12)

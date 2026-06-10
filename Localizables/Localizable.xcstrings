@@ -1,12 +1,24 @@
 {
   "sourceLanguage" : "en",
   "strings" : {
-    "" : {},
-    "—" : {},
-    "·" : {},
-    "· %lld" : {},
-    "(%@)" : {},
-    "(%lld)" : {},
+    "" : {
+
+    },
+    "—" : {
+
+    },
+    "·" : {
+
+    },
+    "· %lld" : {
+
+    },
+    "(%@)" : {
+
+    },
+    "(%lld)" : {
+
+    },
     "(%lld/%lld)" : {
       "localizations" : {
         "en" : {
@@ -69,7 +81,9 @@
         }
       }
     },
-    "/" : {},
+    "/" : {
+
+    },
     "%@" : {
       "localizations" : {
         "zh-Hans" : {
@@ -175,7 +189,9 @@
         }
       }
     },
-    "%lld" : {},
+    "%lld" : {
+
+    },
     "%lld / %lld" : {
       "localizations" : {
         "en" : {
@@ -216,7 +232,9 @@
         }
       }
     },
-    "%lld.x" : {},
+    "%lld.x" : {
+
+    },
     "%lld/%lld" : {
       "localizations" : {
         "en" : {
@@ -237,9 +255,15 @@
         }
       }
     },
-    "Adobe Creative Cloud" : {},
-    "Adobe Downloader" : {},
-    "Adobe Downloader %@" : {},
+    "Adobe Creative Cloud" : {
+
+    },
+    "Adobe Downloader" : {
+
+    },
+    "Adobe Downloader %@" : {
+
+    },
     "Adobe Downloader 完全开源免费" : {
       "localizations" : {
         "en" : {
@@ -382,13 +406,27 @@
         }
       }
     },
-    "Apple Silicon" : {},
-    "Apple Silicon (arm64)" : {},
-    "base:" : {},
-    "buildGuid" : {},
-    "buildGuid:" : {},
-    "By X1a0He." : {},
-    "C4D / Red Giant" : {},
+    "Apple Silicon" : {
+
+    },
+    "Apple Silicon (arm64)" : {
+
+    },
+    "base:" : {
+
+    },
+    "buildGuid" : {
+
+    },
+    "buildGuid:" : {
+
+    },
+    "By X1a0He." : {
+
+    },
+    "C4D / Red Giant" : {
+
+    },
     "Debug 模式" : {
       "extractionState" : "stale",
       "localizations" : {
@@ -400,7 +438,9 @@
         }
       }
     },
-    "GitHub" : {},
+    "GitHub" : {
+
+    },
     "GNU 通用公共许可证 GPL v3." : {
       "localizations" : {
         "en" : {
@@ -518,6 +558,16 @@
         }
       }
     },
+    "Helper 无法安装或显示未安装怎么办？" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "What should I do if Helper cannot be installed or shows as not installed?"
+          }
+        }
+      }
+    },
     "Helper 是一个具有管理员权限的辅助工具，用于执行需要管理员权限的操作，如修改系统文件等。没有 Helper 将无法正常使用软件的某些功能。" : {
       "localizations" : {
         "en" : {
@@ -565,6 +615,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Helper not enabled will prevent execution of operations requiring administrator privileges"
+          }
+        }
+      }
+    },
+    "Helper 未启用或未连接，无法下载 IPCBox 和 HDBox。请先在 Helper 设置中点击「重新启用」，前往系统设置 → 登录项与扩展打开 Adobe Downloader.app，重启 App 后再点击「重新启用」或「重新连接」。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Helper is not enabled or connected, so IPCBox and HDBox cannot be downloaded. Click \"Re-enable\" in Helper Settings, go to System Settings → Login Items & Extensions and turn on Adobe Downloader.app, then restart the app and click \"Re-enable\" or \"Reconnect\" again."
           }
         }
       }
@@ -749,9 +809,15 @@
         }
       }
     },
-    "Intel" : {},
-    "Intel (x86_64)" : {},
-    "macOS %@" : {},
+    "Intel" : {
+
+    },
+    "Intel (x86_64)" : {
+
+    },
+    "macOS %@" : {
+
+    },
     "sapCode 包含" : {
       "localizations" : {
         "en" : {
@@ -806,8 +872,12 @@
         }
       }
     },
-    "v%@" : {},
-    "X1a0He CC" : {},
+    "v%@" : {
+
+    },
+    "X1a0He CC" : {
+
+    },
     "X1a0He CC 下载并处理成功" : {
       "extractionState" : "stale",
       "localizations" : {
@@ -826,6 +896,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "X1a0He CC downloaded successfully"
+          }
+        }
+      }
+    },
+    "X1a0He CC 会下载 IPCBox 和 HDBox 组件，因为部分官方安装功能需要 HDBox，Photoshop 相关安装流程需要 IPCBox。未启用 Helper 时无法下载这些组件。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "X1a0He CC downloads the IPCBox and HDBox components because some official installation features require HDBox, and Photoshop-related installation workflows require IPCBox. These components cannot be downloaded unless Helper is enabled."
           }
         }
       }
@@ -1127,6 +1207,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Why does the download sometimes fail?"
+          }
+        }
+      }
+    },
+    "为什么需要 IPCBox 和 HDBox？" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Why are IPCBox and HDBox required?"
           }
         }
       }
@@ -5768,6 +5858,16 @@
         }
       }
     },
+    "请按以下步骤处理：\n1. 在 Helper 设置中点击「重新启用」\n2. 前往系统设置 → 登录项与扩展\n3. 找到 Adobe Downloader.app 并打开开关\n4. 重启 Adobe Downloader\n5. 再次点击「重新启用」或「重新连接」" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Follow these steps:\n1. Click \"Re-enable\" in Helper Settings\n2. Go to System Settings → Login Items & Extensions\n3. Find Adobe Downloader.app and turn it on\n4. Restart Adobe Downloader\n5. Click \"Re-enable\" or \"Reconnect\" again"
+          }
+        }
+      }
+    },
     "请求超时，请检查网络连接后重试" : {
       "comment" : "Network timeout",
       "localizations" : {
@@ -6491,56 +6591,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Default"
-          }
-        }
-      }
-    },
-    "Helper 无法安装或显示未安装怎么办？" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "What should I do if Helper cannot be installed or shows as not installed?"
-          }
-        }
-      }
-    },
-    "请按以下步骤处理：\n1. 在 Helper 设置中点击「重新启用」\n2. 前往系统设置 → 登录项与扩展\n3. 找到 Adobe Downloader.app 并打开开关\n4. 重启 Adobe Downloader\n5. 再次点击「重新启用」或「重新连接」" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Follow these steps:\n1. Click \"Re-enable\" in Helper Settings\n2. Go to System Settings → Login Items & Extensions\n3. Find Adobe Downloader.app and turn it on\n4. Restart Adobe Downloader\n5. Click \"Re-enable\" or \"Reconnect\" again"
-          }
-        }
-      }
-    },
-    "为什么需要 IPCBox 和 HDBox？" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Why are IPCBox and HDBox required?"
-          }
-        }
-      }
-    },
-    "X1a0He CC 会下载 IPCBox 和 HDBox 组件，因为部分官方安装功能需要 HDBox，Photoshop 相关安装流程需要 IPCBox。未启用 Helper 时无法下载这些组件。" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "X1a0He CC downloads the IPCBox and HDBox components because some official installation features require HDBox, and Photoshop-related installation workflows require IPCBox. These components cannot be downloaded unless Helper is enabled."
-          }
-        }
-      }
-    },
-    "Helper 未启用或未连接，无法下载 IPCBox 和 HDBox。请先在 Helper 设置中点击「重新启用」，前往系统设置 → 登录项与扩展打开 Adobe Downloader.app，重启 App 后再点击「重新启用」或「重新连接」。" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Helper is not enabled or connected, so IPCBox and HDBox cannot be downloaded. Click \"Re-enable\" in Helper Settings, go to System Settings → Login Items & Extensions and turn on Adobe Downloader.app, then restart the app and click \"Re-enable\" or \"Reconnect\" again."
           }
         }
       }

@@ -7,6 +7,10 @@ import Foundation
 
 class HDPIMRollbackHelper {
 
+	struct UninstallPIMXPlan {
+		let commands: [HDPIMCommand]
+	}
+
     static func rollback(
         executedCommands: [HDPIMCommand],
         backupManager: HDPIMBackupManager
@@ -34,11 +38,31 @@ class HDPIMRollbackHelper {
 		estimatedWorkSize: Int64 = 0,
 		progressHandler: ((Int64, String) -> Void)? = nil
 	) async throws {
+		let plan = try makeUninstallPIMXPlan(at: pimxURL, propertyTable: propertyTable)
+		try await executeUninstallPIMXPlan(
+			plan,
+			estimatedWorkSize: estimatedWorkSize,
+			progressHandler: progressHandler
+		)
+	}
+
+	static func makeUninstallPIMXPlan(
+		at pimxURL: URL,
+		propertyTable: HDPIMPropertyTable
+	) throws -> UninstallPIMXPlan {
 		let parser = PIMXParser(propertyTable: propertyTable)
 		let descriptors = try parser.parseUninstallCommands(pimxURL: pimxURL)
-
 		let engine = HDPIMCommandEngine(propertyTable: propertyTable)
 		let commands = engine.generateCommands(from: descriptors)
+		return UninstallPIMXPlan(commands: commands)
+	}
+
+	static func executeUninstallPIMXPlan(
+		_ plan: UninstallPIMXPlan,
+		estimatedWorkSize: Int64 = 0,
+		progressHandler: ((Int64, String) -> Void)? = nil
+	) async throws {
+		let commands = plan.commands
 		let totalWork = max(estimatedWorkSize, 0)
 		let chunkSize: Int64 = 2 * 1024 * 1024
 		let commandCount = max(commands.count, 1)

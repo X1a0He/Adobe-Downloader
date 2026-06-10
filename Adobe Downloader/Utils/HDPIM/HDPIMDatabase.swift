@@ -447,6 +447,43 @@ final class HDPIMDatabase {
         }
     }
 
+    func removeProductInstallationRecords(productKeys: [HDPIMNativeProductKey]) throws {
+        let uniqueKeys = Array(Set(productKeys))
+        try beginTransaction(name: "HDPIMDatabase-removeProductInstallationRecords")
+        do {
+            for key in uniqueKeys {
+                let latestInstalledVersionSlot = try fetchProductBaseVersion(
+                    sapCode: key.sapCode,
+                    version: key.version,
+                    processorFamily: key.processorFamily
+                ) ?? key.version
+
+                try deleteProductReference(
+                    sapCode: key.sapCode,
+                    version: latestInstalledVersionSlot,
+                    processorFamily: key.processorFamily,
+                    referencingVersion: key.version
+                )
+                try deleteProductRecords(
+                    sapCode: key.sapCode,
+                    version: key.version,
+                    processorFamily: key.processorFamily
+                )
+                if latestInstalledVersionSlot != key.version {
+                    try deleteProductRecords(
+                        sapCode: key.sapCode,
+                        version: latestInstalledVersionSlot,
+                        processorFamily: key.processorFamily
+                    )
+                }
+            }
+            try commitTransaction(name: "HDPIMDatabase-removeProductInstallationRecords")
+        } catch {
+            try? rollbackTransaction(name: "HDPIMDatabase-removeProductInstallationRecords")
+            throw error
+        }
+    }
+
     func removeInstallations(
         products: [HDPIMNativeProductContext],
         removeRepairPIMX: Bool = false,
@@ -2048,11 +2085,13 @@ final class HDPIMDatabase {
     }
 
     private func deleteProductInfo(for sapCode: String, version: String, processorFamily: HDPIMProcessorFamily) throws {
+        print("[HDPIM-DELETE-PRODUCT] 即将删除产品记录: \(sapCode) \(version) \(processorFamily.rawValue)")
         try delete(
             table: Schema.productInstallationInfo,
             whereClause: "SAPCode = ? AND ProductVersion = ? AND ProcessorFamily = ?",
             bindings: [sapCode, version, processorFamily.rawValue]
         )
+        print("[HDPIM-DELETE-PRODUCT] 已删除产品记录: \(sapCode)")
     }
 
     private func deleteProductMeta(for sapCode: String, version: String, processorFamily: HDPIMProcessorFamily) throws {
@@ -2091,11 +2130,13 @@ final class HDPIMDatabase {
         packageName: String,
         packageVersion: String
     ) throws {
+        print("[HDPIM-DELETE-PKG] 即将删除包记录: \(sapCode) \(version) \(packageName) \(packageVersion)")
         try delete(
             table: Schema.packageInstallationInfo,
             whereClause: "SAPCode = ? AND ProductVersion = ? AND ProcessorFamily = ? AND PackageName = ? AND PackageVersion = ?",
             bindings: [sapCode, version, processorFamily.rawValue, packageName, packageVersion]
         )
+        print("[HDPIM-DELETE-PKG] 已删除包记录: \(packageName)")
     }
 
     private func deletePackageMeta(for sapCode: String, version: String, processorFamily: HDPIMProcessorFamily) throws {

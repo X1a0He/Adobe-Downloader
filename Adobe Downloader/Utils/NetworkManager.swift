@@ -15,6 +15,7 @@ class NetworkManager: ObservableObject {
 	@Published var installCommand: String = ""
 	@Published var installLogs: [String] = []
 	@Published var uninstallLogs: [String] = []
+	@Published var installStateRevision: Int = 0
 	internal var progressObservers: [UUID: NSKeyValueObservation] = [:]
 	internal var activeDownloadTaskId: UUID?
 	internal var monitor = NWPathMonitor()
@@ -24,6 +25,7 @@ class NetworkManager: ObservableObject {
 	private var lastInstallationProgress = 0.0
 	private var lastInstallationStatus = "准备安装..."
 	private var lastInstallationPhase: InstallProgressPhase = .preparing
+	private var installationSessionID = UUID()
 	private var lastUninstallProgress = 0.0
 	private var lastUninstallStatus = "准备卸载..."
 	private var lastUninstallPhase: InstallProgressPhase = .preparing
@@ -42,6 +44,18 @@ class NetworkManager: ObservableObject {
         get { StorageData.shared.apiVersion }
         set { StorageData.shared.apiVersion = newValue }
     }
+
+	func notifyInstallStateChanged() {
+		installStateRevision += 1
+	}
+
+	private func completeInstallation() {
+		if case .completed = installationState {
+			return
+		}
+		installationState = .completed
+		notifyInstallStateChanged()
+	}
     
     enum InstallationState {
         case idle
@@ -249,7 +263,9 @@ class NetworkManager: ObservableObject {
    }
 
     func installProduct(at path: URL) async {
+        let sessionID = UUID()
         await MainActor.run {
+            installationSessionID = sessionID
             installationState = .installing(progress: 0, status: "准备安装...")
             installLogs = []
             installCommand = ""
@@ -262,9 +278,10 @@ class NetworkManager: ObservableObject {
                 at: path,
                 progressHandler: { progress, status in
                     Task { @MainActor in
+                        guard self.installationSessionID == sessionID else { return }
                         self.updateInstallationSnapshot(progress: progress, status: status)
                         if status == "安装完成" {
-                            self.installationState = .completed
+							self.completeInstallation()
                         } else {
                             self.installationState = .installing(progress: progress, status: status)
                         }
@@ -272,14 +289,16 @@ class NetworkManager: ObservableObject {
                 },
                 logHandler: { message in
                     Task { @MainActor in
+                        guard self.installationSessionID == sessionID else { return }
                         self.appendInstallLog(message)
                     }
                 }
             )
             
             await MainActor.run {
+                guard installationSessionID == sessionID else { return }
                 updateInstallationSnapshot(progress: 1.0, status: "安装完成")
-                installationState = .completed
+				completeInstallation()
             }
         } catch {
             let command = await installManager.getInstallCommand(
@@ -287,6 +306,7 @@ class NetworkManager: ObservableObject {
             )
             
             await MainActor.run {
+                guard installationSessionID == sessionID else { return }
                 self.installCommand = command
                 
                 var errorDetails: String? = nil
@@ -317,8 +337,23 @@ class NetworkManager: ObservableObject {
         }
     }
 
+    func clearInstallationSheetState() {
+        if case .installing = installationState {
+            cancelInstallation()
+        }
+        installationSessionID = UUID()
+        installationState = .idle
+        installLogs = []
+        installCommand = ""
+        lastInstallationProgress = 0
+        lastInstallationStatus = "准备安装..."
+        lastInstallationPhase = .preparing
+    }
+
     func retryInstallation(at path: URL) async {
+        let sessionID = UUID()
         await MainActor.run {
+            installationSessionID = sessionID
             installationState = .installing(progress: 0, status: "正在重试安装...")
             installLogs = []
             installCommand = ""
@@ -331,9 +366,10 @@ class NetworkManager: ObservableObject {
                 at: path,
                 progressHandler: { progress, status in
                     Task { @MainActor in
+                        guard self.installationSessionID == sessionID else { return }
                         self.updateInstallationSnapshot(progress: progress, status: status)
                         if status == "安装完成" {
-                            self.installationState = .completed
+							self.completeInstallation()
                         } else {
                             self.installationState = .installing(progress: progress, status: status)
                         }
@@ -341,17 +377,20 @@ class NetworkManager: ObservableObject {
                 },
                 logHandler: { message in
                     Task { @MainActor in
+                        guard self.installationSessionID == sessionID else { return }
                         self.appendInstallLog(message)
                     }
                 }
             )
             
             await MainActor.run {
+                guard installationSessionID == sessionID else { return }
                 updateInstallationSnapshot(progress: 1.0, status: "安装完成")
-                installationState = .completed
+				completeInstallation()
             }
         } catch {
             await MainActor.run {
+                guard installationSessionID == sessionID else { return }
                 var errorDetails: String? = nil
                 var mainError = error
                 
@@ -585,6 +624,7 @@ class NetworkManager: ObservableObject {
 				appendUninstallLog("卸载完成")
 				uninstallState = .installing(progress: snapshot.progress, status: snapshot.status)
 				uninstallState = .completed
+				notifyInstallStateChanged()
 				objectWillChange.send()
 			}
 		} catch {
@@ -601,28 +641,55 @@ class NetworkManager: ObservableObject {
 		let outputState = InstallManager.InstallOutputState()
 		let executablePath = Bundle.main.executableURL?.path ?? CommandLine.arguments[0]
 
-		try await HelperManager.shared.executeHDPIMUninstall(
-			request: request,
-			userHome: NSHomeDirectory(),
-			executablePath: executablePath
-		) { [weak self] output in
+		do {
+			try await HelperManager.shared.executeHDPIMUninstall(
+				request: request,
+				userHome: NSHomeDirectory(),
+				executablePath: executablePath
+			) { [weak self] output in
+				InstallManager.consumeHelperOutput(
+					output,
+					state: outputState,
+					progressHandler: { progress, status in
+						Task { @MainActor in
+							guard let self else { return }
+							let snapshot = self.updateUninstallSnapshot(progress: progress, status: status)
+							self.uninstallState = .installing(progress: snapshot.progress, status: snapshot.status)
+						}
+					},
+					logHandler: { message in
+						Task { @MainActor in
+							self?.appendUninstallLog(message)
+						}
+					},
+					failureStatusPrefix: "卸载失败"
+				)
+			}
+		} catch {
 			InstallManager.consumeHelperOutput(
-				output,
+				"\n",
 				state: outputState,
 				progressHandler: { progress, status in
 					Task { @MainActor in
-						guard let self else { return }
 						let snapshot = self.updateUninstallSnapshot(progress: progress, status: status)
 						self.uninstallState = .installing(progress: snapshot.progress, status: snapshot.status)
 					}
 				},
-				logHandler: { message in
+				logHandler: { [weak self] message in
 					Task { @MainActor in
 						self?.appendUninstallLog(message)
 					}
 				},
 				failureStatusPrefix: "卸载失败"
 			)
+			if let lastStructuredError = outputState.lastStructuredError {
+				throw NSError(
+					domain: "HDPIMUninstall",
+					code: 1,
+					userInfo: [NSLocalizedDescriptionKey: lastStructuredError]
+				)
+			}
+			throw error
 		}
 
 		InstallManager.consumeHelperOutput(

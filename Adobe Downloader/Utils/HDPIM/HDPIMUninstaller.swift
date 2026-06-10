@@ -99,6 +99,11 @@ private struct HDPIMUninstallCompletionSnapshot {
 	}
 }
 
+private struct HDPIMPackageUninstallPlan {
+	let package: HDPIMNativePackageContext
+	let pimxPlan: HDPIMRollbackHelper.UninstallPIMXPlan?
+}
+
 private final class HDPIMUninstallProgressReporter {
 	private static let chunkSize: Int64 = 2 * 1024 * 1024
 	private let progressHandler: ((Double, String) -> Void)?
@@ -341,6 +346,11 @@ final class HDPIMUninstaller {
 				database.close()
 			}
 		}
+		func reopenDatabaseIfNeeded() throws {
+			if shouldClose && !database.isOpen {
+				try database.open()
+			}
+		}
 
 		progressHandler?(0.04, "正在分析 HDPIM 卸载状态")
 
@@ -350,6 +360,7 @@ final class HDPIMUninstaller {
 				version: version,
 				processorFamily: processorFamily
 			)
+			print("[HDPIM-DEP] 依赖检查 \(sapCode) \(version): canUninstall=\(canUninstall.canUninstall), reason=\(canUninstall.reason ?? "无")")
 
 			guard canUninstall.canUninstall else {
 				throw UninstallError.dependencyExists(canUninstall.reason ?? "")
@@ -370,9 +381,8 @@ final class HDPIMUninstaller {
 			processorFamily: processorFamily,
 			target: target
 		)
-		let validPackages = try validInstalledPackages(
-			selectedPackages,
-			database: database
+		let validPackages = validInstalledPackages(
+			selectedPackages
 		)
 
 		guard !validPackages.isEmpty || target.isModuleUninstall else {
@@ -409,10 +419,14 @@ final class HDPIMUninstaller {
 			target: target,
 			packages: selectedPackages
 		)
+		let uninstallPlans = try validPackages.map { package in
+			try makePackageUninstallPlan(package, database: database)
+		}
 
-		for (index, package) in validPackages.enumerated() {
+		for (index, plan) in uninstallPlans.enumerated() {
+			let package = plan.package
 			progressReporter.beginPackage(package, index: index + 1, total: validPackages.count)
-			try await uninstallPackage(package, database: database, progressReporter: progressReporter)
+			try await uninstallPackage(plan, progressReporter: progressReporter)
 			try database.removeInstalledPackages([package])
 			progressReporter.completePackage(package)
 		}
@@ -539,33 +553,9 @@ final class HDPIMUninstaller {
 	}
 
 	private static func validInstalledPackages(
-		_ packages: [HDPIMNativePackageContext],
-		database: HDPIMDatabase
-	) throws -> [HDPIMNativePackageContext] {
-		var validPackages: [HDPIMNativePackageContext] = []
-		var invalidPackages: [HDPIMNativePackageContext] = []
-
-		for package in packages {
-			let isValid = try database.hasValidInstalledPackage(
-				sapCode: package.sapCode,
-				productVersion: package.productVersion,
-				processorFamily: package.processorFamily,
-				packageName: package.packageName,
-				packageVersion: package.packageVersion,
-				expectedInstallDir: package.installDir
-			)
-			if isValid {
-				validPackages.append(package)
-			} else {
-				invalidPackages.append(package)
-			}
-		}
-
-		if !invalidPackages.isEmpty {
-			try database.removeInstalledPackages(invalidPackages)
-		}
-
-		return validPackages
+		_ packages: [HDPIMNativePackageContext]
+	) -> [HDPIMNativePackageContext] {
+		packages
 	}
 
 	private static func validateDependentProductsForProductUninstall(
@@ -762,23 +752,17 @@ final class HDPIMUninstaller {
 	}
 
 	private static func uninstallPackage(
-		_ package: HDPIMNativePackageContext,
-		database: HDPIMDatabase,
+		_ plan: HDPIMPackageUninstallPlan,
 		progressReporter: HDPIMUninstallProgressReporter?
 	) async throws {
-		guard let pimxPath = package.uninstallPIMXPath,
-		      !pimxPath.isEmpty else {
-			throw UninstallError.missingUninstallPIMX(package.packageName)
+		let package = plan.package
+		guard let pimxPlan = plan.pimxPlan else {
+			progressReporter?.reportPackageProgress(package, processedBytes: progressReporter?.packageWorkSize(for: package) ?? 0, detail: "卸载 PIMX 已缺失，安装目标已不存在，跳过命令执行")
+			return
 		}
 
-		guard FileManager.default.fileExists(atPath: pimxPath) else {
-			throw UninstallError.missingUninstallPIMX(pimxPath)
-		}
-
-		let propertyTable = makePropertyTable(for: package, database: database)
-		try await HDPIMRollbackHelper.executeUninstallPIMX(
-			at: URL(fileURLWithPath: pimxPath),
-			propertyTable: propertyTable,
+		try await HDPIMRollbackHelper.executeUninstallPIMXPlan(
+			pimxPlan,
 			estimatedWorkSize: progressReporter?.packageWorkSize(for: package) ?? 0,
 			progressHandler: { processedBytes, detail in
 				progressReporter?.reportPackageProgress(
@@ -788,6 +772,49 @@ final class HDPIMUninstaller {
 				)
 			}
 		)
+	}
+
+	private static func makePackageUninstallPlan(
+		_ package: HDPIMNativePackageContext,
+		database: HDPIMDatabase
+	) throws -> HDPIMPackageUninstallPlan {
+		guard let pimxPath = package.uninstallPIMXPath,
+		      !pimxPath.isEmpty else {
+			throw UninstallError.missingUninstallPIMX(package.packageName)
+		}
+
+		let propertyTable = makePropertyTable(for: package, database: database)
+		guard FileManager.default.fileExists(atPath: pimxPath) else {
+			if installedTargetsAreGone(package: package, propertyTable: propertyTable) {
+				return HDPIMPackageUninstallPlan(
+					package: package,
+					pimxPlan: nil
+				)
+			}
+			throw UninstallError.missingUninstallPIMX(pimxPath)
+		}
+
+		let pimxPlan = try HDPIMRollbackHelper.makeUninstallPIMXPlan(
+			at: URL(fileURLWithPath: pimxPath),
+			propertyTable: propertyTable
+		)
+		return HDPIMPackageUninstallPlan(
+			package: package,
+			pimxPlan: pimxPlan
+		)
+	}
+
+	private static func installedTargetsAreGone(
+		package: HDPIMNativePackageContext,
+		propertyTable: HDPIMPropertyTable
+	) -> Bool {
+		let targets = package.targetFolders
+			.map { propertyTable.expandPath($0).trimmingCharacters(in: .whitespacesAndNewlines) }
+			.filter { !$0.isEmpty && !$0.contains("[") }
+		guard !targets.isEmpty else {
+			return false
+		}
+		return targets.allSatisfy { !FileManager.default.fileExists(atPath: $0) }
 	}
 
 	private static func makePropertyTable(
@@ -876,7 +903,14 @@ final class HDPIMUninstaller {
 
 		switch target {
 		case .product:
-			break
+			try await removeProductIfNoPackagesRemain(
+				database: database,
+				sapCode: sapCode,
+				version: version,
+				processorFamily: processorFamily,
+				snapshot: snapshot
+			)
+
 		case .modules(let moduleIds):
 			let modulesToRemove = snapshot.modulesToRemove.intersection(moduleIds)
 			if !modulesToRemove.isEmpty {
@@ -891,14 +925,6 @@ final class HDPIMUninstaller {
 		case .packages:
 			break
 		}
-
-		try await removeProductIfNoPackagesRemain(
-			database: database,
-			sapCode: sapCode,
-			version: version,
-			processorFamily: processorFamily,
-			snapshot: snapshot
-		)
 
 		await removePathIfExists("/.adobeTemp")
 	}
@@ -915,11 +941,14 @@ final class HDPIMUninstaller {
 			version: version,
 			processorFamily: processorFamily
 		)
+		print("[HDPIM-COMPLETION] \(sapCode) \(version) 剩余包数量: \(remainingPackages.count)")
 		guard remainingPackages.isEmpty else {
+			print("[HDPIM-COMPLETION] \(sapCode) 还有 \(remainingPackages.count) 个包未删除，保留产品记录")
 			return
 		}
 
-		try database.removeInstallations(productKeys: [
+		print("[HDPIM-COMPLETION] \(sapCode) 所有包已删除，开始删除产品记录")
+		try database.removeProductInstallationRecords(productKeys: [
 			HDPIMNativeProductKey(
 				sapCode: sapCode,
 				version: version,
