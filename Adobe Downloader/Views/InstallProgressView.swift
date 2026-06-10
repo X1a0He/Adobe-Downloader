@@ -18,54 +18,109 @@ enum InstallProgressOperation: Equatable {
     var actionName: String {
         switch self {
         case .install:
-            return "安装"
+            return String(localized: "安装")
         case .uninstall:
-            return "卸载"
+            return String(localized: "卸载")
         }
     }
 
     var runningBadge: String {
-        "\(actionName)中"
+        switch self {
+        case .install:
+            return String(localized: "安装中")
+        case .uninstall:
+            return String(localized: "卸载中")
+        }
     }
 
     var completedBadge: String {
-        "\(actionName)完成"
+        switch self {
+        case .install:
+            return String(localized: "安装完成")
+        case .uninstall:
+            return String(localized: "卸载完成")
+        }
     }
 
     var failedBadge: String {
-        "\(actionName)失败"
+        switch self {
+        case .install:
+            return String(localized: "安装失败")
+        case .uninstall:
+            return String(localized: "卸载失败")
+        }
     }
 
     var completedStatusText: String {
-        "\(actionName)已完成"
+        switch self {
+        case .install:
+            return String(localized: "安装已完成")
+        case .uninstall:
+            return String(localized: "卸载已完成")
+        }
     }
 
     var phaseSectionTitle: String {
-        "\(actionName)阶段"
+        switch self {
+        case .install:
+            return String(localized: "安装阶段")
+        case .uninstall:
+            return String(localized: "卸载阶段")
+        }
     }
 
     var infoSectionTitle: String {
-        "\(actionName)信息"
+        switch self {
+        case .install:
+            return String(localized: "安装信息")
+        case .uninstall:
+            return String(localized: "卸载信息")
+        }
     }
 
     var logPanelTitle: String {
-        "\(actionName)日志"
+        switch self {
+        case .install:
+            return String(localized: "安装日志")
+        case .uninstall:
+            return String(localized: "卸载日志")
+        }
     }
 
     var emptyLogTitle: String {
-        "暂无\(actionName)日志"
+        switch self {
+        case .install:
+            return String(localized: "暂无安装日志")
+        case .uninstall:
+            return String(localized: "暂无卸载日志")
+        }
     }
 
     var emptyLogMessage: String {
-        "\(actionName)进行后，这里会实时展示输出内容。"
+        switch self {
+        case .install:
+            return String(localized: "安装进行后，这里会实时展示输出内容。")
+        case .uninstall:
+            return String(localized: "卸载进行后，这里会实时展示输出内容。")
+        }
     }
 
     var copiedLogsMessage: String {
-        "\(actionName)日志已复制到剪贴板"
+        switch self {
+        case .install:
+            return String(localized: "安装日志已复制到剪贴板")
+        case .uninstall:
+            return String(localized: "卸载日志已复制到剪贴板")
+        }
     }
 
     var commandTitle: String {
-        "\(actionName)命令"
+        switch self {
+        case .install:
+            return String(localized: "安装命令")
+        case .uninstall:
+            return String(localized: "卸载命令")
+        }
     }
 }
 
@@ -80,26 +135,26 @@ enum InstallProgressPhase: Int, CaseIterable {
     var title: String {
         switch self {
         case .preparing:
-            return "准备"
+            return String(localized: "准备")
         case .parsing:
-            return "解析"
+            return String(localized: "解析")
         case .backingUp:
-            return "备份"
+            return String(localized: "备份")
         case .extracting:
-            return "解压"
+            return String(localized: "解压")
         case .installing:
-            return "安装"
+            return String(localized: "安装")
         case .finishing:
-            return "收尾"
+            return String(localized: "收尾")
         }
     }
 
     func title(for operation: InstallProgressOperation) -> String {
         switch (self, operation) {
         case (.parsing, .uninstall):
-            return "分析"
+            return String(localized: "分析")
         case (.installing, .uninstall):
-            return "卸载"
+            return String(localized: "卸载")
         default:
             return title
         }
@@ -205,11 +260,26 @@ struct InstallProgressViewData {
     var statusTitle: String {
         switch outcome {
         case .completed:
-            return "\(productName) \(operation.completedBadge)"
+            switch operation {
+            case .install:
+                return String(format: String(localized: "%@ 安装完成"), productName)
+            case .uninstall:
+                return String(format: String(localized: "%@ 卸载完成"), productName)
+            }
         case .failed:
-            return "\(productName) \(operation.failedBadge)"
+            switch operation {
+            case .install:
+                return String(format: String(localized: "%@ 安装失败"), productName)
+            case .uninstall:
+                return String(format: String(localized: "%@ 卸载失败"), productName)
+            }
         case .running:
-            return "正在\(operation.actionName) \(productName)"
+            switch operation {
+            case .install:
+                return String(format: String(localized: "正在安装 %@"), productName)
+            case .uninstall:
+                return String(format: String(localized: "正在卸载 %@"), productName)
+            }
         }
     }
 
@@ -255,25 +325,25 @@ enum InstallProgressTextParser {
     static func phase(from status: String, logs: [String], outcome: InstallProgressOutcome) -> InstallProgressPhase {
         let source = phaseSource(from: status, logs: logs, outcome: outcome)
 
-        if outcome == .completed || source.contains("安装完成") || source.contains("卸载完成") || source.contains("没有需要安装的包") {
+        if outcome == .completed || source.contains("安装完成") || source.contains("卸载完成") || source.contains("Install completed") || source.contains("Uninstall completed") || source.contains("No packages need to be installed") {
             return .finishing
         }
-        if source.contains("回滚") || source.contains("清理") {
+        if source.contains("回滚") || source.contains("清理") || source.contains("rollback") || source.contains("clean") {
             return .finishing
         }
-        if source.contains("正在安装") || source.contains("正在卸载") || source.contains("正在处理:") {
+        if source.contains("正在安装") || source.contains("正在卸载") || source.contains("正在处理:") || source.contains("Installing ") || source.contains("Uninstalling ") || source.contains("Processing:") {
             return .installing
         }
-        if source.contains("解压") {
+        if source.contains("解压") || source.contains("Extracting ") {
             return .extracting
         }
-        if source.contains("备份") {
+        if source.contains("备份") || source.contains("Backing up ") {
             return .backingUp
         }
         if source.contains("解析 driver.xml") || source.contains("收集包信息") {
             return .parsing
         }
-        if source.contains("分析 HDPIM 卸载") || source.contains("准备安装") || source.contains("准备卸载") || source.contains("重试安装") || source.contains("临时安装目录") {
+        if source.contains("分析 HDPIM 卸载") || source.contains("准备安装") || source.contains("准备卸载") || source.contains("重试安装") || source.contains("临时安装目录") || source.contains("Analyzing HDPIM uninstall") || source.contains("Preparing install") || source.contains("Preparing uninstall") || source.contains("Retrying install") || source.contains("temporary install") {
             return .preparing
         }
         return .preparing
@@ -296,7 +366,7 @@ enum InstallProgressTextParser {
     }
 
     private static func hasPhaseKeyword(_ text: String) -> Bool {
-        let keywords = ["准备安装", "准备卸载", "重试安装", "解析 driver.xml", "收集包信息", "分析 HDPIM 卸载", "备份", "解压", "正在安装", "正在卸载", "正在处理:", "清理", "回滚", "安装完成", "卸载完成"]
+        let keywords = ["准备安装", "准备卸载", "重试安装", "解析 driver.xml", "收集包信息", "分析 HDPIM 卸载", "备份", "解压", "正在安装", "正在卸载", "正在处理:", "清理", "回滚", "安装完成", "卸载完成", "Preparing install", "Preparing uninstall", "Retrying install", "Analyzing HDPIM uninstall", "Backing up", "Extracting", "Installing", "Uninstalling", "Processing:", "clean", "rollback", "Install completed", "Uninstall completed"]
         return keywords.contains { text.contains($0) }
     }
 
@@ -310,6 +380,18 @@ enum InstallProgressTextParser {
         }
 
         if let packageName = extractSegment(after: "正在卸载 ", in: text) {
+            return packageName
+        }
+
+        if let packageName = extractSegment(after: "Extracting ", in: text) {
+            return packageName
+        }
+
+        if let packageName = extractSegment(after: "Installing ", in: text) {
+            return packageName
+        }
+
+        if let packageName = extractSegment(after: "Uninstalling ", in: text) {
             return packageName
         }
 

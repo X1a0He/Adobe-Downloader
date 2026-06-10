@@ -53,7 +53,7 @@ enum HDPIMHeadlessInstallRunner {
                 emit("PROGRESS|\(progress)|\(sanitize(status))")
             }
 
-            progressHandler(0.02, "正在准备 HDPIM 卸载流程")
+            progressHandler(0.02, String(localized: "正在准备 HDPIM 卸载流程"))
             switch request.target {
             case .product:
                 try await HDPIMUninstaller.uninstall(
@@ -84,7 +84,7 @@ enum HDPIMHeadlessInstallRunner {
                     progressHandler: progressHandler
                 )
             }
-            progressHandler(1.0, "卸载完成")
+            progressHandler(1.0, String(localized: "卸载完成"))
         }
     }
 

@@ -1188,11 +1188,11 @@ private enum PendingUninstallAction: Identifiable, Equatable {
 	var title: String {
 		switch self {
 		case .product:
-			return "卸载产品"
+			return String(localized: "卸载产品")
 		case .modules(let moduleIds):
-			return moduleIds.count > 1 ? "移除多个模块" : "移除模块"
+			return moduleIds.count > 1 ? String(localized: "移除多个模块") : String(localized: "移除模块")
 		case .package:
-			return "卸载包"
+			return String(localized: "卸载包")
 		}
 	}
 }
@@ -1226,7 +1226,7 @@ private struct InstalledProductUninstallSection: View {
 	}
 
 	private var packageCountText: String {
-		"\(installedProduct.packages.count) 个包"
+		String(format: String(localized: "%d 个包"), installedProduct.packages.count)
 	}
 
 	private var canSelectMultipleModules: Bool {
@@ -1234,7 +1234,9 @@ private struct InstalledProductUninstallSection: View {
 	}
 
 	private var selectedModuleCountText: String {
-		selectedModuleIds.isEmpty ? "未选择模块" : "已选择 \(selectedModuleIds.count) 个模块"
+		selectedModuleIds.isEmpty
+			? String(localized: "未选择模块")
+			: String(format: String(localized: "已选择 %d 个模块"), selectedModuleIds.count)
 	}
 
 	private var selectableModuleIds: Set<String> {
@@ -1482,15 +1484,15 @@ private struct InstalledProductUninstallSection: View {
 	private func confirmMessage(for action: PendingUninstallAction) -> String {
 		switch action {
 		case .product:
-			return "将按 HDPIM 产品卸载流程移除 \(displayName) \(version)。"
+			return String(format: String(localized: "将按 HDPIM 产品卸载流程移除 %@ %@。"), displayName, version)
 		case .modules(let moduleIds):
 			let names = moduleIds.sorted().joined(separator: "、")
 			if moduleIds.count > 1 {
-				return "将按 HDPIM 模块卸载流程移除 \(moduleIds.count) 个模块：\(names)。"
+				return String(format: String(localized: "将按 HDPIM 模块卸载流程移除 %d 个模块：%@。"), moduleIds.count, names)
 			}
-			return "将按 HDPIM 模块卸载流程移除模块 \(names)。"
+			return String(format: String(localized: "将按 HDPIM 模块卸载流程移除模块 %@。"), names)
 		case .package(let packageKey):
-			return "将按 HDPIM 包级卸载流程移除包 \(packageKey.packageName) \(packageKey.packageVersion)。"
+			return String(format: String(localized: "将按 HDPIM 包级卸载流程移除包 %@ %@。"), packageKey.packageName, packageKey.packageVersion)
 		}
 	}
 

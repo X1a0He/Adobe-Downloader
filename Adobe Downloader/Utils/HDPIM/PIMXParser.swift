@@ -658,6 +658,34 @@ class PIMXParser {
         return normalized == "true" || normalized == "1" || normalized == "yes"
     }
 
+    static func readPackageVersion(from pimxURL: URL) -> String {
+        guard let xmlData = try? loadXMLData(from: pimxURL, writeBackIfNeeded: false),
+              let xmlDoc = try? XMLDocument(data: xmlData, options: []),
+              let root = xmlDoc.rootElement() else {
+            return ""
+        }
+
+        let candidates = [
+            "version",
+            "PackageVersion",
+            "Version",
+            "CodexVersion",
+            "ProductVersion",
+            "BuildVersion",
+            "BaseVersion"
+        ]
+
+        for key in candidates {
+            let nodes = try? root.nodes(forXPath: key)
+            if let value = nodes?.first?.stringValue?.trimmingCharacters(in: .whitespacesAndNewlines),
+               !value.isEmpty {
+                return value
+            }
+        }
+
+        return ""
+    }
+
     static func loadXMLData(from pimxURL: URL, writeBackIfNeeded: Bool = true) throws -> Data {
         var xmlData = try Data(contentsOf: pimxURL)
         let firstChunk = String(data: xmlData.prefix(200), encoding: .utf8) ?? ""

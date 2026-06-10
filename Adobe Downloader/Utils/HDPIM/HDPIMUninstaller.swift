@@ -132,9 +132,9 @@ private final class HDPIMUninstallProgressReporter {
 	func reportPackageSelection(packageCount: Int) {
 		let status: String
 		if packageCount > 0 {
-			status = "正在准备 \(packageCount) 个 HDPIM 卸载包"
+			status = String(format: String(localized: "正在准备 %d 个 HDPIM 卸载包"), packageCount)
 		} else {
-			status = "未找到需要删除的包，正在更新 HDPIM 模块状态"
+			status = String(localized: "未找到需要删除的包，正在更新 HDPIM 模块状态")
 		}
 		emit(0.08, status)
 	}
@@ -142,7 +142,7 @@ private final class HDPIMUninstallProgressReporter {
 	func beginPackage(_ package: HDPIMNativePackageContext, index: Int, total: Int) {
 		currentPackageId = Self.packageId(package)
 		currentPackageWorkSize = 0
-		emitPackageProgress(status: "正在卸载 \(package.packageName) (\(index)/\(total))")
+		emitPackageProgress(status: String(format: String(localized: "正在卸载 %@ (%d/%d)"), package.packageName, index, total))
 	}
 
 	func packageWorkSize(for package: HDPIMNativePackageContext) -> Int64 {
@@ -156,7 +156,7 @@ private final class HDPIMUninstallProgressReporter {
 		}
 		currentPackageId = Self.packageId(package)
 		currentPackageWorkSize = min(max(processedBytes, currentPackageWorkSize), size)
-		emitPackageProgress(status: "正在卸载 \(package.packageName): \(detail)")
+		emitPackageProgress(status: String(format: String(localized: "正在卸载 %@: %@"), package.packageName, detail))
 	}
 
 	func completePackage(_ package: HDPIMNativePackageContext) {
@@ -164,7 +164,7 @@ private final class HDPIMUninstallProgressReporter {
 		completedWorkSize += size
 		currentPackageId = nil
 		currentPackageWorkSize = 0
-		emitPackageProgress(status: "已完成 \(package.packageName) 卸载")
+		emitPackageProgress(status: String(format: String(localized: "已完成 %@ 卸载"), package.packageName))
 	}
 
 	func reportCompletion(_ status: String) {
@@ -172,7 +172,7 @@ private final class HDPIMUninstallProgressReporter {
 	}
 
 	func reportFinished() {
-		emit(1.0, "卸载完成", force: true)
+		emit(1.0, String(localized: "卸载完成"), force: true)
 	}
 
 	private func emitPackageProgress(status: String) {
@@ -352,7 +352,7 @@ final class HDPIMUninstaller {
 			}
 		}
 
-		progressHandler?(0.04, "正在分析 HDPIM 卸载状态")
+		progressHandler?(0.04, String(localized: "正在分析 HDPIM 卸载状态"))
 
 		if case .product = target {
 			let canUninstall = HDPIMDependencyManager.shared.canUninstall(
@@ -431,7 +431,7 @@ final class HDPIMUninstaller {
 			progressReporter.completePackage(package)
 		}
 
-		progressReporter.reportCompletion("正在完成 HDPIM 卸载状态更新")
+		progressReporter.reportCompletion(String(localized: "正在完成 HDPIM 卸载状态更新"))
 		try await performCompletion(
 			database: database,
 			sapCode: sapCode,
@@ -757,7 +757,7 @@ final class HDPIMUninstaller {
 	) async throws {
 		let package = plan.package
 		guard let pimxPlan = plan.pimxPlan else {
-			progressReporter?.reportPackageProgress(package, processedBytes: progressReporter?.packageWorkSize(for: package) ?? 0, detail: "卸载 PIMX 已缺失，安装目标已不存在，跳过命令执行")
+			progressReporter?.reportPackageProgress(package, processedBytes: progressReporter?.packageWorkSize(for: package) ?? 0, detail: String(localized: "卸载 PIMX 已缺失，安装目标已不存在，跳过命令执行"))
 			return
 		}
 
@@ -1130,7 +1130,7 @@ final class HDPIMUninstaller {
 			throw NSError(
 				domain: "HDPIMUninstaller",
 				code: 1,
-				userInfo: [NSLocalizedDescriptionKey: "禁止删除共享根目录: \(path)"]
+				userInfo: [NSLocalizedDescriptionKey: String(format: String(localized: "禁止删除共享根目录: %@"), path)]
 			)
 		}
 
@@ -1241,17 +1241,17 @@ enum UninstallError: Error, LocalizedError {
 	var errorDescription: String? {
 		switch self {
 		case .dependencyExists(let reason):
-			return reason.isEmpty ? "该产品仍被其他产品引用，不能卸载" : reason
+			return reason.isEmpty ? String(localized: "该产品仍被其他产品引用，不能卸载") : reason
 		case .uwpReferenceExists(let reason):
-			return reason.isEmpty ? "该 UWP 产品仍被其他产品引用，不能卸载" : reason
+			return reason.isEmpty ? String(localized: "该 UWP 产品仍被其他产品引用，不能卸载") : reason
 		case .noPackagesSelected:
-			return "没有找到可卸载的包"
+			return String(localized: "没有找到可卸载的包")
 		case .moduleNotInstalled:
-			return "所选模块未安装或已被移除"
+			return String(localized: "所选模块未安装或已被移除")
 		case .missingUninstallPIMX(let value):
-			return "找不到卸载 PIMX: \(value)"
+			return String(format: String(localized: "找不到卸载 PIMX: %@"), value)
 		case .conflictingProcesses(let processes):
-			return "检测到冲突进程，请先退出: \(processes.joined(separator: ", "))"
+			return String(format: String(localized: "检测到冲突进程，请先退出: %@"), processes.joined(separator: ", "))
 		}
 	}
 }

@@ -165,7 +165,8 @@ actor InstallManager {
         state: InstallOutputState,
         progressHandler: @escaping (Double, String) -> Void,
         logHandler: ((String) -> Void)?,
-        failureStatusPrefix: String = "安装失败"
+        failureStatusPrefix: String = "安装失败",
+        includeUnstructuredOutput: Bool = true
     ) {
         state.pending.append(output.replacingOccurrences(of: "\r\n", with: "\n"))
 
@@ -217,6 +218,10 @@ actor InstallManager {
             }
 
             if line.hasPrefix("Exit Code:") {
+                continue
+            }
+
+            guard includeUnstructuredOutput else {
                 continue
             }
 

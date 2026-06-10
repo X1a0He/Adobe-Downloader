@@ -163,6 +163,56 @@ struct SettingsStatusChip: View {
     }
 }
 
+struct X1a0HeCCInstallStatus {
+    let isInstalled: Bool
+    let hdBoxVersion: String
+    let ipcBoxVersion: String
+
+    var statusText: String {
+        isInstalled ? String(localized: "已安装") : String(localized: "未安装")
+    }
+
+    var statusIcon: String {
+        isInstalled ? "checkmark.circle.fill" : "xmark.circle.fill"
+    }
+
+    var statusTint: Color {
+        isInstalled ? .green : .orange
+    }
+
+    var subtitle: String {
+        guard isInstalled else {
+            return String(localized: "下载 HDBox 和 IPCBox 组件")
+        }
+
+        return "HDBox \(displayVersion(hdBoxVersion)) / IPCBox \(displayVersion(ipcBoxVersion))"
+    }
+
+    static func detect() -> X1a0HeCCInstallStatus {
+        let baseURL = URL(fileURLWithPath: "/Library/Application Support/Adobe/Adobe Desktop Common", isDirectory: true)
+        let hdBoxURL = baseURL.appendingPathComponent("HDBox", isDirectory: true)
+        let ipcBoxURL = baseURL.appendingPathComponent("IPCBox", isDirectory: true)
+
+        let isInstalled = directoryExists(at: hdBoxURL) && directoryExists(at: ipcBoxURL)
+
+        return X1a0HeCCInstallStatus(
+            isInstalled: isInstalled,
+            hdBoxVersion: PIMXParser.readPackageVersion(from: hdBoxURL.appendingPathComponent("HDBox.pimx")),
+            ipcBoxVersion: PIMXParser.readPackageVersion(from: ipcBoxURL.appendingPathComponent("IPCBox.pimx"))
+        )
+    }
+
+    private func displayVersion(_ version: String) -> String {
+        version.isEmpty ? String(localized: "未知 Setup 组件版本号") : version
+    }
+
+    private static func directoryExists(at url: URL) -> Bool {
+        var isDirectory: ObjCBool = false
+        let exists = FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory)
+        return exists && isDirectory.boolValue
+    }
+}
+
 struct ExternalLinkView: View {
     let title: String
     let url: String
@@ -373,6 +423,7 @@ final class GeneralSettingsViewModel: ObservableObject {
     @Published var isDownloadingSetup = false
     @Published var setupDownloadProgress = 0.0
     @Published var setupDownloadStatus = ""
+    @Published var ccInstallStatus = X1a0HeCCInstallStatus.detect()
     @Published var showAlert = false
     @Published var alertMessage = ""
     @Published var isSuccess = false
@@ -494,6 +545,10 @@ final class GeneralSettingsViewModel: ObservableObject {
     func cancelDownload() {
         isCancelled = true
     }
+
+    func refreshCCInstallStatus() {
+        ccInstallStatus = X1a0HeCCInstallStatus.detect()
+    }
 }
 
 struct GeneralSettingsView: View {
@@ -596,6 +651,7 @@ private struct GeneralSettingsAlerts: ViewModifier {
                 )
                 viewModel.isSuccess = true
                 viewModel.alertMessage = String(localized: "HDBox 和 IPCBox 下载成功")
+                viewModel.refreshCCInstallStatus()
             } catch NetworkError.cancelled {
                 viewModel.isSuccess = false
                 viewModel.alertMessage = String(localized: "下载已取消")
@@ -663,6 +719,9 @@ struct CCSettingsView: View {
             footer: String(localized: "下载 HDBox 和 IPCBox 组件")
         ) {
             SetupComponentRow(viewModel: viewModel)
+        }
+        .onAppear {
+            viewModel.refreshCCInstallStatus()
         }
     }
 }
@@ -1042,7 +1101,7 @@ struct SetupComponentRow: View {
             title: String(localized: "X1a0He CC"),
             subtitle: viewModel.isDownloadingSetup
                 ? viewModel.setupDownloadStatus
-                : String(localized: "下载 HDBox 和 IPCBox 组件"),
+                : viewModel.ccInstallStatus.subtitle,
             icon: "arrow.down.circle.fill",
             iconTint: .blue
         ) {
@@ -1060,6 +1119,12 @@ struct SetupComponentRow: View {
                     }
                     .buttonStyle(BeautifulButtonStyle(baseColor: Color.red))
                 } else {
+                    SettingsStatusChip(
+                        icon: viewModel.ccInstallStatus.statusIcon,
+                        text: viewModel.ccInstallStatus.statusText,
+                        tint: viewModel.ccInstallStatus.statusTint
+                    )
+
                     Button(action: { viewModel.showDownloadOnlyConfirmAlert = true }) {
                         HStack(spacing: 4) {
                             Image(systemName: "arrow.down.circle").font(.system(size: 10))

@@ -27,7 +27,7 @@ class NetworkManager: ObservableObject {
 	private var lastInstallationPhase: InstallProgressPhase = .preparing
 	private var installationSessionID = UUID()
 	private var lastUninstallProgress = 0.0
-	private var lastUninstallStatus = "准备卸载..."
+	private var lastUninstallStatus = String(localized: "准备卸载...")
 	private var lastUninstallPhase: InstallProgressPhase = .preparing
     
     private var defaultDirectory: String {
@@ -549,9 +549,9 @@ class NetworkManager: ObservableObject {
 			return InstallProgressViewData(
 				productName: productName,
 				progress: 0,
-				status: "准备卸载...",
+				status: String(localized: "准备卸载..."),
 				logs: uninstallLogs,
-				installCommand: "HDPIM Engine (内置卸载引擎)",
+				installCommand: String(localized: "HDPIM Engine (内置卸载引擎)"),
 				errorDetails: nil,
 				phase: .preparing,
 				outcome: .running,
@@ -563,7 +563,7 @@ class NetworkManager: ObservableObject {
 				progress: progress,
 				status: status,
 				logs: uninstallLogs,
-				installCommand: "HDPIM Engine (内置卸载引擎)",
+				installCommand: String(localized: "HDPIM Engine (内置卸载引擎)"),
 				errorDetails: nil,
 				phase: lastUninstallPhase,
 				outcome: .running,
@@ -573,9 +573,9 @@ class NetworkManager: ObservableObject {
 			return InstallProgressViewData(
 				productName: productName,
 				progress: 1.0,
-				status: "卸载完成",
+				status: String(localized: "卸载完成"),
 				logs: uninstallLogs,
-				installCommand: "HDPIM Engine (内置卸载引擎)",
+				installCommand: String(localized: "HDPIM Engine (内置卸载引擎)"),
 				errorDetails: nil,
 				phase: .finishing,
 				outcome: .completed,
@@ -587,7 +587,7 @@ class NetworkManager: ObservableObject {
 				progress: lastUninstallProgress,
 				status: normalizedUninstallFailureStatus(from: error),
 				logs: uninstallLogs,
-				installCommand: "HDPIM Engine (内置卸载引擎)",
+				installCommand: String(localized: "HDPIM Engine (内置卸载引擎)"),
 				errorDetails: errorDetails,
 				phase: lastUninstallPhase,
 				outcome: .failed,
@@ -602,26 +602,26 @@ class NetworkManager: ObservableObject {
 		operation: @escaping () async throws -> Void
 	) async {
 		await MainActor.run {
-			uninstallState = .installing(progress: 0, status: "准备卸载...")
+			uninstallState = .installing(progress: 0, status: String(localized: "准备卸载..."))
 			uninstallLogs = []
 			lastUninstallProgress = 0
-			lastUninstallStatus = "准备卸载..."
+			lastUninstallStatus = String(localized: "准备卸载...")
 			lastUninstallPhase = .preparing
-			appendUninstallLog("准备卸载 \(productName)")
+			appendUninstallLog(String(format: String(localized: "准备卸载 %@"), productName))
 		}
 
 		do {
 			await MainActor.run {
-				let snapshot = updateUninstallSnapshot(progress: 0.05, status: "正在准备 HDPIM 卸载流程...")
+				let snapshot = updateUninstallSnapshot(progress: 0.05, status: String(localized: "正在准备 HDPIM 卸载流程..."))
 				uninstallState = .installing(progress: snapshot.progress, status: snapshot.status)
-				appendUninstallLog("正在执行 HDPIM 卸载流程")
+				appendUninstallLog(String(localized: "正在执行 HDPIM 卸载流程"))
 			}
 
 			try await operation()
 
 			await MainActor.run {
-				let snapshot = updateUninstallSnapshot(progress: 1.0, status: "卸载完成")
-				appendUninstallLog("卸载完成")
+				let snapshot = updateUninstallSnapshot(progress: 1.0, status: String(localized: "卸载完成"))
+				appendUninstallLog(String(localized: "卸载完成"))
 				uninstallState = .installing(progress: snapshot.progress, status: snapshot.status)
 				uninstallState = .completed
 				notifyInstallStateChanged()
@@ -630,7 +630,7 @@ class NetworkManager: ObservableObject {
 		} catch {
 			await MainActor.run {
 				let message = error.localizedDescription
-				appendUninstallLog("卸载失败: \(message)")
+				appendUninstallLog(String(format: String(localized: "卸载失败: %@"), message))
 				uninstallState = .failed(error, String(describing: error))
 				objectWillChange.send()
 			}
@@ -662,7 +662,8 @@ class NetworkManager: ObservableObject {
 							self?.appendUninstallLog(message)
 						}
 					},
-					failureStatusPrefix: "卸载失败"
+					failureStatusPrefix: String(localized: "卸载失败"),
+					includeUnstructuredOutput: false
 				)
 			}
 		} catch {
@@ -680,7 +681,8 @@ class NetworkManager: ObservableObject {
 						self?.appendUninstallLog(message)
 					}
 				},
-				failureStatusPrefix: "卸载失败"
+				failureStatusPrefix: String(localized: "卸载失败"),
+				includeUnstructuredOutput: false
 			)
 			if let lastStructuredError = outputState.lastStructuredError {
 				throw NSError(
@@ -706,7 +708,8 @@ class NetworkManager: ObservableObject {
 					self?.appendUninstallLog(message)
 				}
 			},
-			failureStatusPrefix: "卸载失败"
+			failureStatusPrefix: String(localized: "卸载失败"),
+			includeUnstructuredOutput: false
 		)
 
 		if let lastStructuredError = outputState.lastStructuredError {
@@ -723,9 +726,9 @@ class NetworkManager: ObservableObject {
 		let clampedProgress = min(max(progress, lastUninstallProgress), 1.0)
 		lastUninstallProgress = clampedProgress
 		lastUninstallStatus = status
-		if status.contains("完成") {
+		if clampedProgress >= 0.95 {
 			lastUninstallPhase = .finishing
-		} else if status.contains("执行") || status.contains("卸载") {
+		} else if clampedProgress >= 0.08 {
 			lastUninstallPhase = .installing
 		} else {
 			lastUninstallPhase = .preparing
@@ -746,10 +749,11 @@ class NetworkManager: ObservableObject {
 
 	private func normalizedUninstallFailureStatus(from error: Error) -> String {
 		let message = error.localizedDescription.trimmingCharacters(in: .whitespacesAndNewlines)
-		if message.hasPrefix("卸载失败") {
+		let prefix = String(localized: "卸载失败")
+		if message.hasPrefix(prefix) || message.hasPrefix("卸载失败") {
 			return message
 		}
-		return "卸载失败: \(message)"
+		return String(format: String(localized: "卸载失败: %@"), message)
 	}
 
 	private func updateInstallationSnapshot(progress: Double, status: String) {

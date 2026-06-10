@@ -124,8 +124,27 @@
         }
       }
     },
+    "%@ 卸载失败" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@ uninstall failed"
+          }
+        }
+      }
+    },
+    "%@ 卸载完成" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@ uninstall completed"
+          }
+        }
+      }
+    },
     "%@ 安装失败" : {
-      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -136,7 +155,6 @@
       }
     },
     "%@ 安装完成" : {
-      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -185,6 +203,16 @@
           "stringUnit" : {
             "state" : "new",
             "value" : "%1$02d:%2$02d:%3$02d"
+          }
+        }
+      }
+    },
+    "%d 个包" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$d packages"
           }
         }
       }
@@ -471,6 +499,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "HDBox and IPCBox downloaded successfully"
+          }
+        }
+      }
+    },
+    "HDPIM Engine (内置卸载引擎)" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "HDPIM Engine (Built-in uninstall engine)"
           }
         }
       }
@@ -1684,6 +1722,16 @@
         }
       }
     },
+    "准备" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Preparing"
+          }
+        }
+      }
+    },
     "准备中 · %@" : {
       "localizations" : {
         "en" : {
@@ -1701,6 +1749,26 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Preparing: %@"
+          }
+        }
+      }
+    },
+    "准备卸载 %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Preparing to uninstall %1$@"
+          }
+        }
+      }
+    },
+    "准备卸载..." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Preparing to uninstall..."
           }
         }
       }
@@ -1734,6 +1802,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Ready to Install…"
+          }
+        }
+      }
+    },
+    "分析" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Analyzing"
           }
         }
       }
@@ -2002,6 +2080,36 @@
         }
       }
     },
+    "卸载" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Uninstall"
+          }
+        }
+      }
+    },
+    "卸载 PIMX 已缺失，安装目标已不存在，跳过命令执行" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Uninstall PIMX is missing, install target no longer exists. Skipping command execution"
+          }
+        }
+      }
+    },
+    "卸载中" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Uninstalling"
+          }
+        }
+      }
+    },
     "卸载产品" : {
       "localizations" : {
         "en" : {
@@ -2012,13 +2120,92 @@
         }
       }
     },
+    "卸载信息" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Uninstall info"
+          }
+        }
+      }
+    },
+    "卸载包" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Uninstall package"
+          }
+        }
+      }
+    },
+    "卸载命令" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Uninstall command"
+          }
+        }
+      }
+    },
+    "卸载失败" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Uninstall failed"
+          }
+        }
+      }
+    },
     "卸载失败: %@" : {
-      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "Uninstall failed: %@"
+          }
+        }
+      }
+    },
+    "卸载完成" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Uninstall completed"
+          }
+        }
+      }
+    },
+    "卸载已完成" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Uninstall completed"
+          }
+        }
+      }
+    },
+    "卸载日志" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Uninstall logs"
+          }
+        }
+      }
+    },
+    "卸载日志已复制到剪贴板" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Uninstall logs copied to clipboard"
           }
         }
       }
@@ -2030,6 +2217,26 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Failed to uninstall old version Helper: %@"
+          }
+        }
+      }
+    },
+    "卸载进行后，这里会实时展示输出内容。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Uninstall output will appear here in real time once uninstallation starts."
+          }
+        }
+      }
+    },
+    "卸载阶段" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Uninstall stage"
           }
         }
       }
@@ -2272,6 +2479,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Process Status:"
+          }
+        }
+      }
+    },
+    "备份" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Backing up"
           }
         }
       }
@@ -2578,8 +2795,27 @@
         }
       }
     },
+    "安装中" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Installing"
+          }
+        }
+      }
+    },
+    "安装信息" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Installation info"
+          }
+        }
+      }
+    },
     "安装命令" : {
-      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -2590,7 +2826,6 @@
       }
     },
     "安装失败" : {
-      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -2612,7 +2847,6 @@
       }
     },
     "安装完成" : {
-      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -2628,6 +2862,36 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Cancelled"
+          }
+        }
+      }
+    },
+    "安装已完成" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Installation completed"
+          }
+        }
+      }
+    },
+    "安装日志" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Install logs"
+          }
+        }
+      }
+    },
+    "安装日志已复制到剪贴板" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Install logs copied to clipboard"
           }
         }
       }
@@ -2653,6 +2917,16 @@
         }
       }
     },
+    "安装进行后，这里会实时展示输出内容。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Install output will appear here in real time once installation starts."
+          }
+        }
+      }
+    },
     "安装错误: %@" : {
       "comment" : "Install error",
       "localizations" : {
@@ -2660,6 +2934,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Install error: %@"
+          }
+        }
+      }
+    },
+    "安装阶段" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Installation stage"
           }
         }
       }
@@ -2713,6 +2997,46 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Cleanup plan to execute:"
+          }
+        }
+      }
+    },
+    "将按 HDPIM 产品卸载流程移除 %@ %@。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@ %2$@ will be removed using the HDPIM product uninstall workflow."
+          }
+        }
+      }
+    },
+    "将按 HDPIM 包级卸载流程移除包 %@ %@。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Package %1$@ %2$@ will be removed using the HDPIM package uninstall workflow."
+          }
+        }
+      }
+    },
+    "将按 HDPIM 模块卸载流程移除 %d 个模块：%@。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$d modules will be removed using the HDPIM module uninstall workflow: %2$@."
+          }
+        }
+      }
+    },
+    "将按 HDPIM 模块卸载流程移除模块 %@。" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Module %1$@ will be removed using the HDPIM module uninstall workflow."
           }
         }
       }
@@ -2976,6 +3300,16 @@
         }
       }
     },
+    "已完成 %@ 卸载" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Completed uninstall for %1$@"
+          }
+        }
+      }
+    },
     "已暂停" : {
       "comment" : "Download status paused",
       "localizations" : {
@@ -3046,6 +3380,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Selected %1$lld / %2$lld packages"
+          }
+        }
+      }
+    },
+    "已选择 %d 个模块" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$d modules selected"
           }
         }
       }
@@ -3257,6 +3601,16 @@
         }
       }
     },
+    "所选模块未安装或已被移除" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The selected module is not installed or has already been removed"
+          }
+        }
+      }
+    },
     "打开" : {
       "localizations" : {
         "en" : {
@@ -3407,6 +3761,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Execution timed out"
+          }
+        }
+      }
+    },
+    "找不到卸载 PIMX: %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Cannot find uninstall PIMX: %1$@"
           }
         }
       }
@@ -3681,6 +4045,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Operation results"
+          }
+        }
+      }
+    },
+    "收尾" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Finishing"
           }
         }
       }
@@ -3963,12 +4337,32 @@
         }
       }
     },
+    "暂无卸载日志" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No uninstall logs"
+          }
+        }
+      }
+    },
     "暂无可下载的包" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "No downloadable packages"
+          }
+        }
+      }
+    },
+    "暂无安装日志" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No install logs"
           }
         }
       }
@@ -4099,7 +4493,6 @@
       }
     },
     "未安装" : {
-      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -4172,6 +4565,16 @@
         }
       }
     },
+    "未找到需要删除的包，正在更新 HDPIM 模块状态" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No packages need to be removed. Updating HDPIM module status"
+          }
+        }
+      }
+    },
     "未检测到 Adobe CC 组件" : {
       "extractionState" : "stale",
       "localizations" : {
@@ -4184,7 +4587,6 @@
       }
     },
     "未知 Setup 组件版本号" : {
-      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -4228,6 +4630,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Disconnected"
+          }
+        }
+      }
+    },
+    "未选择模块" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No module selected"
           }
         }
       }
@@ -4349,6 +4761,16 @@
         }
       }
     },
+    "检测到冲突进程，请先退出: %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Conflicting processes detected. Quit them first: %1$@"
+          }
+        }
+      }
+    },
     "检测到新版本后自动下载" : {
       "localizations" : {
         "en" : {
@@ -4445,6 +4867,36 @@
         }
       }
     },
+    "正在准备 %d 个 HDPIM 卸载包" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Preparing %1$d HDPIM uninstall packages"
+          }
+        }
+      }
+    },
+    "正在准备 HDPIM 卸载流程" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Preparing HDPIM uninstall workflow"
+          }
+        }
+      }
+    },
+    "正在准备 HDPIM 卸载流程..." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Preparing HDPIM uninstall workflow..."
+          }
+        }
+      }
+    },
     "正在准备安装..." : {
       "extractionState" : "stale",
       "localizations" : {
@@ -4462,6 +4914,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Preparing..."
+          }
+        }
+      }
+    },
+    "正在分析 HDPIM 卸载状态" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Analyzing HDPIM uninstall status"
           }
         }
       }
@@ -4497,6 +4959,36 @@
         }
       }
     },
+    "正在卸载 %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Uninstalling %1$@"
+          }
+        }
+      }
+    },
+    "正在卸载 %@ (%d/%d)" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Uninstalling %1$@ (%2$d/%3$d)"
+          }
+        }
+      }
+    },
+    "正在卸载 %@: %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Uninstalling %1$@: %2$@"
+          }
+        }
+      }
+    },
     "正在处理 %@ 的包信息..." : {
       "extractionState" : "stale",
       "localizations" : {
@@ -4509,7 +5001,6 @@
       }
     },
     "正在安装 %@" : {
-      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -4530,6 +5021,16 @@
         }
       }
     },
+    "正在完成 HDPIM 卸载状态更新" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Finalizing HDPIM uninstall status"
+          }
+        }
+      }
+    },
     "正在建立 XPC 通道，请稍候…" : {
       "localizations" : {
         "en" : {
@@ -4546,6 +5047,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Establishing connection…"
+          }
+        }
+      }
+    },
+    "正在执行 HDPIM 卸载流程" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Running HDPIM uninstall workflow"
           }
         }
       }
@@ -4821,6 +5332,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "No products found"
+          }
+        }
+      }
+    },
+    "没有找到可卸载的包" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No uninstallable packages found"
           }
         }
       }
@@ -5414,12 +5935,32 @@
         }
       }
     },
+    "禁止删除共享根目录: %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Refusing to remove shared root directory: %1$@"
+          }
+        }
+      }
+    },
     "移除" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "Remove"
+          }
+        }
+      }
+    },
+    "移除多个模块" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Remove multiple modules"
           }
         }
       }
@@ -5440,6 +5981,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Remove this delta package"
+          }
+        }
+      }
+    },
+    "移除模块" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Remove module"
           }
         }
       }
@@ -5799,6 +6350,26 @@
         }
       }
     },
+    "解压" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Extracting"
+          }
+        }
+      }
+    },
+    "解析" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Parsing"
+          }
+        }
+      }
+    },
     "解析错误: %@ - %@" : {
       "comment" : "Parsing error",
       "extractionState" : "extracted_with_value",
@@ -5837,6 +6408,26 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Settings…"
+          }
+        }
+      }
+    },
+    "该 UWP 产品仍被其他产品引用，不能卸载" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "This UWP product is still referenced by other products and cannot be uninstalled"
+          }
+        }
+      }
+    },
+    "该产品仍被其他产品引用，不能卸载" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "This product is still referenced by other products and cannot be uninstalled"
           }
         }
       }
