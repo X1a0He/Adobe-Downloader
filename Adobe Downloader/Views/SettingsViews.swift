@@ -194,6 +194,9 @@ struct HelperView: View {
 }
 
 struct AboutAppView: View {
+    @State private var debugTapCount = 0
+    @State private var showDebugRestartAlert = false
+
     private var appVersion: String {
         Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "Unknown"
     }
@@ -202,9 +205,26 @@ struct AboutAppView: View {
         VStack(alignment: .leading, spacing: 20) {
             SettingSection(String(localized: "关于 Adobe Downloader")) {
                 VStack(spacing: 14) {
-                    Image(nsImage: NSApp.applicationIconImage)
-                        .resizable()
-                        .frame(width: AboutViewConstants.appIconSize, height: AboutViewConstants.appIconSize)
+                    ZStack(alignment: .bottomTrailing) {
+                        Image(nsImage: NSApp.applicationIconImage)
+                            .resizable()
+                            .frame(width: AboutViewConstants.appIconSize, height: AboutViewConstants.appIconSize)
+
+                        if AppDebugMode.isEnabled {
+                            Text("DEBUG")
+                                .font(.system(size: 8, weight: .bold))
+                                .foregroundColor(.black)
+                                .padding(.horizontal, 5)
+                                .padding(.vertical, 2)
+                                .background(Capsule().fill(Color.yellow))
+                                .offset(x: 5, y: 3)
+                        }
+                    }
+                    .frame(width: AboutViewConstants.appIconSize, height: AboutViewConstants.appIconSize)
+                    .contentShape(Rectangle())
+                    .onTapGesture {
+                        handleDebugIconTap()
+                    }
 
                     VStack(spacing: 4) {
                         Text("Adobe Downloader \(appVersion)")
@@ -254,6 +274,25 @@ struct AboutAppView: View {
             .padding(.top, 4)
         }
         .frame(maxWidth: .infinity, alignment: .top)
+        .alert("调试模式已开启", isPresented: $showDebugRestartAlert) {
+            Button("确定") {
+                AppDebugMode.restartApplication()
+            }
+        } message: {
+            Text("需要重启 Adobe Downloader 后生效。")
+        }
+    }
+
+    private func handleDebugIconTap() {
+        debugTapCount += 1
+
+        guard debugTapCount >= 5 else {
+            return
+        }
+
+        debugTapCount = 0
+        AppDebugMode.requestNextLaunch()
+        showDebugRestartAlert = true
     }
 }
 

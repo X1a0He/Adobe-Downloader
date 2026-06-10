@@ -427,6 +427,9 @@
     "C4D / Red Giant" : {
 
     },
+    "DEBUG" : {
+
+    },
     "Debug 模式" : {
       "extractionState" : "stale",
       "localizations" : {
@@ -5900,6 +5903,9 @@
         }
       }
     },
+    "调试模式已开启" : {
+
+    },
     "路径包含" : {
       "localizations" : {
         "en" : {
@@ -6553,6 +6559,9 @@
           }
         }
       }
+    },
+    "需要重启 Adobe Downloader 后生效。" : {
+
     },
     "预置命令" : {
       "localizations" : {

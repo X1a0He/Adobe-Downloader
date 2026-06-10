@@ -12,6 +12,7 @@ struct Adobe_DownloaderApp: App {
     private let updaterController: SPUStandardUpdaterController
 
     init() {
+        AppDebugMode.consumeLaunchFlag()
         HDPIMHeadlessInstallRunner.runIfNeeded()
 
         globalNetworkService = NewNetworkService()
