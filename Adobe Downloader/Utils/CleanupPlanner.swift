@@ -267,7 +267,7 @@ enum CleanupProtectedResource {
 
     static func isDangerousPath(_ path: String) -> Bool {
         let normalized = (path as NSString).standardizingPath
-        return dangerousPaths.contains { normalized == $0 || normalized.hasPrefix($0 + "/") && normalized.split(separator: "/").count <= 2 }
+        return dangerousPaths.contains { normalized == $0 }
     }
 
     static func isAllowedAdobePath(_ path: String) -> Bool {
@@ -546,6 +546,8 @@ final class CleanupPlanner {
             ))
         }
 
+        items = deduplicatedItems(items)
+
         let estimatedBytes = items.reduce(Int64(0)) { $0 + $1.estimatedBytes }
 
         progress?(CleanupPlanProgress(
@@ -586,6 +588,90 @@ final class CleanupPlanner {
             totalOptions: 1,
             progress: nil
         )
+    }
+
+    private func deduplicatedItems(_ items: [CleanupPlanItem]) -> [CleanupPlanItem] {
+        var seenCommands = Set<String>()
+        var keptRemovalPaths: [String] = []
+        var result: [CleanupPlanItem] = []
+
+        for item in items {
+            guard seenCommands.insert(item.command).inserted else {
+                continue
+            }
+
+            if isRemovalKind(item.kind),
+               keptRemovalPaths.contains(where: { isPath($0, sameOrAncestorOf: item.resolvedTarget) }) {
+                continue
+            }
+
+            result.append(item)
+
+            if isRemovalKind(item.kind), !hasWildcard(item.resolvedTarget) {
+                keptRemovalPaths.append(item.resolvedTarget)
+            }
+        }
+
+        return result
+    }
+
+    private func isRemovalKind(_ kind: CleanupActionKind) -> Bool {
+        kind == .removePath || kind == .removeGlob
+    }
+
+    private func isPath(_ parent: String, sameOrAncestorOf child: String) -> Bool {
+        let normalizedParent = normalizedPath(parent)
+        let normalizedChild = normalizedPath(child)
+        return normalizedChild == normalizedParent || normalizedChild.hasPrefix(normalizedParent + "/")
+    }
+
+    private func removalCommand(for path: String) -> String {
+        if let userName = userContextName(for: path), shouldRemoveAsUser(path) {
+            return "/usr/bin/sudo -u \(shellQuoted(userName)) /bin/rm -rf -- \(shellQuoted(path))"
+        }
+
+        return "/bin/rm -rf -- \(shellQuoted(path))"
+    }
+
+    private func shouldRemoveAsUser(_ path: String) -> Bool {
+        guard let relativePath = userRelativePath(for: path) else {
+            return false
+        }
+
+        return relativePath.hasPrefix("Library/Containers/")
+            || relativePath.hasPrefix("Library/Group Containers/")
+            || relativePath.hasPrefix("Documents/")
+    }
+
+    private func userContextName(for path: String) -> String? {
+        let normalized = normalizedPath(path)
+        let components = normalized.split(separator: "/").map(String.init)
+
+        if components.count >= 2, components[0] == "Users" {
+            return components[1]
+        }
+
+        if normalized.hasPrefix(NSHomeDirectory() + "/") {
+            return NSUserName()
+        }
+
+        return nil
+    }
+
+    private func userRelativePath(for path: String) -> String? {
+        let normalized = normalizedPath(path)
+        let components = normalized.split(separator: "/").map(String.init)
+
+        if components.count > 2, components[0] == "Users" {
+            return components.dropFirst(2).joined(separator: "/")
+        }
+
+        let home = normalizedPath(NSHomeDirectory())
+        guard normalized.hasPrefix(home + "/") else {
+            return nil
+        }
+
+        return String(normalized.dropFirst(home.count + 1))
     }
 
     private func makeItems(
@@ -641,7 +727,7 @@ final class CleanupPlanner {
                 title: target.description,
                 template: target.template,
                 resolvedTarget: path,
-                command: "/bin/rm -rf -- \(shellQuoted(path))",
+                command: removalCommand(for: path),
                 estimatedBytes: estimatedSize(of: path),
                 shouldRunWhenMissing: false
             )
@@ -668,7 +754,7 @@ final class CleanupPlanner {
                     title: target.description,
                     template: target.template,
                     resolvedTarget: path,
-                    command: "/bin/rm -rf -- \(shellQuoted(path))",
+                    command: removalCommand(for: path),
                     estimatedBytes: estimatedSize(of: path),
                     shouldRunWhenMissing: false
                 )

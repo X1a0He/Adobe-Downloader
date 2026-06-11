@@ -794,8 +794,7 @@ enum CleanupOption: String, CaseIterable, Identifiable {
                 .glob(self, "/Library/Logs/Adobe*", "系统 Adobe 日志"),
                 .glob(self, "/Library/Logs/DiagnosticReports/*Adobe*", "系统 Adobe DiagnosticReports"),
                 .glob(self, "/Library/Application Support/CrashReporter/*Adobe*", "系统 Adobe CrashReporter"),
-                .glob(self, "{USER_HOME}/Library/Application Support/CrashReporter/*Adobe*", "用户 Adobe CrashReporter"),
-                .shell(self, "/bin/sh -c '/usr/bin/find /Applications /Library \"{ALL_USER_HOME}/Library\" /Users/Shared -maxdepth 4 \\( -iname \"*adobe*\" -o -iname \"*creative cloud*\" -o -iname \"*acrobat*\" -o -iname \"*ngl*\" -o -iname \"*ccx*\" \\) 2>/dev/null | /usr/bin/grep -vi \"Adobe Downloader\\|Adobe-Downloader\\|com.x1a0he\" | /usr/bin/head -n 80 || true'", "扫描 Adobe 残留", kind: .shell)
+                .glob(self, "{USER_HOME}/Library/Application Support/CrashReporter/*Adobe*", "用户 Adobe CrashReporter")
             ]
         case .adobeServices:
             return Self.safeAdobeProcessNames.map {
@@ -1261,7 +1260,7 @@ enum CleanupOption: String, CaseIterable, Identifiable {
         let deleteCommand = itemClass == "certificate"
             ? "/usr/bin/security delete-certificate -c \"$item\" \"\(keychain)\""
             : "/usr/bin/security delete-generic-password -s \"$item\" \"\(keychain)\""
-        let shell = "/bin/sh -c '/usr/bin/security dump-keychain \"\(keychain)\" 2>/dev/null | /usr/bin/grep -i \"Adobe App Info\\|Adobe App Prefetched Info\\|Adobe User\\|Adobe Profile\\|Adobe Proxy\\|Adobe Package\\|Adobe Content\\|Adobe Intermediate\\|Adobe Lightroom\\|Creative Cloud\\|com.adobe\\|NGL\\|IMS\\|SLCache\\|SLStore\" | /usr/bin/grep -vi \"Adobe Downloader\\|Adobe-Downloader\\|com.x1a0he\" | /usr/bin/grep -i \"\(attr)\" | /usr/bin/awk -F \"=\" \"{print \\\\$2}\" | /usr/bin/cut -d \"\\\"\" -f2 | /usr/bin/sort -u | while IFS= read -r item; do if \(deleteCommand) >/dev/null 2>&1; then /bin/echo deleted; fi; done | /usr/bin/wc -l | /usr/bin/awk \"{print \\\"deleted=\\\" \\\\$1}\"'"
+        let shell = "/bin/sh -c '/usr/bin/security dump-keychain \"\(keychain)\" 2>/dev/null | /usr/bin/grep -i \"Adobe App Info\\|Adobe App Prefetched Info\\|Adobe User\\|Adobe Profile\\|Adobe Proxy\\|Adobe Package\\|Adobe Content\\|Adobe Intermediate\\|Adobe Lightroom\\|Creative Cloud\\|com.adobe\\|NGL\\|IMS\\|SLCache\\|SLStore\" | /usr/bin/grep -vi \"Adobe Downloader\\|Adobe-Downloader\\|com.x1a0he\" | /usr/bin/grep -i \"\(attr)\" | /usr/bin/cut -d \"=\" -f2 | /usr/bin/cut -d \"\\\"\" -f2 | /usr/bin/sort -u | while IFS= read -r item; do if [ -n \"$item\" ] && \(deleteCommand) >/dev/null 2>&1; then /bin/echo deleted; fi; done | /usr/bin/wc -l | /usr/bin/tr -d \"[:space:]\" | /usr/bin/sed \"s/^/deleted=/\"'"
 
         if let userUID {
             return "/bin/launchctl asuser \(userUID) \(shell)"

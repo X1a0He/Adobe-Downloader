@@ -29,6 +29,9 @@ final class OperationExecutor {
         case .executeShell(let command):
             return executeShellCommand(command)
 
+        case .triggerTCCPrompt:
+            return triggerTCCRegistration()
+
         case .getVersion:
             let version = Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "unknown"
             return .success(version)
@@ -99,5 +102,24 @@ final class OperationExecutor {
             "/tmp",
             "/"
         ].contains(path)
+    }
+
+    private static func triggerTCCRegistration() -> HelperOperationResult {
+        let fm = FileManager.default
+        let home = NSHomeDirectory()
+
+        let protectedPaths = [
+            "\(home)/Library/Safari",
+            "\(home)/Library/Messages",
+            "\(home)/Library/Mail",
+            "\(home)/Library/Application Support/com.apple.TCC"
+        ]
+
+        for path in protectedPaths where fm.fileExists(atPath: path) {
+            _ = try? fm.contentsOfDirectory(atPath: path)
+            break
+        }
+
+        return .success("triggered")
     }
 }

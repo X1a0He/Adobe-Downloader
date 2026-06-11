@@ -283,6 +283,9 @@
         }
       }
     },
+    "1. 在系统设置中找到「Adobe Downloader」\n2. 勾选以授予全磁盘访问权限\n3. 返回此界面点击刷新按钮验证" : {
+
+    },
     "Adobe Creative Cloud" : {
 
     },
@@ -322,6 +325,9 @@
           }
         }
       }
+    },
+    "Adobe Downloader 已具备访问受保护用户目录的权限" : {
+
     },
     "Adobe Downloader 需要通过后台服务来安装与移动文件。请在\"系统设置 → 通用 → 登录项与扩展\"中允许此应用的后台项目。" : {
       "extractionState" : "stale",
@@ -434,6 +440,9 @@
         }
       }
     },
+    "App 全磁盘访问权限" : {
+
+    },
     "Apple Silicon" : {
 
     },
@@ -513,6 +522,9 @@
         }
       }
     },
+    "Helper 全磁盘访问权限" : {
+
+    },
     "Helper 启用成功" : {
       "extractionState" : "stale",
       "localizations" : {
@@ -545,6 +557,9 @@
           }
         }
       }
+    },
+    "Helper 已具备访问受保护用户目录的权限" : {
+
     },
     "Helper 已安装并运行中" : {
       "localizations" : {
@@ -712,6 +727,12 @@
         }
       }
     },
+    "Helper 未连接，无法检测权限状态" : {
+
+    },
+    "Helper 权限说明" : {
+
+    },
     "Helper 注册失败" : {
       "extractionState" : "stale",
       "localizations" : {
@@ -763,6 +784,9 @@
           }
         }
       }
+    },
+    "Helper 的权限状态可通过右侧刷新按钮检测。\n\n如需访问受保护目录，Helper 会在执行操作时自动请求授权。" : {
+
     },
     "Helper 设置" : {
       "localizations" : {
@@ -2028,6 +2052,9 @@
         }
       }
     },
+    "刷新权限状态" : {
+
+    },
     "前往 Adobe Creative Cloud" : {
       "extractionState" : "stale",
       "localizations" : {
@@ -2038,6 +2065,9 @@
           }
         }
       }
+    },
+    "前往设置" : {
+
     },
     "剩余 %@" : {
       "localizations" : {
@@ -2586,6 +2616,9 @@
           }
         }
       }
+    },
+    "复制全部错误日志" : {
+
     },
     "复制包信息" : {
       "localizations" : {
@@ -3309,6 +3342,9 @@
           }
         }
       }
+    },
+    "已授权" : {
+
     },
     "已暂停" : {
       "comment" : "Download status paused",
@@ -4200,6 +4236,9 @@
         }
       }
     },
+    "无法检测" : {
+
+    },
     "无法获取 Helper 代理" : {
       "extractionState" : "stale",
       "localizations" : {
@@ -4575,6 +4614,15 @@
         }
       }
     },
+    "未授权" : {
+
+    },
+    "未授权时，Containers、Group Containers 和 Documents 清理可能失败" : {
+
+    },
+    "未授权时，Containers、Group Containers、Documents 等用户受保护目录可能清理失败。请将 Adobe Downloader 与 Helper 加入全磁盘访问，授权后重新启动 Adobe Downloader 或重新启用 Helper。" : {
+
+    },
     "未检测到 Adobe CC 组件" : {
       "extractionState" : "stale",
       "localizations" : {
@@ -4685,6 +4733,9 @@
           }
         }
       }
+    },
+    "权限设置" : {
+
     },
     "条件: %@" : {
       "extractionState" : "stale",
@@ -5082,6 +5133,9 @@
         }
       }
     },
+    "正在检测权限..." : {
+
+    },
     "正在清理 Adobe 应用程序..." : {
       "localizations" : {
         "en" : {
@@ -5439,6 +5493,9 @@
         }
       }
     },
+    "清理用户容器、群组容器和文档目录时，Adobe Downloader 与 Helper 都建议加入全磁盘访问" : {
+
+    },
     "清理结果" : {
       "localizations" : {
         "en" : {
@@ -5696,6 +5753,9 @@
           }
         }
       }
+    },
+    "知道了" : {
+
     },
     "确定" : {
       "localizations" : {
@@ -6200,6 +6260,9 @@
         }
       }
     },
+    "继续清理" : {
+
+    },
     "网络中断" : {
       "comment" : "Download status network paused",
       "localizations" : {
@@ -6401,6 +6464,9 @@
           }
         }
       }
+    },
+    "设置 Adobe Downloader 全磁盘访问" : {
+
     },
     "设置..." : {
       "localizations" : {
@@ -7117,6 +7183,9 @@
           }
         }
       }
+    },
+    "需要全磁盘访问权限" : {
+
     },
     "需要在系统设置中允许 Helper" : {
       "extractionState" : "stale",

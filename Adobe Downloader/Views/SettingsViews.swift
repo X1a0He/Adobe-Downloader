@@ -163,6 +163,69 @@ struct SettingsStatusChip: View {
     }
 }
 
+enum FullDiskAccessPermission {
+    static var isGranted: Bool {
+        protectedProbePaths.contains { canAccessProtectedPath($0) }
+    }
+
+    static func openSettings() {
+        guard let url = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles") else {
+            return
+        }
+        NSWorkspace.shared.open(url)
+    }
+
+    static func helperIsGranted() async -> Bool? {
+        do {
+            let output = try await HelperManager.shared.executeShell(helperProbeCommand)
+            return output.trimmingCharacters(in: .whitespacesAndNewlines) == "granted"
+        } catch {
+            return nil
+        }
+    }
+
+    private static var helperProbeCommand: String {
+        let checks = protectedProbePaths.map { path in
+            let quotedPath = shellQuoted(path)
+            return "p=\(quotedPath); if [ -e \"$p\" ]; then if [ -d \"$p\" ]; then /bin/ls \"$p\" >/dev/null 2>&1 && /bin/echo granted && exit 0; else /bin/cat \"$p\" >/dev/null 2>&1 && /bin/echo granted && exit 0; fi; fi"
+        }
+        return (checks + ["/bin/echo denied"]).joined(separator: "; ")
+    }
+
+    private static var protectedProbePaths: [String] {
+        let home = NSHomeDirectory()
+        return [
+            "\(home)/Library/Application Support/com.apple.TCC/TCC.db",
+            "\(home)/Library/Safari",
+            "\(home)/Library/Messages",
+            "\(home)/Library/Mail",
+            "\(home)/Library/Containers/com.apple.Safari"
+        ]
+    }
+
+    private static func canAccessProtectedPath(_ path: String) -> Bool {
+        var isDirectory: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory) else {
+            return false
+        }
+
+        if isDirectory.boolValue {
+            return (try? FileManager.default.contentsOfDirectory(atPath: path)) != nil
+        }
+
+        guard let handle = FileHandle(forReadingAtPath: path) else {
+            return false
+        }
+
+        try? handle.close()
+        return true
+    }
+
+    private static func shellQuoted(_ value: String) -> String {
+        "'\(value.replacingOccurrences(of: "'", with: "'\\''"))'"
+    }
+}
+
 struct X1a0HeCCInstallStatus {
     let isInstalled: Bool
     let hdBoxVersion: String
@@ -430,6 +493,9 @@ final class GeneralSettingsViewModel: ObservableObject {
     @Published var showLanguagePicker = false
     @Published var showDownloadOnlyConfirmAlert = false
     @Published var helperConnectionStatus: HelperConnectionStatus = .disconnected
+    @Published var fullDiskAccessGranted = FullDiskAccessPermission.isGranted
+    @Published var helperFullDiskAccessGranted: Bool?
+    @Published var isCheckingHelperFullDiskAccess = false
     @Published var downloadAppleSilicon: Bool {
         didSet {
             StorageData.shared.downloadAppleSilicon = downloadAppleSilicon
@@ -549,6 +615,27 @@ final class GeneralSettingsViewModel: ObservableObject {
     func refreshCCInstallStatus() {
         ccInstallStatus = X1a0HeCCInstallStatus.detect()
     }
+
+    func refreshFullDiskAccessStatus() {
+        refreshAppFullDiskAccessStatus()
+        refreshHelperFullDiskAccessStatus()
+    }
+
+    func refreshAppFullDiskAccessStatus() {
+        fullDiskAccessGranted = FullDiskAccessPermission.isGranted
+    }
+
+    func refreshHelperFullDiskAccessStatus() {
+        isCheckingHelperFullDiskAccess = true
+
+        Task { [weak self] in
+            let helperGranted = await FullDiskAccessPermission.helperIsGranted()
+            await MainActor.run {
+                self?.helperFullDiskAccessGranted = helperGranted
+                self?.isCheckingHelperFullDiskAccess = false
+            }
+        }
+    }
 }
 
 struct GeneralSettingsView: View {
@@ -580,6 +667,7 @@ private struct GeneralSettingsContent: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 20) {
+            PermissionSettingsView(viewModel: viewModel)
             DownloadSettingsView(viewModel: viewModel)
             CCSettingsView(viewModel: viewModel)
             UpdateSettingsView(viewModel: viewModel)
@@ -595,6 +683,168 @@ private struct GeneralSettingsContent: View {
         .onReceive(NotificationCenter.default.publisher(for: .storageDidChange)) { _ in
             viewModel.objectWillChange.send()
         }
+    }
+}
+
+struct PermissionSettingsView: View {
+    @ObservedObject var viewModel: GeneralSettingsViewModel
+    @State private var showAppPermissionGuide = false
+    @State private var showHelperPermissionGuide = false
+
+    var body: some View {
+        SettingSection(
+            String(localized: "权限设置"),
+            footer: String(localized: "清理用户容器、群组容器和文档目录时，Adobe Downloader 与 Helper 都建议加入全磁盘访问")
+        ) {
+            SettingRow(
+                title: String(localized: "App 全磁盘访问权限"),
+                subtitle: viewModel.fullDiskAccessGranted
+                    ? String(localized: "Adobe Downloader 已具备访问受保护用户目录的权限")
+                    : String(localized: "未授权时，Containers、Group Containers 和 Documents 清理可能失败"),
+                icon: "externaldrive.badge.checkmark",
+                iconTint: viewModel.fullDiskAccessGranted ? .green : .orange
+            ) {
+                HStack(spacing: 8) {
+                    SettingsStatusChip(
+                        icon: viewModel.fullDiskAccessGranted ? "checkmark.circle.fill" : "exclamationmark.triangle.fill",
+                        text: viewModel.fullDiskAccessGranted ? String(localized: "已授权") : String(localized: "未授权"),
+                        tint: viewModel.fullDiskAccessGranted ? .green : .orange
+                    )
+
+                    Button(action: { showAppPermissionGuide = true }) {
+                        HStack(spacing: 4) {
+                            Image(systemName: "gearshape.fill").font(.system(size: 10))
+                            Text("打开设置").font(.system(size: 12))
+                        }
+                        .foregroundColor(.white)
+                    }
+                    .buttonStyle(BeautifulButtonStyle(baseColor: Color.blue))
+
+                    PermissionRefreshButton {
+                        viewModel.refreshAppFullDiskAccessStatus()
+                    }
+                }
+                .fixedSize(horizontal: true, vertical: false)
+            }
+
+            SettingRowDivider()
+
+            SettingRow(
+                title: String(localized: "Helper 全磁盘访问权限"),
+                subtitle: helperPermissionSubtitle,
+                icon: "lock.shield.fill",
+                iconTint: helperPermissionTint
+            ) {
+                HStack(spacing: 8) {
+                    SettingsStatusChip(
+                        icon: helperPermissionIcon,
+                        text: helperPermissionText,
+                        tint: helperPermissionTint
+                    )
+
+                    Button(action: { showHelperPermissionGuide = true }) {
+                        HStack(spacing: 4) {
+                            Image(systemName: "gearshape.fill").font(.system(size: 10))
+                            Text("打开设置").font(.system(size: 12))
+                        }
+                        .foregroundColor(.white)
+                    }
+                    .buttonStyle(BeautifulButtonStyle(baseColor: Color.blue))
+
+                    PermissionRefreshButton(isLoading: viewModel.isCheckingHelperFullDiskAccess) {
+                        viewModel.refreshHelperFullDiskAccessStatus()
+                    }
+                }
+                .fixedSize(horizontal: true, vertical: false)
+            }
+        }
+        .onAppear {
+            viewModel.refreshFullDiskAccessStatus()
+        }
+        .alert("设置 Adobe Downloader 全磁盘访问", isPresented: $showAppPermissionGuide) {
+            Button("取消", role: .cancel) { }
+            Button("前往设置") {
+                FullDiskAccessPermission.openSettings()
+            }
+        } message: {
+            Text("1. 在系统设置中找到「Adobe Downloader」\n2. 勾选以授予全磁盘访问权限\n3. 返回此界面点击刷新按钮验证")
+        }
+        .alert("Helper 权限说明", isPresented: $showHelperPermissionGuide) {
+            Button("知道了", role: .cancel) { }
+        } message: {
+            Text("Helper 的权限状态可通过右侧刷新按钮检测。\n\n如需访问受保护目录，Helper 会在执行操作时自动请求授权。")
+        }
+    }
+
+    private var helperPermissionSubtitle: String {
+        switch viewModel.helperFullDiskAccessGranted {
+        case .some(true):
+            return String(localized: "Helper 已具备访问受保护用户目录的权限")
+        case .some(false):
+            return "com.x1a0he.macOS.Adobe-Downloader.helper " + String(localized: "未授权")
+        case .none:
+            return viewModel.helperConnectionStatus == .disconnected
+                ? String(localized: "Helper 未连接，无法检测权限状态")
+                : String(localized: "正在检测权限...")
+        }
+    }
+
+    private var helperPermissionIcon: String {
+        switch viewModel.helperFullDiskAccessGranted {
+        case .some(true):
+            return "checkmark.circle.fill"
+        case .some(false):
+            return "exclamationmark.triangle.fill"
+        case .none:
+            return "questionmark.circle.fill"
+        }
+    }
+
+    private var helperPermissionText: String {
+        switch viewModel.helperFullDiskAccessGranted {
+        case .some(true):
+            return String(localized: "已授权")
+        case .some(false):
+            return String(localized: "未授权")
+        case .none:
+            return String(localized: "无法检测")
+        }
+    }
+
+    private var helperPermissionTint: Color {
+        switch viewModel.helperFullDiskAccessGranted {
+        case .some(true):
+            return .green
+        case .some(false):
+            return .orange
+        case .none:
+            return .secondary
+        }
+    }
+}
+
+private struct PermissionRefreshButton: View {
+    var isLoading = false
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            ZStack {
+                ProgressView()
+                    .scaleEffect(0.55)
+                    .opacity(isLoading ? 1 : 0)
+
+                Image(systemName: "arrow.clockwise")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundColor(.secondary)
+                    .opacity(isLoading ? 0 : 1)
+            }
+            .frame(width: 24, height: 24)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(isLoading)
+        .help(String(localized: "刷新权限状态"))
     }
 }
 

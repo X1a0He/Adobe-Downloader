@@ -138,4 +138,20 @@ extension HelperManager {
             }
         }
     }
+
+    func triggerTCCPrompt() async throws {
+        let client = try getClient()
+        let operation = HelperOperation.triggerTCCPrompt
+
+        try await withCheckedThrowingContinuation { continuation in
+            client.execute(operation) { result in
+                switch result {
+                case .success:
+                    continuation.resume()
+                case .failure(let error):
+                    continuation.resume(throwing: error)
+                }
+            }
+        }
+    }
 }

@@ -60,6 +60,7 @@ final class CleanupViewModel: ObservableObject {
     @Published var isPreparingPlan = false
     @Published var prepareProgress = 0.0
     @Published var prepareMessage = ""
+    @Published var showFullDiskAccessAlert = false
     #if DEBUG
     @Published var showDebugPlanConfirmation = false
     @Published var debugPlanItems: [CleanupPlanItem] = []
@@ -70,6 +71,15 @@ final class CleanupViewModel: ObservableObject {
     private var cleanupPlan: CleanupPlan?
     private var planItems: [CleanupPlanItem] = []
     private var previewItemsByOption: [CleanupOption: [CleanupPlanItem]] = [:]
+    private let errorLogDateFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "yyyy-MM-dd HH:mm:ss"
+        return formatter
+    }()
+
+    var hasErrorLogs: Bool {
+        cleanupLogs.contains { $0.status == .error }
+    }
 
     func previewItems(for option: CleanupOption) -> [CleanupPlanItem] {
         #if DEBUG
@@ -83,7 +93,23 @@ final class CleanupViewModel: ObservableObject {
     }
 
     func prepareCleanup() {
+        prepareCleanup(ignoreFullDiskAccessWarning: false)
+    }
+
+    func continueCleanupWithoutFullDiskAccess() {
+        prepareCleanup(ignoreFullDiskAccessWarning: true)
+    }
+
+    private func prepareCleanup(ignoreFullDiskAccessWarning: Bool) {
         guard !selectedOptions.isEmpty else { return }
+
+        if !ignoreFullDiskAccessWarning,
+           requiresFullDiskAccess(options: selectedOptions),
+           !FullDiskAccessPermission.isGranted {
+            showFullDiskAccessAlert = true
+            return
+        }
+
         let options = selectedOptions
         isPreparingPlan = true
         prepareProgress = 0
@@ -222,7 +248,7 @@ final class CleanupViewModel: ObservableObject {
                     if self.isCancelled {
                         self.cleanupLogs[index] = CleanupLog(timestamp: Date(), command: item.debugSummary, status: .cancelled, message: String(localized: "已取消"))
                     } else {
-                        let isSuccess = output.isEmpty || output.lowercased() == "success"
+                        let isSuccess = self.isExecutionSuccess(output)
                         let message = isSuccess ? String(localized: "执行成功") : self.failureMessage(for: item, output: output)
                         self.cleanupLogs[index] = CleanupLog(timestamp: Date(), command: item.debugSummary, status: isSuccess ? .success : .error, message: message)
                     }
@@ -237,13 +263,47 @@ final class CleanupViewModel: ObservableObject {
         previewItemsByOption.removeAll()
     }
 
+    private func requiresFullDiskAccess(options: Set<CleanupOption>) -> Bool {
+        !options.isDisjoint(with: Set([
+            .adobeApps,
+            .adobeCreativeCloud,
+            .adobeUserData,
+            .adobePreferences,
+            .adobeLicenses
+        ]))
+    }
+
+    func copyErrorLogs() {
+        let errorLogs = cleanupLogs.filter { $0.status == .error }
+        guard !errorLogs.isEmpty else { return }
+
+        let content = errorLogs.enumerated().map { index, log in
+            [
+                "==== Error \(index + 1) ====",
+                "Time: \(errorLogDateFormatter.string(from: log.timestamp))",
+                "Command: \(log.command)",
+                "Message: \(log.message)"
+            ].joined(separator: "\n")
+        }.joined(separator: "\n\n")
+
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(content, forType: .string)
+    }
+
     private func failureMessage(for item: CleanupPlanItem, output: String) -> String {
         #if DEBUG
         return String(localized: "执行结果：\(output)\n执行命令：\(item.command)")
         #else
         let title = CleanupLog.getCleanupDescription(for: item.debugSummary)
-        return String(localized: "执行失败：\(title)")
+        return String(localized: "执行失败：\(title)\n执行结果：\(output)\n执行命令：\(item.command)")
         #endif
+    }
+
+    private func isExecutionSuccess(_ output: String) -> Bool {
+        let normalized = output.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalized.isEmpty else { return true }
+        guard normalized.lowercased() != "success" else { return true }
+        return !normalized.lowercased().hasPrefix("error:")
     }
 }
 
@@ -286,6 +346,17 @@ struct CleanupView: View {
             Button("确定", role: .destructive) { viewModel.prepareCleanup() }
         } message: {
             Text("这将删除所选的 Adobe 相关文件，该操作不可撤销。清理过程不会影响 Adobe Downloader 的文件和下载数据。是否继续？")
+        }
+        .alert("需要全磁盘访问权限", isPresented: $viewModel.showFullDiskAccessAlert) {
+            Button("打开设置") {
+                FullDiskAccessPermission.openSettings()
+            }
+            Button("继续清理", role: .destructive) {
+                viewModel.continueCleanupWithoutFullDiskAccess()
+            }
+            Button("取消", role: .cancel) { }
+        } message: {
+            Text("未授权时，Containers、Group Containers、Documents 等用户受保护目录可能清理失败。请将 Adobe Downloader 与 Helper 加入全磁盘访问，授权后重新启动 Adobe Downloader 或重新启用 Helper。")
         }
         #if DEBUG
         .sheet(isPresented: $viewModel.showDebugPlanConfirmation) {
@@ -448,6 +519,26 @@ struct CleanupView: View {
                     .padding(.horizontal, 12).padding(.vertical, 10).contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
+
+                if viewModel.hasErrorLogs {
+                    SettingRowDivider()
+
+                    HStack {
+                        Spacer()
+                        Button(action: { viewModel.copyErrorLogs() }) {
+                            HStack(spacing: 4) {
+                                Image(systemName: "doc.on.doc")
+                                    .font(.system(size: 10))
+                                Text("复制全部错误日志")
+                                    .font(.system(size: 12))
+                            }
+                            .foregroundColor(.white)
+                        }
+                        .buttonStyle(BeautifulButtonStyle(baseColor: Color.red))
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 8)
+                    }
+                }
 
                 ScrollView {
                     if viewModel.cleanupLogs.isEmpty {

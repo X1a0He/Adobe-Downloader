@@ -8,6 +8,7 @@ enum HelperOperation: Codable, Equatable {
     case executeShell(command: String)
     case hdpimInstall(productDir: String, userHome: String, executablePath: String?)
     case hdpimUninstall(request: HDPIMUninstallHelperRequest, userHome: String, executablePath: String?)
+    case triggerTCCPrompt
     case cancelOperation
     case getVersion
 
@@ -15,7 +16,7 @@ enum HelperOperation: Codable, Equatable {
         switch self {
         case .installPackage, .uninstallPath, .copyFile, .setPermissions:
             return true
-        case .executeShell, .hdpimInstall, .hdpimUninstall, .cancelOperation, .getVersion:
+        case .executeShell, .hdpimInstall, .hdpimUninstall, .triggerTCCPrompt, .cancelOperation, .getVersion:
             return false
         }
     }
@@ -36,6 +37,8 @@ enum HelperOperation: Codable, Equatable {
             return "HDPIM install: \(URL(fileURLWithPath: productDir).lastPathComponent)"
         case .hdpimUninstall(let request, _, _):
             return "HDPIM uninstall: \(request.description)"
+        case .triggerTCCPrompt:
+            return "Trigger TCC"
         case .cancelOperation:
             return "Cancel operation"
         case .getVersion:
