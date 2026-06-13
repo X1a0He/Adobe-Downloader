@@ -8,6 +8,7 @@
 // 下面是所有全局变量的私有存储
 private var _globalStiResult: NewParseResult?
 private var _globalCcmResult: NewParseResult?
+private var _globalRawProducts: [Product]?
 private var _globalProducts: [Product]?
 private var _globalUniqueProducts: [UniqueProduct]?
 private var _globalCdn: String = ""
@@ -19,6 +20,7 @@ private var _globalCancelTracker: CancelTracker?
 struct DependencyCacheKey: Hashable {
     let sapCode: String
     let targetPlatform: String
+    let baseVersion: String
 }
 
 private var _globalDependencyCache: [DependencyCacheKey: Product.Platform.LanguageSet.Dependency]?
@@ -129,6 +131,18 @@ var globalProducts: [Product] {
     }
 }
 
+var globalRawProducts: [Product] {
+    get {
+        if _globalRawProducts == nil {
+            _globalRawProducts = []
+        }
+        return _globalRawProducts!
+    }
+    set {
+        _globalRawProducts = newValue
+    }
+}
+
 var globalUniqueProducts: [UniqueProduct] {
     get {
         if _globalUniqueProducts == nil {
@@ -154,14 +168,38 @@ func getAllProducts() -> [Product] {
     return allProducts
 }
 
+enum ProductQueryScope {
+    case visible
+    case raw
+    case ccm
+    case sti
+}
+
+private func products(in scope: ProductQueryScope) -> [Product] {
+    switch scope {
+    case .visible:
+        return globalProducts
+    case .raw:
+        return globalRawProducts
+    case .ccm:
+        return globalCcmResult.products
+    case .sti:
+        return globalStiResult.products
+    }
+}
+
 /// 根据产品ID和版本号快速查找产品
 /// - Parameters:
 ///   - id: 产品ID
 ///   - version: 版本号（可选）
 /// - Returns: 如果提供版本号，返回指定版本的产品；否则返回最新版本的产品
-func findProduct(id: String, version: String? = nil) -> Product? {
-    // 首先在全局产品列表中查找匹配ID的产品
-    guard let product = globalProducts.first(where: { $0.id == id }) else {
+func findProduct(
+    id: String,
+    version: String? = nil,
+    scope: ProductQueryScope = .visible
+) -> Product? {
+    let productPool = products(in: scope)
+    guard let product = productPool.first(where: { $0.id == id }) else {
         return nil
     }
     
@@ -170,11 +208,11 @@ func findProduct(id: String, version: String? = nil) -> Product? {
         return product
     }
 
-    if let matchedProduct = globalProducts.first(where: { $0.id == id && $0.version == version }) {
+    if let matchedProduct = productPool.first(where: { $0.id == id && $0.version == version }) {
         return matchedProduct
     }
 
-    for product in globalProducts.filter({ $0.id == id }) {
+    for product in productPool.filter({ $0.id == id }) {
         for platform in product.platforms {
             for languageSet in platform.languageSet {
                 if languageSet.productVersion == version {
@@ -190,8 +228,8 @@ func findProduct(id: String, version: String? = nil) -> Product? {
 /// 获取产品的所有可用版本
 /// - Parameter id: 产品ID
 /// - Returns: 版本号数组，已去重并按版本号排序
-func getProductVersions(id: String) -> [String] {
-    guard let product = globalProducts.first(where: { $0.id == id }) else {
+func getProductVersions(id: String, scope: ProductQueryScope = .visible) -> [String] {
+    guard let product = products(in: scope).first(where: { $0.id == id }) else {
         return []
     }
     
@@ -214,8 +252,12 @@ func getProductVersions(id: String) -> [String] {
 ///   - id: 产品ID
 ///   - version: 版本号
 /// - Returns: 语言代码数组
-func getProductLanguages(id: String, version: String) -> [String] {
-    guard let product = globalProducts.first(where: { $0.id == id }) else {
+func getProductLanguages(
+    id: String,
+    version: String,
+    scope: ProductQueryScope = .visible
+) -> [String] {
+    guard let product = products(in: scope).first(where: { $0.id == id }) else {
         return []
     }
     
@@ -234,17 +276,99 @@ func getProductLanguages(id: String, version: String) -> [String] {
 /// 查找所有匹配指定ID的产品
 /// - Parameter id: 产品ID
 /// - Returns: 匹配的产品数组
-func findProducts(id: String) -> [Product] {
-    var matchedProducts = [Product]()
-    
-    // 从 globalProducts 中查找
-    matchedProducts.append(contentsOf: globalProducts.filter { $0.id == id })
-    
-    // 从 globalCcmResult 中查找
-    matchedProducts.append(contentsOf: globalCcmResult.products.filter { $0.id == id })
-    
-    // 从 globalStiResult 中查找
-    matchedProducts.append(contentsOf: globalStiResult.products.filter { $0.id == id })
-    
-    return matchedProducts
+func findProducts(
+    id: String,
+    scope: ProductQueryScope = .visible
+) -> [Product] {
+    products(in: scope).filter { $0.id == id }
+}
+
+func isManifestInstallerProduct(_ productId: String) -> Bool {
+    ["APRO", "KCCC"].contains(productId)
+}
+
+func isBlockedVisibleProduct(_ productId: String) -> Bool {
+    ["KCCC"].contains(productId)
+}
+
+func installerOutputName(productId: String, version: String, language: String, platform: String) -> String {
+    if isManifestInstallerProduct(productId) {
+        return "Adobe Downloader \(productId)_\(version)_\(platform).dmg"
+    }
+    return "Adobe Downloader \(productId)_\(version)-\(language)-\(platform)"
+}
+
+func installerSelectedPlatformId(
+    productId: String,
+    version: String,
+    targetArchitecture: HDPIMParityTargetArchitecture = .currentSelection
+) -> String? {
+    guard isManifestInstallerProduct(productId),
+          let product = findProduct(id: productId, version: version, scope: .ccm)
+            ?? findProduct(id: productId, version: version),
+          let match = installerPlatformMatch(
+            product: product,
+            selectedVersion: version,
+            targetArchitecture: targetArchitecture
+          ) else {
+        return HDPIMParityDecisionEngine.shared.preferredPlatformId(
+            productId: productId,
+            version: version,
+            targetArchitecture: targetArchitecture
+        )
+    }
+
+    return match.platform.id
+}
+
+func installerProductVersion(product: Product, languageSet: Product.Platform.LanguageSet, selectedVersion: String) -> String {
+    if !languageSet.productVersion.isEmpty {
+        return languageSet.productVersion
+    }
+    if !selectedVersion.isEmpty {
+        return selectedVersion
+    }
+    return product.version
+}
+
+func installerPlatformMatch(
+    product: Product,
+    selectedVersion: String,
+    targetArchitecture: HDPIMParityTargetArchitecture = .currentSelection
+) -> (platform: Product.Platform, languageSet: Product.Platform.LanguageSet)? {
+    let availablePlatforms = product.platforms.filter {
+        guard let languageSet = $0.languageSet.first else { return false }
+        return !languageSet.manifestURL.isEmpty || !languageSet.lbsURL.isEmpty
+    }
+
+    if product.id == "KCCC",
+       let platform = availablePlatforms.first(where: { $0.id == "osx10" }),
+       let languageSet = platform.languageSet.first {
+        return (platform, languageSet)
+    }
+
+    for platformId in targetArchitecture.platformPreference {
+        if let platform = availablePlatforms.first(where: { $0.id == platformId }),
+           let languageSet = platform.languageSet.first {
+            return (platform, languageSet)
+        }
+    }
+
+    guard let platform = availablePlatforms.first,
+          let languageSet = platform.languageSet.first else {
+        return nil
+    }
+    return (platform, languageSet)
+}
+
+func normalizedInstallerURL(_ value: String, cdn: String = globalCdn) -> String {
+    let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
+    guard !trimmed.isEmpty else { return "" }
+    guard URL(string: trimmed)?.scheme == nil else {
+        return trimmed
+    }
+
+    let cleanCdn = cdn.hasSuffix("/") ? String(cdn.dropLast()) : cdn
+    let cleanPath = trimmed.hasPrefix("/") ? trimmed : "/\(trimmed)"
+    return cleanCdn + cleanPath
 }

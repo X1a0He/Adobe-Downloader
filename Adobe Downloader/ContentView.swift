@@ -32,40 +32,33 @@ struct ContentView: View {
 
     var body: some View {
         VStack(spacing: 0) {
+            BannerView()
+            
+            MainContentView(
+                loadingState: networkManager.loadingState,
+                filteredProducts: filteredProducts,
+                searchText: searchText,
+                onRetry: { networkManager.retryFetchData() },
+                onOpenDownloadManager: { showDownloadManager = true }
+            )
+            .background(Color(.clear))
+            .animation(.easeInOut, value: networkManager.loadingState)
+        }
+        .background(Color(.clear))
+        .sheet(isPresented: $showDownloadManager) {
+            DownloadManagerView() 
+        }
+        .toolbar {
             ToolbarView(
-                downloadAppleSilicon: Binding(
-                    get: { StorageData.shared.downloadAppleSilicon },
-                    set: { newValue in
-                        StorageData.shared.downloadAppleSilicon = newValue
-                        Task {
-                            await networkManager.fetchProducts()
-                        }
-                    }
-                ),
                 currentApiVersion: $currentApiVersion,
-                searchText: $searchText,
                 showDownloadManager: $showDownloadManager,
                 isRefreshing: isRefreshing,
                 downloadTasksCount: networkManager.downloadTasks.count,
                 onRefresh: refreshData,
                 openSettings: openSettings
             )
-            
-            BannerView()
-            
-            MainContentView(
-                loadingState: networkManager.loadingState,
-                filteredProducts: filteredProducts,
-                onRetry: { networkManager.retryFetchData() }
-            )
-            .background(Color(.clear))
-            .animation(.easeInOut, value: networkManager.loadingState)
-            .animation(.easeInOut, value: filteredProducts)
         }
-        .background(Color(.clear))
-        .sheet(isPresented: $showDownloadManager) {
-            DownloadManagerView() 
-        }
+        .searchable(text: $searchText, placement: .toolbar, prompt: "搜索应用或产品 ID")
         .onChange(of: currentApiVersion) { newValue in
             StorageData.shared.apiVersion = newValue
             refreshData()

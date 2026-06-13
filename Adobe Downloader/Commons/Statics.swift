@@ -7,6 +7,43 @@ import Foundation
 import SwiftUI
 import AppKit
 
+enum AppDebugMode {
+    private static let userDefaultsKey = "isDebuger"
+
+    static let isEnabled: Bool = {
+        let isEnabled = UserDefaults.standard.bool(forKey: userDefaultsKey)
+
+        if isEnabled {
+            UserDefaults.standard.removeObject(forKey: userDefaultsKey)
+        }
+
+        return isEnabled
+    }()
+
+    static func consumeLaunchFlag() {
+        _ = isEnabled
+    }
+
+    static func requestNextLaunch() {
+        UserDefaults.standard.set(true, forKey: userDefaultsKey)
+    }
+
+    static func restartApplication() {
+        let configuration = NSWorkspace.OpenConfiguration()
+        configuration.createsNewApplicationInstance = true
+
+        NSWorkspace.shared.openApplication(at: Bundle.main.bundleURL, configuration: configuration) { _, error in
+            guard error == nil else {
+                return
+            }
+
+            DispatchQueue.main.async {
+                AppDelegate.shouldTerminateImmediately = true
+                NSApplication.shared.terminate(nil)
+            }
+        }
+    }
+}
 
 struct AppStatics {
     static let supportedLanguages: [(code: String, name: String)] = [

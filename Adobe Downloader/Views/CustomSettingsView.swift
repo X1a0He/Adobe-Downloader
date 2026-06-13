@@ -8,186 +8,209 @@ import SwiftUI
 import Sparkle
 
 struct CustomSettingsView: View {
-    @State private var selectedTab = "general_settings"
+    @State private var selectedTab: SettingsTab = .general
     @StateObject private var cleanupViewModel = CleanupViewModel()
     @StateObject private var helperPlaygroundViewModel = HelperPlaygroundViewModel()
     @Environment(\.presentationMode) var presentationMode
-    @Environment(\.colorScheme) var colorScheme
-    
+
     private let updater: SPUUpdater
-    
+
     init(updater: SPUUpdater) {
         self.updater = updater
     }
-    
-    var body: some View {
-        ZStack {
-            BlurView()
-                .ignoresSafeArea()
-            
-            ZStack(alignment: .topTrailing) {
-                VStack(spacing: 0) {
-                    HStack {
-                        HStack(spacing: 0) {
-                            SquareTabButton(
-                                imageName: "gear",
-                                title: String(localized: "通用"),
-                                isSelected: selectedTab == "general_settings"
-                            ) {
-                                withAnimation(.easeInOut(duration: 0.15)) {
-                                    selectedTab = "general_settings"
-                                }
-                            }
-                            
-                            SquareTabButton(
-                                imageName: "lock.shield",
-                                title: String(localized: "Helper 设置"),
-                                isSelected: selectedTab == "helper_view"
-                            ) {
-                                withAnimation(.easeInOut(duration: 0.15)) {
-                                    selectedTab = "helper_view"
-                                }
-                            }
-                            .accessibilityLabel("Helper 设置")
-                            
-                            SquareTabButton(
-                                imageName: "trash",
-                                title: String(localized: "清理工具"),
-                                isSelected: selectedTab == "cleanup_view"
-                            ) {
-                                withAnimation(.easeInOut(duration: 0.15)) {
-                                    selectedTab = "cleanup_view"
-                                }
-                            }
-                            .accessibilityLabel("清理工具")
-                            
-                            SquareTabButton(
-                                imageName: "questionmark.circle",
-                                title: String(localized: "常见问题"),
-                                isSelected: selectedTab == "qa_view"
-                            ) {
-                                withAnimation(.easeInOut(duration: 0.15)) {
-                                    selectedTab = "qa_view"
-                                }
-                            }
-                            .accessibilityLabel("常见问题")
-                            
-                            SquareTabButton(
-                                imageName: "info.circle",
-                                title: String(localized: "关于"),
-                                isSelected: selectedTab == "about_app"
-                            ) {
-                                withAnimation(.easeInOut(duration: 0.15)) {
-                                    selectedTab = "about_app"
-                                }
-                            }
-                            .accessibilityLabel("关于")
-                        }
-                        .padding(.leading, 8)
-                        
-                        Spacer()
-                    }
-                    .padding(.top, 10)
-                    .padding(.bottom, 6)
-                    
-                    Divider()
-                        .opacity(0.6)
 
-                    ScrollView {
-                        ZStack {
-                            if selectedTab == "general_settings" {
-                                GeneralSettingsView(updater: updater)
-                                    .transition(contentTransition)
-                                    .id("general_settings")
-                            } else if selectedTab == "cleanup_view" {
-                                CleanupView(viewModel: cleanupViewModel)
-                                    .transition(contentTransition)
-                                    .id("cleanup_view")
-                            } else if selectedTab == "qa_view" {
-                                QAView()
-                                    .transition(contentTransition)
-                                    .id("qa_view")
-                            } else if selectedTab == "about_app" {
-                                AboutAppView()
-                                    .transition(contentTransition)
-                                    .id("about_app")
-                            } else if selectedTab == "helper_view" {
-                                HelperView(updater: updater, playgroundViewModel: helperPlaygroundViewModel)
-                                    .transition(contentTransition)
-                                    .id("helper_view")
-                            }
-                        }
-                        .frame(maxWidth: .infinity)
-                    }
-                    .background(Color.clear)
-                }
+    enum SettingsTab: String, CaseIterable, Identifiable {
+        case general
+        case helper
+        case cleanup
+        case qa
+        case about
 
-                Button(action: {
-                    withAnimation {
-                        presentationMode.wrappedValue.dismiss()
-                    }
-                }) {
-                    Image(systemName: "xmark")
-                        .font(.system(size: 11, weight: .bold))
-                        .foregroundColor(.gray)
-                        .frame(width: 20, height: 20)
-                        .background(
-                            Circle()
-                                .fill(colorScheme == .dark ? 
-                                    Color.gray.opacity(0.3) : 
-                                    Color.gray.opacity(0.15))
-                        )
-                        .help("关闭")
-                }
-                .buttonStyle(PlainButtonStyle())
-                .keyboardShortcut(.escape, modifiers: [])
-                .padding(.top, 10)
-                .padding(.trailing, 10)
+        var id: String { rawValue }
+
+        var title: String {
+            switch self {
+            case .general: return String(localized: "通用")
+            case .helper:  return String(localized: "Helper 设置")
+            case .cleanup: return String(localized: "清理工具")
+            case .qa:      return String(localized: "常见问题")
+            case .about:   return String(localized: "关于")
             }
         }
-        .frame(width: 700, height: 650)
-        .onAppear {
-            selectedTab = "general_settings"
+
+        var icon: String {
+            switch self {
+            case .general: return "gearshape.fill"
+            case .helper:  return "lock.shield.fill"
+            case .cleanup: return "trash.fill"
+            case .qa:      return "questionmark.circle.fill"
+            case .about:   return "info.circle.fill"
+            }
+        }
+
+        var tint: Color {
+            switch self {
+            case .general: return .blue
+            case .helper:  return .indigo
+            case .cleanup: return .red
+            case .qa:      return .orange
+            case .about:   return .gray
+            }
         }
     }
-    
-    private var contentTransition: AnyTransition {
-        .asymmetric(
-            insertion: .opacity.combined(with: .scale(scale: 0.98)).animation(.easeInOut(duration: 0.2)),
-            removal: .opacity.animation(.easeInOut(duration: 0.1))
+
+    var body: some View {
+        HStack(spacing: 0) {
+            SettingsSidebar(selectedTab: $selectedTab)
+                .frame(width: 200)
+                .background(
+                    Rectangle()
+                        .fill(.ultraThinMaterial)
+                        .overlay(
+                            Rectangle()
+                                .frame(width: 0.5)
+                                .foregroundColor(.secondary.opacity(0.15)),
+                            alignment: .trailing
+                        )
+                )
+
+            ScrollView(showsIndicators: false) {
+                content
+                    .padding(.top, 42)
+                    .padding(.leading, 24)
+                    .padding(.trailing, 24)
+                    .padding(.bottom, 24)
+                    .frame(maxWidth: .infinity, alignment: .top)
+                    .transition(.opacity.animation(.easeInOut(duration: 0.15)))
+                    .id(selectedTab)
+            }
+            .background(Color(.windowBackgroundColor).opacity(0.3))
+        }
+        .overlay(alignment: .topTrailing) {
+            SettingsCloseButton(onClose: { presentationMode.wrappedValue.dismiss() })
+                .padding(12)
+        }
+        .frame(
+            minWidth: 720,
+            idealWidth: 780,
+            maxWidth: 1100,
+            minHeight: 560,
+            idealHeight: 620,
+            maxHeight: 900
         )
+        .background(.ultraThinMaterial)
+        .onAppear {
+            selectedTab = .general
+        }
+    }
+
+    @ViewBuilder
+    private var content: some View {
+        switch selectedTab {
+        case .general:
+            GeneralSettingsView(updater: updater)
+        case .helper:
+            HelperView(updater: updater, playgroundViewModel: helperPlaygroundViewModel)
+        case .cleanup:
+            CleanupView(viewModel: cleanupViewModel)
+        case .qa:
+            QAView()
+        case .about:
+            AboutAppView()
+        }
     }
 }
 
-struct SquareTabButton: View {
-    let imageName: String
-    let title: String
-    let isSelected: Bool
-    let action: () -> Void
-    @Environment(\.colorScheme) var colorScheme
-    
+private struct SettingsSidebar: View {
+    @Binding var selectedTab: CustomSettingsView.SettingsTab
+
     var body: some View {
-        Button(action: action) {
-            VStack(spacing: 4) {
-                ZStack {
-                    if isSelected {
-                        RoundedRectangle(cornerRadius: 6)
-                            .fill(Color.blue.opacity(0.2))
-                            .frame(width: 40, height: 40)
-                    }
-                    
-                    Image(systemName: imageName)
-                        .font(.system(size: isSelected ? 18 : 17))
-                        .foregroundColor(isSelected ? .blue : colorScheme == .dark ? .white : .black)
+        VStack(alignment: .leading, spacing: 4) {
+            Text("设置")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundColor(.secondary.opacity(0.85))
+                .padding(.horizontal, 16)
+                .padding(.top, 20)
+                .padding(.bottom, 8)
+
+            VStack(spacing: 2) {
+                ForEach(CustomSettingsView.SettingsTab.allCases) { tab in
+                    SettingsSidebarItem(
+                        tab: tab,
+                        isActive: selectedTab == tab,
+                        onTap: {
+                            withAnimation(.easeInOut(duration: 0.15)) {
+                                selectedTab = tab
+                            }
+                        }
+                    )
                 }
-                
-                Text(title)
-                    .font(.system(size: 12, weight: isSelected ? .medium : .regular))
-                    .foregroundColor(isSelected ? .blue : colorScheme == .dark ? .white : .primary)
             }
-            .frame(width: 70)
+            .padding(.horizontal, 8)
+
+            Spacer()
+        }
+    }
+}
+
+private struct SettingsSidebarItem: View {
+    let tab: CustomSettingsView.SettingsTab
+    let isActive: Bool
+    let onTap: () -> Void
+    @State private var isHovered = false
+
+    var body: some View {
+        Button(action: onTap) {
+            HStack(spacing: 10) {
+                ZStack {
+                    RoundedRectangle(cornerRadius: 6)
+                        .fill(tab.tint.opacity(isActive ? 0.22 : 0.12))
+                        .frame(width: 24, height: 24)
+                    Image(systemName: tab.icon)
+                        .font(.system(size: 11, weight: isActive ? .semibold : .regular))
+                        .foregroundColor(tab.tint)
+                }
+                Text(tab.title)
+                    .font(.system(size: 13, weight: isActive ? .semibold : .regular))
+                    .foregroundColor(.primary.opacity(isActive ? 0.95 : 0.75))
+                    .lineLimit(1)
+                Spacer()
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(
+                RoundedRectangle(cornerRadius: 7)
+                    .fill(isActive ? Color.secondary.opacity(0.14) : (isHovered ? Color.secondary.opacity(0.06) : Color.clear))
+            )
             .contentShape(Rectangle())
         }
-        .buttonStyle(PlainButtonStyle())
+        .buttonStyle(.plain)
+        .onHover { isHovered = $0 }
+        .accessibilityLabel(tab.title)
     }
-} 
+}
+
+private struct SettingsCloseButton: View {
+    let onClose: () -> Void
+    @State private var isHovered = false
+
+    var body: some View {
+        Button(action: onClose) {
+            Image(systemName: "xmark")
+                .font(.system(size: 10, weight: .bold))
+                .foregroundColor(.secondary)
+                .frame(width: 24, height: 24)
+                .background(
+                    Circle()
+                        .fill(isHovered ? Color.secondary.opacity(0.28) : Color.secondary.opacity(0.14))
+                )
+                .overlay(
+                    Circle().strokeBorder(Color.secondary.opacity(0.18), lineWidth: 0.5)
+                )
+        }
+        .buttonStyle(.plain)
+        .keyboardShortcut(.escape, modifiers: [])
+        .onHover { isHovered = $0 }
+        .help(String(localized: "关闭"))
+    }
+}

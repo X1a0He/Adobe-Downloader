@@ -1,23 +1,17 @@
-//
-//  PrivilegedHelperAdapter.swift
-//  Adobe Downloader
-//
-//  Created by X1a0He on 2025/07/20.
-//
-
 import Foundation
 import AppKit
 import Combine
 
+@MainActor
 @objcMembers
 class PrivilegedHelperAdapter: NSObject, ObservableObject {
-    
+
     static let shared = PrivilegedHelperAdapter()
-    static let machServiceName = "com.x1a0he.macOS.Adobe-Downloader.helper"
-    
+    nonisolated static let machServiceName = "com.x1a0he.macOS.Adobe-Downloader.helper"
+
     @Published var connectionState: ConnectionState = .disconnected
 
-    private let daemonManager: SMAppServiceDaemonHelperManager
+    private let manager = HelperManager.shared
     var connectionSuccessBlock: (() -> Void)?
 
     enum HelperStatus {
@@ -25,12 +19,12 @@ class PrivilegedHelperAdapter: NSObject, ObservableObject {
         case noFound
         case needUpdate
     }
-    
+
     enum ConnectionState {
         case connected
         case disconnected
         case connecting
-        
+
         var description: String {
             switch self {
             case .connected:
@@ -44,94 +38,119 @@ class PrivilegedHelperAdapter: NSObject, ObservableObject {
     }
 
     override init() {
-        self.daemonManager = SMAppServiceDaemonHelperManager.shared
         super.init()
 
-        daemonManager.$connectionState
+        manager.$isInstalled
             .receive(on: DispatchQueue.main)
-            .sink { [weak self] daemonState in
-                self?.connectionState = self?.convertConnectionState(daemonState) ?? .disconnected
+            .sink { [weak self] isInstalled in
+                self?.connectionState = isInstalled ? .connected : .disconnected
+                if isInstalled {
+                    self?.connectionSuccessBlock?()
+                }
             }
             .store(in: &cancellables)
-
-        daemonManager.connectionSuccessBlock = { [weak self] in
-            self?.connectionSuccessBlock?()
-        }
     }
-    
+
     private var cancellables = Set<AnyCancellable>()
 
     func checkInstall() {
-        daemonManager.checkInstall()
-    }
-    
-    func getHelperStatus(callback: @escaping ((HelperStatus) -> Void)) {
-        daemonManager.getHelperStatus { status in
-            callback(self.convertHelperStatus(status))
+        Task {
+            await manager.checkStatus()
         }
     }
-    
+
+    func getHelperStatus(callback: @escaping ((HelperStatus) -> Void)) {
+        Task {
+            await manager.checkStatus()
+            callback(manager.isInstalled ? .installed : .noFound)
+        }
+    }
+
     static var getHelperStatus: Bool {
-        return SMAppServiceDaemonHelperManager.getHelperStatus
+        return HelperManager.shared.isInstalled
     }
 
     func executeCommand(_ command: String, completion: @escaping (String) -> Void) {
-        daemonManager.executeCommand(command, completion: completion)
+        Task {
+            do {
+                let result = try await manager.executeShell(command)
+                completion(result)
+            } catch {
+                completion("Error: \(error.localizedDescription)")
+            }
+        }
     }
-    
+
     func executeInstallation(_ command: String, progress: @escaping (String) -> Void) async throws {
-        try await daemonManager.executeInstallation(command, progress: progress)
+        try await manager.executeHDPIMInstall(
+            productDir: command,
+            userHome: NSHomeDirectory(),
+            progress: progress
+        )
     }
-    
+
     func reconnectHelper(completion: @escaping (Bool, String) -> Void) {
-        daemonManager.reconnectHelper(completion: completion)
+        Task {
+            do {
+                try await manager.checkStatus()
+                completion(manager.isInstalled, manager.status)
+            } catch {
+                completion(false, error.localizedDescription)
+            }
+        }
     }
-    
+
     func reinstallHelper(completion: @escaping (Bool, String) -> Void) {
-        daemonManager.reinstallHelper(completion: completion)
+        Task {
+            do {
+                try await manager.reinstall()
+                completion(true, "重装成功")
+            } catch {
+                completion(false, error.localizedDescription)
+            }
+        }
     }
-    
+
     func removeInstallHelper(completion: ((Bool) -> Void)? = nil) {
-        daemonManager.removeInstallHelper(completion: completion)
+        Task {
+            do {
+                try await manager.uninstall()
+                completion?(true)
+            } catch {
+                completion?(false)
+            }
+        }
     }
-    
+
     func forceReinstallHelper() {
-        daemonManager.forceCleanAndReinstallHelper { success, message in
-            print("Helper重新启用结果: \(success ? "成功" : "失败") - \(message)")
+        Task {
+            do {
+                try await manager.reinstall()
+                print("Helper重新启用结果: 成功")
+            } catch {
+                print("Helper重新启用结果: 失败 - \(error.localizedDescription)")
+            }
         }
     }
-    
+
     func disconnectHelper() {
-        daemonManager.disconnectHelper()
-    }
-    
-    func uninstallHelperViaTerminal(completion: @escaping (Bool, String) -> Void) {
-        daemonManager.uninstallHelperViaTerminal(completion: completion)
-    }
-    
-    public func getHelperProxy() throws -> HelperToolProtocol {
-        return try daemonManager.getHelperProxy()
-    }
-    
-    private func convertConnectionState(_ daemonState: SMAppServiceDaemonHelperManager.ConnectionState) -> ConnectionState {
-        switch daemonState {
-        case .connected:
-            return .connected
-        case .disconnected:
-            return .disconnected
-        case .connecting:
-            return .connecting
+        Task {
+            do {
+                try await manager.uninstall()
+            } catch {
+                print("断开连接失败: \(error.localizedDescription)")
+            }
         }
     }
-    
-    private func convertHelperStatus(_ daemonStatus: SMAppServiceDaemonHelperManager.HelperStatus) -> HelperStatus {
-        switch daemonStatus {
-        case .installed:
-            return .installed
-        case .noFound:
-            return .noFound
-        case .needUpdate:
-            return .needUpdate
+
+    func uninstallHelperViaTerminal(completion: @escaping (Bool, String) -> Void) {
+        Task {
+            do {
+                try await manager.uninstall()
+                completion(true, "卸载成功")
+            } catch {
+                completion(false, error.localizedDescription)
+            }
         }
     }
 }

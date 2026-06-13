@@ -1,60 +1,8 @@
 # Adobe Downloader
 
-![Adobe Downloader 2.0.0](imgs/Adobe%20Downloader%202.0.0.png)
+![Adobe-Downloader-3.0.0](imgs/Adobe-Downloader-3.0.0.png)
 
-# **[中文版本](readme.md)**
-
-## Before Use
-
-> ⚠️ This repository does not support any PR submission
-
-**Due to the rewritten Helper in v2.1, the minimum macOS requirement is now 13.0+ (no longer supports 12.0).**
-**🍎Only for macOS 13.0+.**
-
-> **If you like Adobe Downloader, or it helps you, please Star🌟 it.**
->
-> 1. Before installing Adobe products, the Adobe Setup component must be present on your system; otherwise, the
-     installation feature will not work. You can download it through the built-in “Settings” in the program or
-     from [Adobe Creative Cloud](https://creativecloud.adobe.com/apps/download/creative-cloud).
-> 2. To enable smooth installation after downloading, Adobe Downloader needs to modify Adobe’s Setup program. This
-     process is fully automated by the program and requires no user intervention. Many thanks
-     to [QiuChenly](https://github.com/QiuChenly) for providing the solution.
-> 3. If you encounter any problems, don't panic, contact [@X1a0He](https://t.me/X1a0He_bot) on Telegram or use the
-     Python
-     version. Many thanks to [Drovosek01](https://github.com/Drovosek01) for
-     the [adobe-packager](https://github.com/Drovosek01/adobe-packager)
-> 4. ⚠️⚠️⚠️ **All Adobe apps in Adobe Downloader are from official Adobe channels and are not cracked versions.**
-> 5. ❌❌❌ **Do not use an external hard drive or any USB to store it, as this will cause permission issues, I do not have
-     the patience to solve any about permission issues**
-
-## FAQ
-
-**This section will be updated periodically with meaningful issues that have been raised.**
-
-### **[NEW] About error codes and Helper**
-
-Before version 1.3.0, many operations required users to enter passwords because root permissions or higher permissions
-were not obtained
-
-Therefore, we introduced the Helper mechanism in version 1.3.0. You only need to install the Helper and then the
-subsequent Setup component processing. Product installation no longer requires entering a password
-
-You may see relevant prompts in the upper right corner. Please rest assured that your system is very safe. This is
-because of macOS's Helper mechanism and signed pop-up windows
-
-If you are still worried about problems, please find a professional to check the relevant code, although it is futile
-
-### Questions about the Setup Component
-
-> It’s mentioned in the usage instructions that to use the installation feature, you need to modify Adobe’s setup
-> component. You can find details in the code.
-
-Why is this necessary? Without modifications, installation will fail with error code 2700.
-
-> **Does the setup modification require user intervention?**
-
-No, Adobe Downloader automates the setup component handling, including backup. All you need to do is enter your password
-when prompted.
+> All Adobe apps in Adobe Downloader are from official Adobe channels and are not cracked versions.
 
 <a href="https://star-history.com/#X1a0He/Adobe-Downloader&Timeline">
  <picture>
@@ -64,42 +12,66 @@ when prompted.
  </picture>
 </a>
 
-## 📔Latest Log
+# **[中文版本](readme.md)**
 
-- For historical update logs, please go to [Update Log](update-log.md)
+## Before Use
 
-- 2025-12-25 Update Log
+**⚠️ Only supports macOS 13.0+**
 
-```markdown
-1.	Reworked the Helper by introducing it via SMAppService Daemon
-2.	Introduced execution logs for the Helper
-3.	Fixed an issue where the cleanup tool lost its selected state and cleanup progress when switching tabs
-4.	Removed the Helper status from the Settings page
-5.	Introduced Helper Settings and a Helper Playground to observe Helper execution results and actual granted privileges
-```
+> **If you like Adobe Downloader, or if it helps you, please Star the repository 🌟. Your support is what keeps me updating it.**
 
-### Language friendly
+## 📔 Latest Log
+
+### 2026-06-13 v3.0.0 Update Log
+
+#### Added
+
+- Brand-new download mechanism
+  Adobe Downloader further improves its download mechanism and now supports downloading add-ons separately, allowing users to download the main product or specific add-ons more flexibly.
+
+- Brand-new product installation mechanism
+  This version removes the dependency on the original Setup component and switches to a new installation engine. It supports full installation and incremental installation for all products, and adds the ability to install add-ons separately.
+
+- Brand-new product uninstallation mechanism
+  Add-on uninstallation is now supported. You can uninstall specific add-ons of a product without affecting the complete product itself.
+
+- Adobe Creative Cloud recognition support
+  Thanks to the new product installation mechanism, all products installed through Adobe Downloader can now be displayed correctly in Adobe Creative Cloud, including related dependencies.
+
+#### Improvements
+
+- macOS 27 support
+  Adobe Downloader has been adapted for macOS 27, improving compatibility and the overall experience on the new system.
+
+- Liquid Glass style support
+  The UI has been further upgraded with richer visual presentation, bringing a more modern and refined interaction experience.
+
+#### Others
+
+- This version also includes more new features and experience improvements for Adobe Downloader 3.0, waiting for you to explore.
+
+#### More
+
+- For more app update logs, please check [Update Log](update-log.md)
+
+### Language Support
 
 - [x] Chinese
 - [x] English
 
 ## ⚠️ Warning
 
-**If you have any optimization suggestions or questions about Adobe Downloader, please open an issue or
-contact [@X1a0He](https://t.me/X1a0He_bot)
-via Telegram.**
+**If you have any optimization suggestions or questions about Adobe Downloader, please open an issue or contact [@X1a0He](https://t.me/X1a0He_bot) via Telegram.**
 
 ## ✨ Features
 
-- [x] Basic 📦
-    - [x] Download Acrobat Pro
-    - [x] Download other Adobe products
-    - [x] Support installation of non-Acrobat products
-    - [x] Support multiple products download at the same time
-    - [x] Supports using default language and default directory
+- [x] Basic features 📦
+    - [x] Download and install all Adobe apps
+    - [x] Support downloading multiple products at the same time
+    - [x] Support using the default language and default directory
     - [x] Support task record persistence
-- [x] Installation 📦
-- [x] Cleanup 🧹 (1.5.0 added)
+- [x] Installation features 📦
+- [x] Cleanup features 🧹 (added in 1.5.0)
     - [x] Adobe applications
     - [x] Adobe Creative Cloud
     - [x] Adobe Preferences
@@ -109,30 +81,9 @@ via Telegram.**
     - [x] Adobe Services
     - [x] Adobe Keychain
     - [x] Adobe Genuine Service
-    - [x] Adobe hosts
+    - [x] Adobe Hosts
 
 ## 👀 Preview
-
-### Light Mode & Dark Mode
-
-![light](imgs/preview-light.png)
-![dark](imgs/preview-dark.png)
-
-### Version Picker
-
-![version picker](imgs/version.png)
-
-### Language Picker
-
-![language picker](imgs/language.png)
-
-### Download Management
-
-![download management](imgs/download.png)
-
-## 🔗 References
-
-- [QiuChenly/InjectLib](https://github.com/QiuChenly/InjectLib/)
 
 ## 👨🏻‍💻Author
 
@@ -140,5 +91,5 @@ Adobe Downloader © X1a0He
 
 Released under GPLv3. Created on 2024.11.05.
 
-> GitHub [@X1a0He](https://github.com/X1a0He) \
+> GitHub [@X1a0He](https://github.com/X1a0He/) \
 > Telegram [@X1a0He](https://t.me/X1a0He_bot)

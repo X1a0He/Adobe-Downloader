@@ -1,50 +1,8 @@
 # Adobe Downloader
 
-![Adobe Downloader 2.0.0](imgs/Adobe%20Downloader%202.0.0.png)
+![Adobe-Downloader-3.0.0](imgs/Adobe-Downloader-3.0.0.png)
 
-# **[English version](readme-en.md)**
-
-## 使用须知
-
-> ⚠️ 本仓库不支持任何 Pr 提交
-
-**由于 2.1 版本重写了 Helper，所以最低支持版本不再为 macOS 12.0+**
-**🍎仅支持 macOS 13.0+**
-
-> **如果你也喜欢 Adobe Downloader, 或者对你有帮助, 请 Star 仓库吧 🌟, 你的支持是我更新的动力**
->
-> 1. 在对Adobe产品进行安装前，系统必须存在 Adobe Setup 组件，否则无法使用安装功能，可通过程序内置的"设置"
-     中进行下载，或前往[Adobe Creative Cloud](https://creativecloud.adobe.com/apps/download/creative-cloud)进行下载
-> 2. 为了能够在下载后顺利安装，Adobe Downloader 需要对 Adobe 的 Setup
-     程序做出修改，该过程由程序全自动，无需用户介入，非常感谢 [QiuChenly](https://github.com/QiuChenly)
-     提供的解决方案
-> 3. 如果在使用过程中遇到问题， 请通过 Telegram 联系我: [@X1a0He](https://t.me/X1a0He_bot)
-> 4. ⚠️⚠️⚠️ **Adobe Downloader 中的所有 Adobe 应用均来自 Adobe 官方渠道，并非破解版本。**
-> 5. ❌❌❌ **不要将下载目录设置为外接移动硬盘或者USB设备，这会导致出现权限问题，我并没有时间也没有耐心处理任何权限问题**
-
-## 常见问题
-
-**这里会不定时更新一些 issues 出现过的，并且有意义的问题**
-
-### **[NEW] 关于 错误代码 和 Helper 的问题**
-
-在 1.3.0 版本以前，由于没有获取到 root 权限或者更高的权限，导致非常多的操作都需要用户输入密码
-
-所以，我们在 1.3.0 版本中引入了 Helper 的机制，只需要安装了 Helper 后续的 Setup 组件处理，产品安装均不再需要输入密码
-
-也许你会在右上角看到相关提示，请放心，你的系统非常安全，这是因为 macOS 的 Helper 机制和签名的弹窗
-
-如果你还担心存在问题，请找专业人士查阅相关代码，尽管这是徒劳
-
-### 关于 setup 组件的问题
-
-> 使用须知中强调了，如果需要使用安装功能，那么就必须对 Adobe 的 setup 组件进行修改处理，你可以在代码中找到
-
-为什么要处理，因为不处理无法安装，会出现2700错误代码
-
-> **setup处理是否需要用户手动处理？**
-
-并不需要，Adobe Downloader已完成了全自动处理且备份 setup 组件的功能
+> Adobe Downloader 中的所有 Adobe 应用均来自 Adobe 官方渠道，并非破解版本。
 
 <a href="https://star-history.com/#X1a0He/Adobe-Downloader&Timeline">
  <picture>
@@ -54,19 +12,47 @@
  </picture>
 </a>
 
+# **[English version](readme-en.md)**
+
+## 使用须知
+
+**⚠️仅支持 macOS 13.0+**
+
+> **如果你也喜欢 Adobe Downloader, 或者对你有帮助, 请 Star 仓库吧 🌟, 你的支持是我更新的动力**
+
 ## 📔 最新日志
 
+### 2026-06-13 v3.0.0 更新日志
+
+#### 新增
+
+- 全新的下载机制
+  Adobe Downloader 对下载机制进行了进一步完善，现已支持加载项单独下载，用户可以更灵活地获取产品主体或指定加载项。
+
+- 全新的产品安装机制
+  本版本抛弃了原有的 Setup 组件依赖，改用新的安装引擎，支持所有产品的全量安装与增量安装，并新增加载项单独安装能力。
+
+- 全新的产品卸载机制
+  新增加载项卸载功能，现在可以针对某个产品的指定加载项进行单独卸载，而不必影响完整产品本体。
+
+- Adobe Creative Cloud 识别支持
+  得益于新的产品安装机制，通过 Adobe Downloader 安装的所有产品都可以在 Adobe Creative Cloud 中正确显示，包括相关依赖项也能被正确识别。
+
+#### 优化
+
+- 适配 macOS 27
+  Adobe Downloader 已针对 macOS 27 进行适配，提升了新系统环境下的兼容性与使用体验。
+
+- 支持 Liquid Glass 风格
+  UI 界面进一步升级，引入更丰富的视觉表现，带来更现代、更细腻的交互体验。
+
+#### 其他
+
+- 本版本还包含更多面向 3.0 的新特性与体验优化，等待你进一步探索。
+
+#### 更多
+
 - 更多关于 App 的更新日志，请查看 [Update Log](update-log.md)
-
-- 2025-12-25 更新日志
-
-```markdown
-1. 引入 SMAppService Daemon 的方式重做 Helper
-2. 加入 Helper 执行日志
-3. 修复了清理工具在切换 Tab 下丢失选中状态和清理进度的问题
-4. 移除设置页面的 Helper 状态
-5. 新增 Helper 设置 和 Helper 游乐场以观察 Helper 执行结果和实际权限
-```
 
 ### 语言支持
 
@@ -80,9 +66,7 @@
 ## ✨ 特点
 
 - [x] 基本功能 📦
-    - [x] Acrobat Pro 的下载
-    - [x] 其他 Adobe 产品的下载
-    - [x] 支持安装非 Acrobat 产品
+    - [x] 所有 Adobe App 的下载/安装
     - [x] 支持多个产品同时下载
     - [x] 支持使用默认语言和默认目录
     - [x] 支持任务记录持久化
@@ -100,27 +84,6 @@
     - [x] Adobe Hosts
 
 ## 👀 预览
-
-### 浅色模式 & 深色模式
-
-![light](imgs/preview-light.png)
-![dark](imgs/preview-dark.png)
-
-### 版本选择
-
-![version picker](imgs/version.png)
-
-### 语言选择
-
-![language picker](imgs/language.png)
-
-### 下载任务管理
-
-![download management](imgs/download.png)
-
-## 🔗 引用
-
-- [QiuChenly/InjectLib](https://github.com/QiuChenly/InjectLib/)
 
 ## 👨🏻‍💻作者
 

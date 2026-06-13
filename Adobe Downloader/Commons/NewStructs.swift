@@ -5,6 +5,32 @@
 //
 
 import Foundation
+
+struct HDPIMHostValidationSnapshot: Codable, Equatable {
+    var isInstallable: Bool
+    var reason: String
+    var checkResult: String
+    var failureXML: String
+    var failingDescription: String
+    var messageString: String
+
+    init(
+        isInstallable: Bool = true,
+        reason: String = "",
+        checkResult: String = "",
+        failureXML: String = "",
+        failingDescription: String = "",
+        messageString: String = ""
+    ) {
+        self.isInstallable = isInstallable
+        self.reason = reason
+        self.checkResult = checkResult
+        self.failureXML = failureXML
+        self.failingDescription = failingDescription
+        self.messageString = messageString
+    }
+}
+
 struct Product: Codable, Equatable {
     var type: String
     var displayName: String
@@ -46,6 +72,7 @@ struct Product: Codable, Equatable {
 
         struct LanguageSet: Codable, Equatable {
             var manifestURL: String
+            var lbsURL: String
             var dependencies: [Dependency]
             var productCode: String
             var name: String
@@ -63,8 +90,10 @@ struct Product: Codable, Equatable {
                 var targetPlatform: String
                 var selectedPlatform: String
                 var selectedReason: String
-                
-                init(sapCode: String, baseVersion: String, productVersion: String, buildGuid: String, isMatchPlatform: Bool = false, targetPlatform: String = "", selectedPlatform: String = "", selectedReason: String = "") {
+                var isSoftDependency: Bool
+                var hostValidation: HDPIMHostValidationSnapshot?
+
+                init(sapCode: String, baseVersion: String, productVersion: String, buildGuid: String, isMatchPlatform: Bool = false, targetPlatform: String = "", selectedPlatform: String = "", selectedReason: String = "", isSoftDependency: Bool = false, hostValidation: HDPIMHostValidationSnapshot? = nil) {
                     self.sapCode = sapCode
                     self.baseVersion = baseVersion
                     self.productVersion = productVersion
@@ -73,6 +102,8 @@ struct Product: Codable, Equatable {
                     self.targetPlatform = targetPlatform
                     self.selectedPlatform = selectedPlatform
                     self.selectedReason = selectedReason
+                    self.isSoftDependency = isSoftDependency
+                    self.hostValidation = hostValidation
                 }
             }
         }
@@ -124,6 +155,12 @@ class DependenciesToDownload: ObservableObject, Codable {
     var version: String
     var buildGuid: String
     var applicationJson: String?
+    var isSoftDependency: Bool
+    var platform: String
+    var baseVersion: String
+    var buildVersion: String
+    var selectedReason: String
+    var hostValidation: HDPIMHostValidationSnapshot?
     @Published var packages: [Package] = []
     @Published var completedPackages: Int = 0
 
@@ -131,11 +168,28 @@ class DependenciesToDownload: ObservableObject, Codable {
         packages.count
     }
 
-    init(sapCode: String, version: String, buildGuid: String, applicationJson: String = "") {
+    init(
+        sapCode: String,
+        version: String,
+        buildGuid: String,
+        applicationJson: String = "",
+        isSoftDependency: Bool = false,
+        platform: String = "",
+        baseVersion: String = "",
+        buildVersion: String = "",
+        selectedReason: String = "",
+        hostValidation: HDPIMHostValidationSnapshot? = nil
+    ) {
         self.sapCode = sapCode
         self.version = version
         self.buildGuid = buildGuid
         self.applicationJson = applicationJson
+        self.isSoftDependency = isSoftDependency
+        self.platform = platform
+        self.baseVersion = baseVersion
+        self.buildVersion = buildVersion
+        self.selectedReason = selectedReason
+        self.hostValidation = hostValidation
     }
 
     func updateCompletedPackages() {
@@ -146,7 +200,7 @@ class DependenciesToDownload: ObservableObject, Codable {
     }
 
     enum CodingKeys: String, CodingKey {
-        case sapCode, version, buildGuid, applicationJson, packages
+        case sapCode, version, buildGuid, applicationJson, packages, isSoftDependency, platform, baseVersion, buildVersion, selectedReason, hostValidation
     }
 
     func encode(to encoder: Encoder) throws {
@@ -156,6 +210,12 @@ class DependenciesToDownload: ObservableObject, Codable {
         try container.encode(buildGuid, forKey: .buildGuid)
         try container.encodeIfPresent(applicationJson, forKey: .applicationJson)
         try container.encode(packages, forKey: .packages)
+        try container.encode(isSoftDependency, forKey: .isSoftDependency)
+        try container.encode(platform, forKey: .platform)
+        try container.encode(baseVersion, forKey: .baseVersion)
+        try container.encode(buildVersion, forKey: .buildVersion)
+        try container.encode(selectedReason, forKey: .selectedReason)
+        try container.encodeIfPresent(hostValidation, forKey: .hostValidation)
     }
 
     required init(from decoder: Decoder) throws {
@@ -165,6 +225,12 @@ class DependenciesToDownload: ObservableObject, Codable {
         buildGuid = try container.decode(String.self, forKey: .buildGuid)
         applicationJson = try container.decodeIfPresent(String.self, forKey: .applicationJson)
         packages = try container.decode([Package].self, forKey: .packages)
+        isSoftDependency = try container.decodeIfPresent(Bool.self, forKey: .isSoftDependency) ?? false
+        platform = try container.decodeIfPresent(String.self, forKey: .platform) ?? ""
+        baseVersion = try container.decodeIfPresent(String.self, forKey: .baseVersion) ?? ""
+        buildVersion = try container.decodeIfPresent(String.self, forKey: .buildVersion) ?? ""
+        selectedReason = try container.decodeIfPresent(String.self, forKey: .selectedReason) ?? ""
+        hostValidation = try container.decodeIfPresent(HDPIMHostValidationSnapshot.self, forKey: .hostValidation)
         completedPackages = 0
     }
 }
@@ -176,8 +242,11 @@ class Package: Identifiable, ObservableObject, Codable {
     var fullPackageName: String
     var downloadSize: Int64
     var downloadURL: String
+    var manifestURL: String
     var packageVersion: String
     var validationURL: String?
+    var validationURLType1: String?
+    var packageHashKey: String
 
     @Published var downloadedSize: Int64 = 0 {
         didSet {
@@ -192,8 +261,14 @@ class Package: Identifiable, ObservableObject, Codable {
     @Published var downloaded: Bool = false
 
     @Published var isSelected: Bool = false
+    var isBaselineDownloaded: Bool = false
     var isRequired: Bool = false
+    var isDefaultSelected: Bool = false
+    var isAdobeDownloaderPreselected: Bool = false
+    var isOfficiallyEligible: Bool = true
+    var officialFilterReasons: [String] = []
     var condition: String = ""
+    var hostValidation: HDPIMHostValidationSnapshot?
 
     var lastUpdated: Date = Date()
     var lastRecordedSize: Int64 = 0
@@ -226,19 +301,40 @@ class Package: Identifiable, ObservableObject, Codable {
         }
     }
 
-    init(type: String, fullPackageName: String, downloadSize: Int64, downloadURL: String, packageVersion: String, condition: String = "", isRequired: Bool = false, validationURL: String? = nil) {
+    init(
+        type: String,
+        fullPackageName: String,
+        downloadSize: Int64,
+        downloadURL: String,
+        manifestURL: String = "",
+        packageVersion: String,
+        condition: String = "",
+        isRequired: Bool = false,
+        isDefaultSelected: Bool = false,
+        isAdobeDownloaderPreselected: Bool = false,
+        isOfficiallyEligible: Bool = true,
+        officialFilterReasons: [String] = [],
+        validationURL: String? = nil,
+        validationURLType1: String? = nil,
+        packageHashKey: String = ""
+    ) {
         self.type = type
         self.fullPackageName = fullPackageName
         self.downloadSize = downloadSize
         self.downloadURL = downloadURL
+        self.manifestURL = manifestURL
         self.packageVersion = packageVersion
         self.validationURL = validationURL
+        self.validationURLType1 = validationURLType1
+        self.packageHashKey = packageHashKey
         self.condition = condition
         self.isRequired = isRequired
-        self.isSelected = isRequired
-        if !isRequired {
-            self.isSelected = shouldBeSelectedByDefault
-        }
+        self.isDefaultSelected = isDefaultSelected || isAdobeDownloaderPreselected || isRequired
+        self.isAdobeDownloaderPreselected = isAdobeDownloaderPreselected
+        self.isOfficiallyEligible = isOfficiallyEligible
+        self.officialFilterReasons = officialFilterReasons
+        self.isSelected = self.isDefaultSelected
+        self.hostValidation = nil
     }
 
     func updateProgress(downloadedSize: Int64, speed: Double) {
@@ -276,30 +372,11 @@ class Package: Identifiable, ObservableObject, Codable {
     var hasValidSize: Bool {
         downloadSize > 0
     }
-    
-    var shouldBeSelectedByDefault: Bool {
-        let targetArchitecture = StorageData.shared.downloadAppleSilicon ? "arm64" : "x64"
-        let language = StorageData.shared.defaultLanguage
-        let isCore = type == "core"
-        
-        if isCore {
-            if condition.isEmpty {
-                return true
-            } else {
-                if condition.contains("[OSArchitecture]==\(targetArchitecture)") {
-                    return true
-                }
-                if condition.contains("[installLanguage]==\(language)") || language == "ALL" {
-                    return true
-                }
-            }
-        } else {
-            return condition.contains("[installLanguage]==\(language)") || language == "ALL"
-        }
-        
-        return false
-    }
 
+    var officialFilterReasonText: String {
+        officialFilterReasons.joined(separator: "；")
+    }
+    
     func updateStatus(_ status: PackageStatus) {
         Task { @MainActor in
             self.status = status
@@ -308,7 +385,7 @@ class Package: Identifiable, ObservableObject, Codable {
     }
 
     enum CodingKeys: String, CodingKey {
-        case id, type, fullPackageName, downloadSize, downloadURL, packageVersion, validationURL, condition, isRequired
+        case id, type, fullPackageName, downloadSize, downloadURL, manifestURL, packageVersion, validationURL, validationURLType1, packageHashKey, condition, isRequired, isDefaultSelected, isAdobeDownloaderPreselected, isOfficiallyEligible, officialFilterReasons, isSelected, isBaselineDownloaded, hostValidation
     }
 
     func encode(to encoder: Encoder) throws {
@@ -318,10 +395,20 @@ class Package: Identifiable, ObservableObject, Codable {
         try container.encode(fullPackageName, forKey: .fullPackageName)
         try container.encode(downloadSize, forKey: .downloadSize)
         try container.encode(downloadURL, forKey: .downloadURL)
+        try container.encode(manifestURL, forKey: .manifestURL)
         try container.encode(packageVersion, forKey: .packageVersion)
         try container.encodeIfPresent(validationURL, forKey: .validationURL)
+        try container.encodeIfPresent(validationURLType1, forKey: .validationURLType1)
+        try container.encode(packageHashKey, forKey: .packageHashKey)
         try container.encode(condition, forKey: .condition)
         try container.encode(isRequired, forKey: .isRequired)
+        try container.encode(isDefaultSelected, forKey: .isDefaultSelected)
+        try container.encode(isAdobeDownloaderPreselected, forKey: .isAdobeDownloaderPreselected)
+        try container.encode(isOfficiallyEligible, forKey: .isOfficiallyEligible)
+        try container.encode(officialFilterReasons, forKey: .officialFilterReasons)
+        try container.encode(isSelected, forKey: .isSelected)
+        try container.encode(isBaselineDownloaded, forKey: .isBaselineDownloaded)
+        try container.encodeIfPresent(hostValidation, forKey: .hostValidation)
     }
 
     required init(from decoder: Decoder) throws {
@@ -331,14 +418,20 @@ class Package: Identifiable, ObservableObject, Codable {
         fullPackageName = try container.decode(String.self, forKey: .fullPackageName)
         downloadSize = try container.decode(Int64.self, forKey: .downloadSize)
         downloadURL = try container.decode(String.self, forKey: .downloadURL)
+        manifestURL = try container.decodeIfPresent(String.self, forKey: .manifestURL) ?? ""
         packageVersion = try container.decode(String.self, forKey: .packageVersion)
         validationURL = try container.decodeIfPresent(String.self, forKey: .validationURL)
+        validationURLType1 = try container.decodeIfPresent(String.self, forKey: .validationURLType1)
+        packageHashKey = try container.decodeIfPresent(String.self, forKey: .packageHashKey) ?? ""
         condition = try container.decodeIfPresent(String.self, forKey: .condition) ?? ""
         isRequired = try container.decodeIfPresent(Bool.self, forKey: .isRequired) ?? false
-        isSelected = isRequired
-        if !isRequired {
-            isSelected = shouldBeSelectedByDefault
-        }
+        isAdobeDownloaderPreselected = try container.decodeIfPresent(Bool.self, forKey: .isAdobeDownloaderPreselected) ?? false
+        isDefaultSelected = (try container.decodeIfPresent(Bool.self, forKey: .isDefaultSelected) ?? false) || isAdobeDownloaderPreselected || isRequired
+        isOfficiallyEligible = try container.decodeIfPresent(Bool.self, forKey: .isOfficiallyEligible) ?? true
+        officialFilterReasons = try container.decodeIfPresent([String].self, forKey: .officialFilterReasons) ?? []
+        isSelected = (try container.decodeIfPresent(Bool.self, forKey: .isSelected) ?? false) || isRequired || isDefaultSelected
+        isBaselineDownloaded = try container.decodeIfPresent(Bool.self, forKey: .isBaselineDownloaded) ?? false
+        hostValidation = try container.decodeIfPresent(HDPIMHostValidationSnapshot.self, forKey: .hostValidation)
     }
 }
 
@@ -365,7 +458,20 @@ struct ValidationInfo {
         xmlParser.delegate = parser
         
         guard xmlParser.parse() else { return nil }
-        
+
+        guard !parser.algorithm.isEmpty,
+              parser.segmentSize > 0,
+              parser.lastSegmentSize > 0,
+              parser.lastSegmentSize <= parser.segmentSize,
+              parser.segmentCount > 0,
+              parser.segments.count == parser.segmentCount,
+              parser.segments.allSatisfy({ (1...parser.segmentCount).contains($0.segmentNumber) && !$0.hash.isEmpty }),
+              Set(parser.segments.map(\.segmentNumber)).count == parser.segmentCount else {
+            return nil
+        }
+
+        let sortedSegments = parser.segments.sorted { $0.segmentNumber < $1.segmentNumber }
+
         return ValidationInfo(
             segmentSize: parser.segmentSize,
             version: parser.version,
@@ -373,7 +479,7 @@ struct ValidationInfo {
             segmentCount: parser.segmentCount,
             lastSegmentSize: parser.lastSegmentSize,
             packageHashKey: parser.packageHashKey,
-            segments: parser.segments
+            segments: sortedSegments
         )
     }
 }
@@ -388,20 +494,26 @@ class ValidationXMLParser: NSObject, XMLParserDelegate {
     var segments: [ValidationInfo.SegmentInfo] = []
     
     private var currentElement: String = ""
+    private var currentText: String = ""
     private var currentSegmentNumber: Int = 0
     
     func parser(_ parser: XMLParser, didStartElement elementName: String, namespaceURI: String?, qualifiedName qName: String?, attributes attributeDict: [String : String] = [:]) {
         currentElement = elementName
+        currentText = ""
         
         if elementName == "segment", let segmentNumber = attributeDict["segmentNumber"], let number = Int(segmentNumber) {
             currentSegmentNumber = number
         }
     }
-    
+
     func parser(_ parser: XMLParser, foundCharacters string: String) {
-        let trimmedString = string.trimmingCharacters(in: .whitespacesAndNewlines)
+        currentText += string
+    }
+
+    func parser(_ parser: XMLParser, didEndElement elementName: String, namespaceURI: String?, qualifiedName qName: String?) {
+        let trimmedString = currentText.trimmingCharacters(in: .whitespacesAndNewlines)
         
-        switch currentElement {
+        switch elementName {
         case "segmentSize":
             if let size = Int64(trimmedString) {
                 segmentSize = size
@@ -427,6 +539,9 @@ class ValidationXMLParser: NSObject, XMLParserDelegate {
         default:
             break
         }
+
+        currentElement = ""
+        currentText = ""
     }
 }
 
@@ -438,28 +553,59 @@ struct NetworkConstants {
     static let maxConcurrentDownloads = 3
     static let progressUpdateInterval: TimeInterval = 1
 
-    static func generateCookie() -> String {
-        let chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
-        let randomString = (0..<26).map { _ in chars.randomElement()! }
-        return "fg=\(String(randomString))======"
-    }
+    static let ffcRequestTimeout: TimeInterval = 90
+    static let serviceCallTimeout: TimeInterval = 20
+    static let maxServiceCallRetries = 3
+    static let deadConnectionTimeout: TimeInterval = 101
+    static let maxDeadConnections = 100
 
-    static var productsJSONURL: String {
+    static let adobeAppVersion = "6.8.1.856"
+
+    static var productsURL: String {
         "https://prod-rel-ffc-ccm.oobesaas.adobe.com/adobe-ffc-external/core/v\(UserDefaults.standard.string(forKey: "apiVersion") ?? "6")/products/all"
     }
 
-    static let applicationJsonURL = "https://cdn-ffc.oobesaas.adobe.com/core/v3/applications"
+    static let applicationJsonURLV3 = "https://cdn-ffc.oobesaas.adobe.com/core/v3/applications"
 
-    static var adobeRequestHeaders: [String: String] {
-        [
-            "x-adobe-app-id": "accc-apps-panel-desktop",
+    static var userAgent: String {
+        let osVersion = ProcessInfo.processInfo.operatingSystemVersion
+        return "Creative Cloud/\(adobeAppVersion)/Mac-\(osVersion.majorVersion).\(osVersion.minorVersion)"
+    }
+
+    static var ffcRequestHeaders: [String: String] {
+        var headers: [String: String] = [
+            "x-adobe-app-id": "accc-hdcore-desktop",
             "x-api-key": "Creative Cloud_v\(UserDefaults.standard.string(forKey: "apiVersion") ?? "6")_4",
-            "User-Agent": "Creative Cloud/6.4.0.361/Mac-15.1",
-            "Cookie": generateCookie()
+            "User-Agent": userAgent,
+            "x-adobe-app-version": adobeAppVersion,
+            "Content-Type": "application/json"
+        ]
+        if let token = UserDefaults.standard.string(forKey: "userAuthenticationToken"), !token.isEmpty {
+            headers["Authorization"] = "Bearer \(token)"
+        }
+        return headers
+    }
+
+    static var applicationJsonHeaders: [String: String] {
+        [
+            "x-adobe-app-id": "accc-hdcore-desktop",
+            "x-api-key": "Creative Cloud_v\(UserDefaults.standard.string(forKey: "apiVersion") ?? "6")_4",
+            "User-Agent": userAgent
         ]
     }
 
-    static let downloadHeaders = [
-        "User-Agent": "Creative Cloud"
-    ]
+    static var downloadHeaders: [String: String] {
+        [
+            "x-adobe-app-id": "accc-hdcore-desktop",
+            "x-api-key": "Creative Cloud_v\(UserDefaults.standard.string(forKey: "apiVersion") ?? "6")_4",
+            "User-Agent": userAgent
+        ]
+    }
+
+    static var adobeRequestHeaders: [String: String] {
+        ffcRequestHeaders
+    }
+
+    static var productsJSONURL: String { productsURL }
+    static var applicationJsonURL: String { applicationJsonURLV3 }
 }

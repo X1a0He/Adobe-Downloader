@@ -17,18 +17,23 @@ struct QAView: View {
                     )
 
                     QAItem(
-                        question: String(localized: "为什么需要下载 Setup 组件？"),
-                        answer: String(localized: "Setup 组件是 Adobe 官方的安装程序组件，我们需要对其进行修改以实现绕过验证的功能。如果没有下载并处理 Setup 组件，将无法使用安装功能。")
-                    )
-
-                    QAItem(
                         question: String(localized: "为什么有时候下载会失败？"),
                         answer: String(localized: "下载失败可能有多种原因：\n1. 网络连接不稳定\n2. Adobe 服务器响应超时\n3. 本地磁盘空间不足\n建议您检查网络连接并重试，如果问题持续存在，可以尝试使用代理或 VPN。")
                     )
 
                     QAItem(
                         question: String(localized: "如何修复安装失败的问题？"),
-                        answer: String(localized: "如果安装失败，您可以尝试以下步骤：\n1. 确保已正确启用并连接 Helper\n2. 确保已下载并处理 Setup 组件\n3. 检查磁盘剩余空间是否充足\n4. 尝试重新下载并安装\n如果问题仍然存在，可以尝试重新启用 Helper 和重新处理 Setup 组件。")
+                        answer: String(localized: "如果安装失败，您可以尝试以下步骤：\n1. 确保已正确启用并连接 Helper\n2. 检查磁盘剩余空间是否充足\n3. 尝试重新下载并安装\n如果问题仍然存在，可以尝试重新启用 Helper。")
+                    )
+
+                    QAItem(
+                        question: String(localized: "Helper 无法安装或显示未安装怎么办？"),
+                        answer: String(localized: "请按以下步骤处理：\n1. 在 Helper 设置中点击「重新启用」\n2. 前往系统设置 → 登录项与扩展\n3. 找到 Adobe Downloader.app 并打开开关\n4. 重启 Adobe Downloader\n5. 再次点击「重新启用」或「重新连接」")
+                    )
+
+                    QAItem(
+                        question: String(localized: "为什么需要 IPCBox 和 HDBox？"),
+                        answer: String(localized: "X1a0He CC 会下载 IPCBox 和 HDBox 组件，因为部分官方安装功能需要 HDBox，Photoshop 相关安装流程需要 IPCBox。未启用 Helper 时无法下载这些组件。")
                     )
                 }
             }

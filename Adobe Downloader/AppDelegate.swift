@@ -16,9 +16,15 @@ struct BlurView: NSViewRepresentable {
 }
 
 class AppDelegate: NSObject, NSApplicationDelegate {
+    static var shouldTerminateImmediately = false
+
     private var eventMonitor: Any?
     
     func applicationDidFinishLaunching(_ notification: Notification) {
+        if HDPIMHeadlessInstallRunner.isActive {
+            return
+        }
+
         if let window = NSApp.windows.first {
             window.minSize = NSSize(width: 800, height: 765)
         }
@@ -38,6 +44,10 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        if Self.shouldTerminateImmediately || HDPIMHeadlessInstallRunner.isActive {
+            return .terminateNow
+        }
+
         let hasActiveDownloads = globalNetworkManager.downloadTasks.contains { task in
             if case .downloading = task.totalStatus { return true }
             return false

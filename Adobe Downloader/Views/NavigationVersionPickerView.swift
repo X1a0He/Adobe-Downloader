@@ -7,7 +7,7 @@
 
 import SwiftUI
 
-private enum NavigationVersionPickerConstants {
+private enum VersionPickerConstants {
     static let headerPadding: CGFloat = 5
     static let viewWidth: CGFloat = 500
     static let viewHeight: CGFloat = 600
@@ -16,7 +16,7 @@ private enum NavigationVersionPickerConstants {
     static let horizontalSpacing: CGFloat = 12
     static let cornerRadius: CGFloat = 8
     static let buttonPadding: CGFloat = 8
-    
+
     static let titleFontSize: CGFloat = 14
     static let captionFontSize: CGFloat = 12
 }
@@ -24,7 +24,7 @@ private enum NavigationVersionPickerConstants {
 enum VersionPickerDestination: Hashable {
     case customDownload(productId: String, version: String)
     case duplicateTaskAlert(productId: String, version: String)
-    
+
     static func == (lhs: VersionPickerDestination, rhs: VersionPickerDestination) -> Bool {
         switch (lhs, rhs) {
         case (.customDownload(let lProductId, let lVersion), .customDownload(let rProductId, let rVersion)):
@@ -35,7 +35,7 @@ enum VersionPickerDestination: Hashable {
             return false
         }
     }
-    
+
     func hash(into hasher: inout Hasher) {
         switch self {
         case .customDownload(let productId, let version):
@@ -50,6 +50,42 @@ enum VersionPickerDestination: Hashable {
     }
 }
 
+enum VersionPickerFilter: String, CaseIterable, Identifiable {
+    case all
+    case latest
+    case downloaded
+    case installed
+    case hasDependencies
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .all: return "全部"
+        case .latest: return "仅最新"
+        case .downloaded: return "已下载"
+        case .installed: return "已安装"
+        case .hasDependencies: return "有依赖"
+        }
+    }
+
+    var icon: String {
+        switch self {
+        case .all: return "square.grid.2x2"
+        case .latest: return "sparkles"
+        case .downloaded: return "checkmark.circle"
+        case .installed: return "checkmark.seal"
+        case .hasDependencies: return "shippingbox"
+        }
+    }
+}
+
+struct VersionGroup: Identifiable {
+    let major: Int
+    let items: [(key: String, value: Product.Platform)]
+    var id: Int { major }
+}
+
 struct NavigationVersionPickerView: View {
     @Environment(\.dismiss) private var dismiss
     @StorageValue(\.defaultLanguage) private var defaultLanguage
@@ -59,26 +95,39 @@ struct NavigationVersionPickerView: View {
     @State private var pendingDependencies: [DependenciesToDownload] = []
     @State private var productIcon: NSImage? = nil
     @State private var navigationPath = NavigationPath()
-    
+    @State private var searchText: String = ""
+    @State private var activeFilter: VersionPickerFilter = .all
+
     private let productId: String
     private let onSelect: (String) -> Void
-    
+
     init(productId: String, onSelect: @escaping (String) -> Void) {
         self.productId = productId
         self.onSelect = onSelect
     }
-    
+
     var body: some View {
         NavigationStack(path: $navigationPath) {
             VStack(spacing: 0) {
-                NavigationVersionPickerHeaderView(
-                    productId: productId, 
+                VersionPickerHeaderView(
+                    productId: productId,
+                    productIcon: productIcon,
                     downloadAppleSilicon: downloadAppleSilicon,
+                    onToggleArchitecture: { newValue in
+                        StorageData.shared.downloadAppleSilicon = newValue
+                    },
                     onDismiss: { dismiss() }
                 )
-                NavigationVersionListView(
+                VersionPickerFilterBar(
+                    searchText: $searchText,
+                    activeFilter: $activeFilter
+                )
+                VersionListView(
                     productId: productId,
+                    searchText: $searchText,
+                    activeFilter: $activeFilter,
                     expandedVersions: $expandedVersions,
+                    downloadAppleSilicon: downloadAppleSilicon,
                     onSelect: onSelect,
                     dismiss: dismiss,
                     onCustomDownload: { version in
@@ -86,7 +135,14 @@ struct NavigationVersionPickerView: View {
                     }
                 )
             }
-            .frame(width: NavigationVersionPickerConstants.viewWidth, height: NavigationVersionPickerConstants.viewHeight)
+            .frame(
+                minWidth: 520,
+                idealWidth: 560,
+                maxWidth: 720,
+                minHeight: 560,
+                idealHeight: VersionPickerConstants.viewHeight,
+                maxHeight: 820
+            )
             .navigationDestination(for: VersionPickerDestination.self) { destination in
                 switch destination {
                 case .customDownload(let productId, let version):
@@ -116,18 +172,24 @@ struct NavigationVersionPickerView: View {
             loadProductIcon()
         }
     }
-    
+
     private func getDestinationURL(productId: String, version: String, language: String) async throws -> URL {
-        let platform = globalProducts.first(where: { $0.id == productId && $0.version == version })?.platforms.first?.id ?? "unknown"
-        let installerName = productId == "APRO"
-            ? "Adobe Downloader \(productId)_\(version)_\(platform).dmg"
-            : "Adobe Downloader \(productId)_\(version)-\(language)-\(platform)"
+        let platform = installerSelectedPlatformId(
+            productId: productId,
+            version: version
+        ) ?? "unknown"
+        let installerName = installerOutputName(
+            productId: productId,
+            version: version,
+            language: language,
+            platform: platform
+        )
 
         if StorageData.shared.useDefaultDirectory && !StorageData.shared.defaultDirectory.isEmpty {
             return URL(fileURLWithPath: StorageData.shared.defaultDirectory)
                 .appendingPathComponent(installerName)
         }
-        
+
         return try await withCheckedThrowingContinuation { continuation in
             DispatchQueue.main.async {
                 let panel = NSOpenPanel()
@@ -135,11 +197,11 @@ struct NavigationVersionPickerView: View {
                 panel.canCreateDirectories = true
                 panel.canChooseDirectories = true
                 panel.canChooseFiles = false
-                
+
                 if let downloadsDir = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first {
                     panel.directoryURL = downloadsDir
                 }
-                
+
                 let result = panel.runModal()
                 if result == .OK, let selectedURL = panel.url {
                     continuation.resume(returning: selectedURL.appendingPathComponent(installerName))
@@ -153,7 +215,7 @@ struct NavigationVersionPickerView: View {
     private func handleCustomDownload(dependencies: [DependenciesToDownload]) {
         guard let firstDependency = dependencies.first else { return }
         let version = firstDependency.version
-        
+
         let existingTask = globalNetworkManager.downloadTasks.first { task in
             task.productId == productId &&
             task.productVersion == version &&
@@ -165,16 +227,16 @@ struct NavigationVersionPickerView: View {
             navigationPath.append(VersionPickerDestination.duplicateTaskAlert(productId: productId, version: version))
             return
         }
-        
+
         Task {
             await startCustomDownloadProcess(dependencies: dependencies)
         }
     }
-    
+
     private func startCustomDownloadProcess(dependencies: [DependenciesToDownload]) async {
         guard let firstDependency = dependencies.first else { return }
         let version = firstDependency.version
-        
+
         let destinationURL: URL
         do {
             destinationURL = try await getDestinationURL(
@@ -186,7 +248,7 @@ struct NavigationVersionPickerView: View {
             await MainActor.run { dismiss() }
             return
         }
-        
+
         do {
             try await globalNetworkManager.startCustomDownload(
                 productId: productId,
@@ -203,18 +265,24 @@ struct NavigationVersionPickerView: View {
             dismiss()
         }
     }
-    
+
     private func loadProductIcon() {
         guard let product = findProduct(id: productId),
               let icon = product.getBestIcon(),
               let iconURL = URL(string: icon.value) else {
             return
         }
-        
+
+        if let cached = IconCache.shared.getIcon(for: icon.value) {
+            productIcon = cached
+            return
+        }
+
         Task {
             do {
                 let (data, _) = try await URLSession.shared.data(from: iconURL)
                 if let image = NSImage(data: data) {
+                    IconCache.shared.setIcon(image, for: icon.value)
                     await MainActor.run {
                         productIcon = image
                     }
@@ -226,107 +294,274 @@ struct NavigationVersionPickerView: View {
     }
 }
 
-private struct NavigationVersionPickerHeaderView: View {
+private struct VersionPickerHeaderView: View {
     let productId: String
+    let productIcon: NSImage?
     let downloadAppleSilicon: Bool
+    let onToggleArchitecture: (Bool) -> Void
     let onDismiss: () -> Void
-    
+
     var body: some View {
-        VStack {
-            HStack {
+        VStack(spacing: 8) {
+            HStack(spacing: 10) {
                 if let product = findProduct(id: productId) {
-                    if let icon = product.getBestIcon() {
-                        AsyncImage(url: URL(string: icon.value)) { image in
-                            image
-                                .resizable()
-                                .aspectRatio(contentMode: .fit)
-                                .frame(width: 24, height: 24)
-                        } placeholder: {
-                            Image(systemName: "app.fill")
-                                .resizable()
-                                .aspectRatio(contentMode: .fit)
-                                .frame(width: 24, height: 24)
-                                .foregroundColor(.blue)
-                        }
+                    productIconView
+                        .frame(width: 28, height: 28)
+
+                    VStack(alignment: .leading, spacing: 2) {
+                        Text(product.displayName)
+                            .font(.system(size: 15, weight: .semibold))
+                            .foregroundColor(.primary.opacity(0.92))
+                            .lineLimit(1)
+                        Text("选择版本")
+                            .font(.system(size: 11))
+                            .foregroundColor(.secondary)
                     }
-                    
-                    Text("\(product.displayName)")
-                        .font(.headline)
                 }
-                Text("选择版本")
-                    .foregroundColor(.secondary)
+
                 Spacer()
+
+                architectureMenu
+
                 Button("取消") {
                     onDismiss()
                 }
                 .buttonStyle(BeautifulButtonStyle(baseColor: Color.gray.opacity(0.2)))
             }
-            .padding(.bottom, NavigationVersionPickerConstants.headerPadding)
-            
+        }
+        .padding(.horizontal)
+        .padding(.top, 14)
+        .padding(.bottom, 10)
+        .background(Color(NSColor.windowBackgroundColor))
+    }
+
+    @ViewBuilder
+    private var productIconView: some View {
+        if let nsImage = productIcon {
+            Image(nsImage: nsImage)
+                .resizable()
+                .interpolation(.high)
+                .aspectRatio(contentMode: .fit)
+        } else if let product = findProduct(id: productId),
+                  let icon = product.getBestIcon(),
+                  let iconURL = URL(string: icon.value) {
+            AsyncImage(url: iconURL) { image in
+                image
+                    .resizable()
+                    .interpolation(.high)
+                    .aspectRatio(contentMode: .fit)
+            } placeholder: {
+                Image(systemName: "app.fill")
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+                    .foregroundColor(.blue)
+            }
+        } else {
+            Image(systemName: "app.fill")
+                .resizable()
+                .aspectRatio(contentMode: .fit)
+                .foregroundColor(.blue)
+        }
+    }
+
+    private var architectureMenu: some View {
+        Menu {
+            Button {
+                onToggleArchitecture(true)
+            } label: {
+                Label("Apple Silicon (arm64)", systemImage: "m.square")
+            }
+            Button {
+                onToggleArchitecture(false)
+            } label: {
+                Label("Intel (x86_64)", systemImage: "x.square")
+            }
+        } label: {
             HStack(spacing: 6) {
                 Image(systemName: downloadAppleSilicon ? "m.square" : "x.square")
                     .foregroundColor(.blue)
                 Text(downloadAppleSilicon ? "Apple Silicon" : "Intel")
-                    .font(.caption)
-                    .fontWeight(.medium)
-                Text("•")
-                    .foregroundColor(.secondary)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundColor(.primary.opacity(0.85))
+                Text("·")
+                    .foregroundColor(.secondary.opacity(0.6))
                 Text(platformText)
-                    .font(.caption)
+                    .font(.system(size: 11))
                     .foregroundColor(.secondary)
+                    .lineLimit(1)
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundColor(.secondary.opacity(0.8))
             }
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .padding(.bottom, 10)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 5)
+            .background(
+                RoundedRectangle(cornerRadius: 6)
+                    .fill(Color.blue.opacity(0.08))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 6)
+                            .stroke(Color.blue.opacity(0.15), lineWidth: 0.5)
+                    )
+            )
         }
-        .padding(.horizontal)
-        .padding(.top)
-        .background(Color(NSColor.windowBackgroundColor))
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .help("切换下载架构")
     }
-    
+
     private var platformText: String {
-        StorageData.shared.allowedPlatform.joined(separator: ", ")
+        HDPIMParityDecisionEngine.shared.visiblePlatformText()
     }
 }
 
-private struct NavigationVersionListView: View {
+private struct VersionPickerFilterBar: View {
+    @Binding var searchText: String
+    @Binding var activeFilter: VersionPickerFilter
+
+    var body: some View {
+        VStack(spacing: 8) {
+            searchField
+            filterChips
+        }
+        .padding(.horizontal)
+        .padding(.bottom, 10)
+        .background(Color(NSColor.windowBackgroundColor))
+    }
+
+    private var searchField: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "magnifyingglass")
+                .font(.system(size: 13))
+                .foregroundColor(.secondary.opacity(0.7))
+
+            TextField("搜索版本号 / buildGuid", text: $searchText)
+                .textFieldStyle(PlainTextFieldStyle())
+                .font(.system(size: 13))
+
+            if !searchText.isEmpty {
+                Button(action: { searchText = "" }) {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 13))
+                        .foregroundColor(.secondary.opacity(0.7))
+                }
+                .buttonStyle(.plain)
+                .transition(.opacity)
+            }
+        }
+        .padding(8)
+        .background(
+            RoundedRectangle(cornerRadius: 8)
+                .fill(Color(NSColor.controlBackgroundColor).opacity(0.5))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8)
+                        .stroke(Color.secondary.opacity(0.1), lineWidth: 1)
+                )
+        )
+    }
+
+    private var filterChips: some View {
+        HStack(spacing: 6) {
+            ForEach(VersionPickerFilter.allCases) { filter in
+                FilterChip(
+                    filter: filter,
+                    isActive: filter == activeFilter,
+                    onTap: {
+                        withAnimation(.easeInOut(duration: 0.15)) {
+                            activeFilter = filter
+                        }
+                    }
+                )
+            }
+            Spacer(minLength: 0)
+        }
+    }
+}
+
+private struct FilterChip: View {
+    let filter: VersionPickerFilter
+    let isActive: Bool
+    let onTap: () -> Void
+
+    var body: some View {
+        Button(action: onTap) {
+            HStack(spacing: 4) {
+                Image(systemName: filter.icon)
+                    .font(.system(size: 10, weight: .medium))
+                Text(filter.title)
+                    .font(.system(size: 12, weight: isActive ? .semibold : .regular))
+            }
+            .foregroundColor(isActive ? .blue : .secondary)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 5)
+            .background(
+                RoundedRectangle(cornerRadius: 6)
+                    .fill(isActive ? Color.blue.opacity(0.12) : Color(NSColor.controlBackgroundColor).opacity(0.5))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 6)
+                    .stroke(isActive ? Color.blue.opacity(0.3) : Color.secondary.opacity(0.12), lineWidth: 0.5)
+            )
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+private struct VersionListView: View {
     let productId: String
+    @Binding var searchText: String
+    @Binding var activeFilter: VersionPickerFilter
     @Binding var expandedVersions: Set<String>
+    let downloadAppleSilicon: Bool
     let onSelect: (String) -> Void
     let dismiss: DismissAction
     let onCustomDownload: (String) -> Void
-    @State private var scrollPosition: String?
+    @StorageValue(\.defaultLanguage) private var defaultLanguage
     @State private var cachedVersions: [(key: String, value: Product.Platform)] = []
-    
+    @State private var cachedPackageSizes: [String: Int64] = [:]
+    @State private var sizeLoadingVersions: Set<String> = []
+
     var body: some View {
+        let groups = processedGroups(cachedVersions: cachedVersions)
+        let totalCount = cachedVersions.count
+        let visibleCount = groups.reduce(0) { $0 + $1.items.count }
+        let overallLatestKey: String? = groups.first?.items.first?.key
+
         ScrollViewReader { proxy in
             ScrollView(showsIndicators: false) {
                 VStack(spacing: 0) {
-                    LazyVStack(spacing: NavigationVersionPickerConstants.verticalSpacing) {
-                        ForEach(getFilteredVersions(), id: \.key) { version, info in
-                            NavigationVersionRow(
-                                productId: productId,
-                                version: version,
-                                info: info,
-                                isExpanded: expandedVersions.contains(version),
-                                onSelect: handleVersionSelect,
-                                onToggle: handleVersionToggle,
-                                onCustomDownload: handleCustomDownload
-                            )
-                            .id(version)
-                            .transition(.opacity)
+                    if groups.isEmpty {
+                        VersionPickerEmptyView(
+                            hint: searchText.isEmpty
+                                ? "当前筛选下暂无版本"
+                                : "没有匹配 “\(searchText)” 的版本"
+                        )
+                        .padding(.top, 40)
+                    } else {
+                        LazyVStack(spacing: 14) {
+                            ForEach(groups) { group in
+                                VersionGroupSection(
+                                    productId: productId,
+                                    group: group,
+                                    overallLatestKey: overallLatestKey,
+                                    expandedVersions: $expandedVersions,
+                                    cachedPackageSizes: $cachedPackageSizes,
+                                    sizeLoadingVersions: $sizeLoadingVersions,
+                                    onSelect: handleVersionSelect,
+                                    onToggle: handleVersionToggle,
+                                    onCustomDownload: handleCustomDownload
+                                )
+                            }
                         }
+                        .padding(.horizontal)
+                        .padding(.top, 6)
                     }
-                    .padding()
 
-                    HStack(spacing: 8) {
-                        Capsule()
-                            .fill(Color.green)
-                            .frame(width: 6, height: 6)
-                        Text("获取到 \(getFilteredVersions().count) 个版本")
-                            .font(.system(size: 12))
-                            .foregroundColor(.secondary)
-                    }
-                    .padding(.bottom, 16)
+                    VersionListFooterView(
+                        totalCount: totalCount,
+                        visibleCount: visibleCount,
+                        isFiltered: activeFilter != .all || !searchText.isEmpty
+                    )
                 }
             }
             .background(Color(.clear))
@@ -342,45 +577,92 @@ private struct NavigationVersionListView: View {
                     cachedVersions = loadFilteredVersions()
                 }
             }
+            .onChange(of: downloadAppleSilicon) { _ in
+                cachedVersions = loadFilteredVersions()
+                cachedPackageSizes.removeAll()
+                sizeLoadingVersions.removeAll()
+                expandedVersions.removeAll()
+            }
         }
     }
-    
-    private func getFilteredVersions() -> [(key: String, value: Product.Platform)] {
-        if !cachedVersions.isEmpty {
-            return cachedVersions
+
+    private func processedGroups(cachedVersions: [(key: String, value: Product.Platform)]) -> [VersionGroup] {
+        var list = cachedVersions
+
+        let query = searchText.trimmingCharacters(in: .whitespaces).lowercased()
+        if !query.isEmpty {
+            list = list.filter { entry in
+                if entry.key.lowercased().contains(query) { return true }
+                if let guid = entry.value.languageSet.first?.buildGuid.lowercased(),
+                   guid.contains(query) {
+                    return true
+                }
+                return false
+            }
         }
-        return loadFilteredVersions()
+
+        switch activeFilter {
+        case .all:
+            break
+        case .latest:
+            let grouped = Dictionary(grouping: list) { majorOf($0.key) }
+            list = grouped.values.compactMap { items in
+                items.sorted { AppStatics.compareVersions($0.key, $1.key) > 0 }.first
+            }
+        case .downloaded:
+            list = list.filter { entry in
+                globalNetworkManager.isVersionDownloaded(
+                    productId: productId,
+                    version: entry.key,
+                    language: defaultLanguage
+                ) != nil
+            }
+        case .installed:
+            list = list.filter { entry in
+                let platform = installerSelectedPlatformId(
+                    productId: productId,
+                    version: entry.key
+                ) ?? "unknown"
+                return globalNetworkManager.isProductInstalled(
+                    productId: productId,
+                    version: entry.key,
+                    platform: platform
+                )
+            }
+        case .hasDependencies:
+            list = list.filter { entry in
+                !(entry.value.languageSet.first?.dependencies.isEmpty ?? true)
+            }
+        }
+
+        let grouped = Dictionary(grouping: list) { majorOf($0.key) }
+        return grouped.keys.sorted(by: >).map { major in
+            VersionGroup(
+                major: major,
+                items: (grouped[major] ?? []).sorted {
+                    AppStatics.compareVersions($0.key, $1.key) > 0
+                }
+            )
+        }
     }
-    
+
+    private func majorOf(_ version: String) -> Int {
+        guard let head = version.split(separator: ".").first,
+              let value = Int(head) else {
+            return 0
+        }
+        return value
+    }
+
     private func loadFilteredVersions() -> [(key: String, value: Product.Platform)] {
-        let products = findProducts(id: productId)
-        if products.isEmpty {
-            return []
-        }
-
-        var versionPlatformMap: [String: Product.Platform] = [:]
-        
-        for product in products {
-            let platforms = product.platforms.filter { platform in
-                StorageData.shared.allowedPlatform.contains(platform.id)
-            }
-            
-            if let firstPlatform = platforms.first {
-                versionPlatformMap[product.version] = firstPlatform
-            }
-        }
-
-        return versionPlatformMap.map { (key: $0.key, value: $0.value) }
-            .sorted { pair1, pair2 in
-                AppStatics.compareVersions(pair1.key, pair2.key) > 0
-            }
+        HDPIMParityDecisionEngine.shared.visibleVersions(productId: productId)
     }
-    
+
     private func handleVersionSelect(_ version: String) {
         onSelect(version)
         dismiss()
     }
-    
+
     private func handleVersionToggle(_ version: String) {
         withAnimation {
             if expandedVersions.contains(version) {
@@ -390,123 +672,291 @@ private struct NavigationVersionListView: View {
             }
         }
     }
-    
+
     private func handleCustomDownload(_ version: String) {
         onCustomDownload(version)
     }
 }
 
-private struct NavigationVersionRow: View, Equatable {
-    @StorageValue(\.defaultLanguage) private var defaultLanguage
-    
+private struct VersionGroupSection: View {
     let productId: String
-    let version: String
-    let info: Product.Platform
-    let isExpanded: Bool
+    let group: VersionGroup
+    let overallLatestKey: String?
+    @Binding var expandedVersions: Set<String>
+    @Binding var cachedPackageSizes: [String: Int64]
+    @Binding var sizeLoadingVersions: Set<String>
     let onSelect: (String) -> Void
     let onToggle: (String) -> Void
     let onCustomDownload: (String) -> Void
-    
-    static func == (lhs: NavigationVersionRow, rhs: NavigationVersionRow) -> Bool {
-        lhs.productId == rhs.productId &&
-        lhs.version == rhs.version &&
-        lhs.isExpanded == rhs.isExpanded
-    }
-    
-    @State private var cachedExistingPath: URL? = nil
-    
-    private var existingPath: URL? {
-        cachedExistingPath
-    }
-    
+
     var body: some View {
-        VStack(spacing: 0) {
-            NavigationVersionHeader(
-                version: version,
-                info: info,
-                isExpanded: isExpanded,
-                hasExistingPath: existingPath != nil,
-                onSelect: { onToggle(version) },
-                onToggle: { onToggle(version) }
-            )
-            
-            if isExpanded {
-                NavigationVersionDetails(
-                    productId: productId,
-                    info: info,
-                    version: version,
-                    onSelect: onSelect,
-                    onCustomDownload: onCustomDownload
-                )
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 8) {
+                Text("\(group.major).x")
+                    .font(.system(size: 12, weight: .semibold, design: .rounded))
+                    .foregroundColor(.primary.opacity(0.75))
+                Rectangle()
+                    .fill(Color.secondary.opacity(0.15))
+                    .frame(height: 0.5)
+                Text("\(group.items.count)")
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundColor(.secondary.opacity(0.8))
+                    .padding(.horizontal, 5)
+                    .padding(.vertical, 1)
+                    .background(
+                        Capsule().fill(Color.secondary.opacity(0.08))
+                    )
             }
-        }
-        .padding(.horizontal)
-        .background(Color(NSColor.controlBackgroundColor))
-        .cornerRadius(NavigationVersionPickerConstants.cornerRadius)
-        .animation(.easeInOut(duration: 0.2), value: isExpanded)
-        .onAppear {
-            if cachedExistingPath == nil {
-                cachedExistingPath = globalNetworkManager.isVersionDownloaded(
-                    productId: productId,
-                    version: version,
-                    language: defaultLanguage
-                )
+            .padding(.horizontal, 4)
+
+            LazyVStack(spacing: VersionPickerConstants.verticalSpacing) {
+                ForEach(group.items, id: \.key) { version, info in
+                    let isGroupLatest = group.items.first?.key == version
+                    let isOverallLatest = overallLatestKey == version
+                    VersionRow(
+                        productId: productId,
+                        version: version,
+                        info: info,
+                        isExpanded: expandedVersions.contains(version),
+                        isGroupLatest: isGroupLatest,
+                        isOverallLatest: isOverallLatest,
+                        cachedPackageSizes: $cachedPackageSizes,
+                        sizeLoadingVersions: $sizeLoadingVersions,
+                        onSelect: onSelect,
+                        onToggle: onToggle,
+                        onCustomDownload: onCustomDownload
+                    )
+                    .id(version)
+                    .transition(.opacity)
+                }
             }
         }
     }
 }
 
-private struct NavigationVersionHeader: View {
+private struct VersionRow: View, Equatable {
+    @StorageValue(\.defaultLanguage) private var defaultLanguage
+
+    let productId: String
     let version: String
     let info: Product.Platform
     let isExpanded: Bool
+    let isGroupLatest: Bool
+    let isOverallLatest: Bool
+    @Binding var cachedPackageSizes: [String: Int64]
+    @Binding var sizeLoadingVersions: Set<String>
+    let onSelect: (String) -> Void
+    let onToggle: (String) -> Void
+    let onCustomDownload: (String) -> Void
+
+	static func == (lhs: VersionRow, rhs: VersionRow) -> Bool {
+		lhs.productId == rhs.productId &&
+		lhs.version == rhs.version &&
+		lhs.isExpanded == rhs.isExpanded &&
+		lhs.isGroupLatest == rhs.isGroupLatest &&
+		lhs.isOverallLatest == rhs.isOverallLatest &&
+		lhs.installedProduct == rhs.installedProduct &&
+		lhs.cachedPackageSizes[rhs.version] == rhs.cachedPackageSizes[rhs.version] &&
+		lhs.sizeLoadingVersions.contains(rhs.version) == rhs.sizeLoadingVersions.contains(rhs.version)
+	}
+
+	@State private var cachedExistingPath: URL? = nil
+	@State private var cachedDownloadedPath: URL? = nil
+	@State private var installedProduct: HDPIMInstalledProductForUninstall? = nil
+	@State private var isHovered = false
+
+    private var existingPath: URL? {
+        cachedExistingPath
+    }
+
+    private var downloadedPath: URL? {
+        cachedDownloadedPath
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            VersionHeader(
+                productId: productId,
+                version: version,
+                info: info,
+                isExpanded: isExpanded,
+                isGroupLatest: isGroupLatest,
+                isOverallLatest: isOverallLatest,
+                hasExistingPath: existingPath != nil,
+                hasDownloadedPackage: existingPath == nil && downloadedPath != nil,
+                onSelect: { onToggle(version) },
+                onToggle: { onToggle(version) }
+            )
+
+            if isExpanded {
+                Divider()
+                    .padding(.horizontal, 4)
+
+				VersionDetails(
+					productId: productId,
+					info: info,
+					version: version,
+					installedProduct: installedProduct,
+					cachedPackageSizes: $cachedPackageSizes,
+					sizeLoadingVersions: $sizeLoadingVersions,
+					onSelect: onSelect,
+					onCustomDownload: onCustomDownload,
+					onUninstallFinished: refreshInstallState
+				)
+			}
+		}
+        .padding(.horizontal)
+        .background(
+            RoundedRectangle(cornerRadius: VersionPickerConstants.cornerRadius)
+                .fill(isHovered ? Color(.controlBackgroundColor).opacity(0.8) : Color(.controlBackgroundColor))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: VersionPickerConstants.cornerRadius)
+                .stroke(
+                    isOverallLatest ? Color.blue.opacity(0.25) : Color.clear,
+                    lineWidth: 1
+                )
+        )
+        .cornerRadius(VersionPickerConstants.cornerRadius)
+        .animation(.easeInOut(duration: 0.2), value: isExpanded)
+        .animation(.easeInOut(duration: 0.15), value: isHovered)
+        .onHover { isHovered = $0 }
+		.onAppear {
+			refreshInstallState()
+
+			if cachedDownloadedPath == nil {
+				cachedDownloadedPath = globalNetworkManager.isVersionDownloaded(
+                    productId: productId,
+                    version: version,
+                    language: defaultLanguage
+                )
+			}
+		}
+	}
+
+	private func refreshInstallState() {
+		let platform = installerSelectedPlatformId(
+			productId: productId,
+			version: version
+		) ?? "unknown"
+		let processorFamily = HDPIMProcessorFamily.from(platform: platform)
+		installedProduct = HDPIMUninstaller.installedProducts(
+			sapCode: productId,
+			version: version
+		).first { $0.processorFamily == processorFamily }
+		cachedExistingPath = installedProduct == nil ? nil : URL(fileURLWithPath: "/")
+	}
+}
+
+private struct VersionHeader: View {
+    let productId: String
+    let version: String
+    let info: Product.Platform
+    let isExpanded: Bool
+    let isGroupLatest: Bool
+    let isOverallLatest: Bool
     let hasExistingPath: Bool
+    let hasDownloadedPackage: Bool
     let onSelect: () -> Void
     let onToggle: () -> Void
-    
+
     private var hasDependencies: Bool {
         !(info.languageSet.first?.dependencies.isEmpty ?? true)
     }
-    
+
+    private var dependencyCount: Int {
+        info.languageSet.first?.dependencies.count ?? 0
+    }
+
     var body: some View {
         Button(action: onSelect) {
-            HStack {
-                VersionInfo(version: version, platform: info.id, info: info)
-                Spacer()
-                ExistingPathButton(isVisible: hasExistingPath)
-                ExpandButton(
-                    isExpanded: isExpanded,
-                    onToggle: onToggle,
-                    hasDependencies: hasDependencies
+            HStack(alignment: .center, spacing: 10) {
+                VersionInfo(
+                    productId: productId,
+                    version: version,
+                    platform: info.id,
+                    info: info,
+                    isGroupLatest: isGroupLatest,
+                    isOverallLatest: isOverallLatest,
+                    hasExistingPath: hasExistingPath,
+                    hasDownloadedPackage: hasDownloadedPackage
                 )
+                Spacer()
+                VStack(alignment: .trailing, spacing: 3) {
+                    if hasDependencies {
+                        HStack(spacing: 3) {
+                            Image(systemName: "shippingbox")
+                                .font(.system(size: 9))
+                            Text("\(dependencyCount) 依赖")
+                                .font(.system(size: 11))
+                        }
+                        .foregroundColor(.secondary.opacity(0.8))
+                    }
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 10, weight: .semibold))
+                        .rotationEffect(.degrees(isExpanded ? 90 : 0))
+                        .animation(.easeInOut(duration: 0.2), value: isExpanded)
+                        .foregroundColor(.secondary.opacity(0.7))
+                }
             }
-            .padding(.vertical, NavigationVersionPickerConstants.buttonPadding)
+            .padding(.vertical, VersionPickerConstants.buttonPadding + 2)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
     }
 }
 
-private struct NavigationVersionDetails: View {
-    let productId: String
-    let info: Product.Platform
-    let version: String
-    let onSelect: (String) -> Void
-    let onCustomDownload: (String) -> Void
-    
-    private var hasDependencies: Bool {
+private struct VersionDetails: View {
+	let productId: String
+	let info: Product.Platform
+	let version: String
+	let installedProduct: HDPIMInstalledProductForUninstall?
+	@Binding var cachedPackageSizes: [String: Int64]
+	@Binding var sizeLoadingVersions: Set<String>
+	let onSelect: (String) -> Void
+	let onCustomDownload: (String) -> Void
+	let onUninstallFinished: () -> Void
+
+    private var hasRawDependencies: Bool {
         !(info.languageSet.first?.dependencies.isEmpty ?? true)
     }
-    
+
+    private var shouldShowDependencySection: Bool {
+        hasRawDependencies
+    }
+
     private var hasModules: Bool {
         !(info.modules.isEmpty)
     }
-    
+
+    private var displayedDependencies: [Product.Platform.LanguageSet.Dependency] {
+        info.languageSet.first?.dependencies ?? []
+    }
+
     var body: some View {
-        VStack(alignment: .leading, spacing: NavigationVersionPickerConstants.verticalSpacing) {
-            if hasDependencies || hasModules {
-                VStack(alignment: .leading, spacing: 8) {
-                    if hasDependencies {
+        VStack(alignment: .leading, spacing: VersionPickerConstants.verticalSpacing) {
+			VersionSizeEstimateView(
+				version: version,
+				cachedPackageSizes: $cachedPackageSizes,
+                sizeLoadingVersions: $sizeLoadingVersions
+            )
+            .task(id: version) {
+                await preloadSize(for: version)
+			}
+
+			if let installedProduct {
+				InstalledProductUninstallSection(
+					productId: productId,
+					version: version,
+					info: info,
+					installedProduct: installedProduct,
+					onUninstallFinished: onUninstallFinished
+				)
+			}
+
+			if shouldShowDependencySection || hasModules {
+				VStack(alignment: .leading, spacing: 8) {
+                    if shouldShowDependencySection {
                         HStack(spacing: 5) {
                             Image(systemName: "shippingbox.fill")
                                 .font(.system(size: 11))
@@ -514,7 +964,7 @@ private struct NavigationVersionDetails: View {
                             Text("依赖组件")
                                 .font(.system(size: 12, weight: .medium))
                                 .foregroundColor(.secondary)
-                            Text("(\(info.languageSet.first?.dependencies.count ?? 0))")
+                            Text("(\(displayedDependencies.count))")
                                 .font(.system(size: 11))
                                 .padding(.horizontal, 5)
                                 .padding(.vertical, 1)
@@ -525,20 +975,20 @@ private struct NavigationVersionDetails: View {
                                 .foregroundColor(.blue.opacity(0.8))
                         }
                         .padding(.vertical, 4)
-                        DependenciesList(dependencies: info.languageSet.first?.dependencies ?? [])
+                        DependenciesList(dependencies: displayedDependencies)
                             .padding(.leading, 8)
                     }
                     #if DEBUG
                     if hasModules {
-                        if hasDependencies {
+                        if shouldShowDependencySection {
                             Divider()
                                 .padding(.vertical, 4)
                         }
-                        
+
                         HStack(spacing: 5) {
                             Image(systemName: "square.stack.3d.up.fill")
                                 .font(.system(size: 11))
-                                .foregroundColor(.blue.opacity(0.8))
+                                .foregroundColor(.purple.opacity(0.8))
                             Text("可选模块")
                                 .font(.system(size: 12, weight: .medium))
                                 .foregroundColor(.secondary)
@@ -548,9 +998,9 @@ private struct NavigationVersionDetails: View {
                                 .padding(.vertical, 1)
                                 .background(
                                     RoundedRectangle(cornerRadius: 3)
-                                        .fill(Color.blue.opacity(0.1))
+                                        .fill(Color.purple.opacity(0.1))
                                 )
-                                .foregroundColor(.blue.opacity(0.8))
+                                .foregroundColor(.purple.opacity(0.8))
                         }
                         .padding(.vertical, 4)
                         ModulesList(modules: info.modules)
@@ -561,10 +1011,10 @@ private struct NavigationVersionDetails: View {
                 .background(Color(NSColor.controlBackgroundColor).opacity(0.5))
                 .cornerRadius(6)
             }
-            
-            NavigationDownloadButton(
+
+            VersionDownloadButton(
                 productId: productId,
-                version: version, 
+                version: version,
                 onSelect: onSelect,
                 onCustomDownload: { version in
                     onCustomDownload(version)
@@ -574,58 +1024,585 @@ private struct NavigationVersionDetails: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.bottom, 8)
     }
+
+    private func preloadSize(for version: String) async {
+        if cachedPackageSizes[version] != nil { return }
+        if sizeLoadingVersions.contains(version) { return }
+        await MainActor.run {
+            _ = sizeLoadingVersions.insert(version)
+        }
+
+        if isManifestInstallerProduct(productId) {
+            let size = await resolveInstallerSize(version: version)
+            await MainActor.run {
+                cachedPackageSizes[version] = size
+                _ = sizeLoadingVersions.remove(version)
+            }
+            return
+        }
+
+        do {
+            let decision = try await HDPIMParityDecisionEngine.shared.resolveDownloadDecision(
+                productId: productId,
+                version: version,
+                requestedLanguage: StorageData.shared.defaultLanguage
+            )
+            let (_, deps) = HDPIMParityDecisionEngine.shared.makeDownloadPresentation(from: decision)
+            let total = deps.reduce(Int64(0)) { acc, dep in
+                acc + dep.packages.filter { $0.isSelected }
+                    .reduce(Int64(0)) { $0 + $1.downloadSize }
+            }
+            await MainActor.run {
+                cachedPackageSizes[version] = total
+                _ = sizeLoadingVersions.remove(version)
+            }
+        } catch {
+            await MainActor.run {
+                _ = sizeLoadingVersions.remove(version)
+            }
+        }
+    }
+
+    private func resolveInstallerSize(version: String) async -> Int64 {
+        guard let product = findProduct(id: productId, version: version, scope: .ccm) ?? findProduct(id: productId, version: version),
+              let match = installerPlatformMatch(product: product, selectedVersion: version) else {
+            return Int64(max(info.languageSet.first?.installSize ?? 0, 0))
+        }
+
+        if let manifestSize = await installerManifestAssetSize(match.languageSet.manifestURL) {
+            return manifestSize
+        }
+
+        if let downloadSize = await installerContentLength(match.languageSet.lbsURL) {
+            return downloadSize
+        }
+
+        return Int64(max(match.languageSet.installSize, 0))
+    }
+
+    private func installerManifestAssetSize(_ manifestPath: String) async -> Int64? {
+        let manifestURL = normalizedInstallerURL(manifestPath)
+        guard !manifestURL.isEmpty,
+              let url = URL(string: manifestURL) else {
+            return nil
+        }
+
+        do {
+            var request = URLRequest(url: url)
+            request.httpMethod = "GET"
+            NetworkConstants.downloadHeaders.forEach { request.setValue($0.value, forHTTPHeaderField: $0.key) }
+
+            let (data, response) = try await URLSession.shared.data(for: request)
+            guard let httpResponse = response as? HTTPURLResponse,
+                  (200...299).contains(httpResponse.statusCode) else {
+                return nil
+            }
+
+            let doc = try XMLDocument(data: data)
+            let sizeNodes = try doc.nodes(forXPath: "//asset_size")
+            return sizeNodes.compactMap { node in
+                Int64(node.stringValue?.trimmingCharacters(in: .whitespacesAndNewlines) ?? "")
+            }.first { $0 > 0 }
+        } catch {
+            return nil
+        }
+    }
+
+    private func installerContentLength(_ downloadPath: String) async -> Int64? {
+        let downloadURL = normalizedInstallerURL(downloadPath)
+        guard !downloadURL.isEmpty,
+              let url = URL(string: downloadURL) else {
+            return nil
+        }
+
+        do {
+            var request = URLRequest(url: url)
+            request.httpMethod = "HEAD"
+            NetworkConstants.downloadHeaders.forEach { request.setValue($0.value, forHTTPHeaderField: $0.key) }
+
+            let (_, response) = try await URLSession.shared.data(for: request)
+            guard let httpResponse = response as? HTTPURLResponse,
+                  (200...299).contains(httpResponse.statusCode) else {
+                return nil
+            }
+
+            if let length = httpResponse.value(forHTTPHeaderField: "Content-Length"),
+               let size = Int64(length),
+               size > 0 {
+                return size
+            }
+
+            return httpResponse.expectedContentLength > 0 ? httpResponse.expectedContentLength : nil
+        } catch {
+            return nil
+        }
+    }
 }
 
-private struct NavigationDownloadButton: View {
-    let productId: String
-    let version: String
+private struct VersionSizeEstimateView: View {
+	let version: String
+	@Binding var cachedPackageSizes: [String: Int64]
+	@Binding var sizeLoadingVersions: Set<String>
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Image(systemName: "arrow.down.doc")
+                .font(.system(size: 11))
+                .foregroundColor(.secondary.opacity(0.75))
+            if let size = cachedPackageSizes[version], size > 0 {
+                Text("预计下载 ~\(ByteCountFormatter.string(fromByteCount: size, countStyle: .file))")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundColor(.primary.opacity(0.8))
+            } else if sizeLoadingVersions.contains(version) {
+                ProgressView()
+                    .controlSize(.mini)
+                Text("计算中…")
+                    .font(.system(size: 11))
+                    .foregroundColor(.secondary)
+            } else {
+                Text("—")
+                    .font(.system(size: 11))
+                    .foregroundColor(.secondary.opacity(0.6))
+            }
+        }
+        .padding(.vertical, 2)
+	}
+}
+
+private enum PendingUninstallAction: Identifiable, Equatable {
+	case product
+	case modules(Set<String>)
+	case package(HDPIMPackageUninstallKey)
+
+	var id: String {
+		switch self {
+		case .product:
+			return "product"
+		case .modules(let moduleIds):
+			return "modules|\(moduleIds.sorted().joined(separator: ","))"
+		case .package(let packageKey):
+			return "package|\(packageKey.id)"
+		}
+	}
+
+	var title: String {
+		switch self {
+		case .product:
+			return String(localized: "卸载产品")
+		case .modules(let moduleIds):
+			return moduleIds.count > 1 ? String(localized: "移除多个模块") : String(localized: "移除模块")
+		case .package:
+			return String(localized: "卸载包")
+		}
+	}
+}
+
+private struct InstalledProductUninstallSection: View {
+	let productId: String
+	let version: String
+	let info: Product.Platform
+	let installedProduct: HDPIMInstalledProductForUninstall
+	let onUninstallFinished: () -> Void
+
+	@ObservedObject private var networkManager = globalNetworkManager
+	@State private var pendingAction: PendingUninstallAction?
+	@State private var showUninstallProgress = false
+	@State private var showPackageUninstall = false
+	@State private var selectedModuleIds: Set<String> = []
+
+	private var displayName: String {
+		findProduct(id: productId, version: version)?.displayName ?? productId
+	}
+
+	private var installedModuleRows: [(id: String, displayName: String, deploymentType: String)] {
+		installedProduct.modules.map { moduleId in
+			let catalog = info.modules.first { $0.id == moduleId }
+			return (
+				id: moduleId,
+				displayName: catalog?.displayName.isEmpty == false ? catalog?.displayName ?? moduleId : moduleId,
+				deploymentType: catalog?.deploymentType ?? ""
+			)
+		}
+	}
+
+	private var packageCountText: String {
+		String(format: String(localized: "%d 个包"), installedProduct.packages.count)
+	}
+
+	private var canSelectMultipleModules: Bool {
+		installedModuleRows.count > 1
+	}
+
+	private var selectedModuleCountText: String {
+		selectedModuleIds.isEmpty
+			? String(localized: "未选择模块")
+			: String(format: String(localized: "已选择 %d 个模块"), selectedModuleIds.count)
+	}
+
+	private var selectableModuleIds: Set<String> {
+		Set(installedModuleRows.map(\.id))
+	}
+
+	private struct InstalledPackageRow: Identifiable {
+		let key: HDPIMPackageUninstallKey
+		let package: HDPIMNativePackageContext
+
+		var id: String {
+			key.id
+		}
+	}
+
+	private var installedPackageRows: [InstalledPackageRow] {
+		installedProduct.packages.sorted { lhs, rhs in
+			if lhs.sequenceNumber != rhs.sequenceNumber {
+				return lhs.sequenceNumber < rhs.sequenceNumber
+			}
+			if lhs.packageName != rhs.packageName {
+				return lhs.packageName < rhs.packageName
+			}
+			return AppStatics.compareVersions(lhs.packageVersion, rhs.packageVersion) < 0
+		}.map { package in
+			InstalledPackageRow(
+				key: HDPIMPackageUninstallKey(
+					packageName: package.packageName,
+					packageVersion: package.packageVersion
+				),
+				package: package
+			)
+		}
+	}
+
+	var body: some View {
+		VStack(alignment: .leading, spacing: 10) {
+			HStack(spacing: 8) {
+				Image(systemName: "checkmark.seal.fill")
+					.font(.system(size: 12))
+					.foregroundColor(.green)
+				Text("已安装")
+					.font(.system(size: 12, weight: .semibold))
+					.foregroundColor(.primary.opacity(0.9))
+				Text(packageCountText)
+					.font(.system(size: 11))
+					.foregroundColor(.secondary)
+				if !installedProduct.installDir.isEmpty {
+					Text(installedProduct.installDir)
+						.font(.system(size: 10))
+						.foregroundColor(.secondary.opacity(0.8))
+						.lineLimit(1)
+						.truncationMode(.middle)
+						.textSelection(.enabled)
+				}
+				Spacer()
+				Button(role: .destructive) {
+					pendingAction = .product
+				} label: {
+					Label("卸载产品", systemImage: "trash")
+				}
+				.buttonStyle(.bordered)
+				.controlSize(.small)
+				.disabled(isUninstalling)
+			}
+
+			if !installedModuleRows.isEmpty {
+				VStack(alignment: .leading, spacing: 4) {
+					if canSelectMultipleModules {
+						HStack(spacing: 8) {
+							Button {
+								if selectedModuleIds.count == installedModuleRows.count {
+									selectedModuleIds.removeAll()
+								} else {
+									selectedModuleIds = Set(installedModuleRows.map(\.id))
+								}
+							} label: {
+								Label(
+									selectedModuleIds.count == installedModuleRows.count ? "清空" : "全选",
+									systemImage: selectedModuleIds.count == installedModuleRows.count ? "checkmark.square.fill" : "square"
+								)
+							}
+							.buttonStyle(.borderless)
+							.controlSize(.small)
+							.disabled(isUninstalling)
+
+							Text(selectedModuleCountText)
+								.font(.system(size: 10))
+								.foregroundColor(.secondary)
+
+							Spacer()
+
+							Button(role: .destructive) {
+								pendingAction = .modules(selectedModuleIds.intersection(selectableModuleIds))
+							} label: {
+								Label("移除选中", systemImage: "minus.circle.fill")
+							}
+							.buttonStyle(.bordered)
+							.controlSize(.small)
+							.disabled(isUninstalling || selectedModuleIds.isEmpty)
+						}
+						.padding(.bottom, 2)
+					}
+
+					ForEach(installedModuleRows, id: \.id) { module in
+						HStack(spacing: 8) {
+							if canSelectMultipleModules {
+								Button {
+									toggleModuleSelection(module.id)
+								} label: {
+									Image(systemName: selectedModuleIds.contains(module.id) ? "checkmark.square.fill" : "square")
+										.font(.system(size: 12))
+										.foregroundColor(selectedModuleIds.contains(module.id) ? .accentColor : .secondary)
+										.frame(width: 14)
+								}
+								.buttonStyle(.plain)
+								.disabled(isUninstalling)
+							}
+							Image(systemName: "puzzlepiece.extension.fill")
+								.font(.system(size: 10))
+								.foregroundColor(.purple.opacity(0.85))
+								.frame(width: 14)
+							Text(module.displayName)
+								.font(.system(size: 12, weight: .medium))
+								.foregroundColor(.primary.opacity(0.85))
+							if !module.deploymentType.isEmpty {
+								Text(module.deploymentType)
+									.font(.system(size: 10))
+									.foregroundColor(.secondary)
+							}
+							Spacer()
+							Button(role: .destructive) {
+								pendingAction = .modules([module.id])
+							} label: {
+								Label("移除", systemImage: "minus.circle")
+							}
+							.buttonStyle(.borderless)
+							.controlSize(.small)
+							.disabled(isUninstalling)
+						}
+						.padding(.vertical, 3)
+					}
+				}
+				.padding(.leading, 2)
+			}
+
+			if !installedPackageRows.isEmpty {
+				DisclosureGroup(isExpanded: $showPackageUninstall) {
+					VStack(alignment: .leading, spacing: 4) {
+						ForEach(installedPackageRows) { row in
+							let package = row.package
+							HStack(spacing: 8) {
+								Image(systemName: "shippingbox.fill")
+									.font(.system(size: 10))
+									.foregroundColor(.orange.opacity(0.85))
+									.frame(width: 14)
+								VStack(alignment: .leading, spacing: 1) {
+									Text(package.packageName)
+										.font(.system(size: 12, weight: .medium))
+										.foregroundColor(.primary.opacity(0.85))
+										.lineLimit(1)
+										.truncationMode(.middle)
+									Text(package.packageVersion)
+										.font(.system(size: 10))
+										.foregroundColor(.secondary)
+										.lineLimit(1)
+								}
+								if let module = package.module, !module.isEmpty {
+									Text(module)
+										.font(.system(size: 10))
+										.foregroundColor(.secondary)
+										.lineLimit(1)
+										.truncationMode(.middle)
+								}
+								Spacer()
+							}
+							.padding(.vertical, 3)
+						}
+					}
+					.padding(.top, 4)
+				} label: {
+					HStack(spacing: 6) {
+						Image(systemName: "shippingbox")
+							.font(.system(size: 10))
+							.foregroundColor(.secondary)
+						Text("已安装包")
+							.font(.system(size: 12, weight: .medium))
+							.foregroundColor(.primary.opacity(0.85))
+					}
+				}
+				.padding(.leading, 2)
+			}
+		}
+		.padding(10)
+		.background(
+			RoundedRectangle(cornerRadius: 6)
+				.fill(Color.green.opacity(0.08))
+		)
+		.overlay(
+			RoundedRectangle(cornerRadius: 6)
+				.stroke(Color.green.opacity(0.18), lineWidth: 0.5)
+		)
+		.alert(item: $pendingAction) { action in
+			Alert(
+				title: Text(action.title),
+				message: Text(confirmMessage(for: action)),
+				primaryButton: .destructive(Text("确认")) {
+					startUninstall(action)
+				},
+				secondaryButton: .cancel()
+			)
+		}
+		.sheet(isPresented: $showUninstallProgress, onDismiss: {
+			if case .completed = networkManager.uninstallState {
+				onUninstallFinished()
+			}
+		}) {
+			InstallProgressView(
+				data: networkManager.makeUninstallProgressViewData(productName: displayName),
+				onCancel: {
+					showUninstallProgress = false
+					if case .completed = networkManager.uninstallState {
+						onUninstallFinished()
+					}
+				}
+			)
+		}
+	}
+
+	private var isUninstalling: Bool {
+		if case .installing = networkManager.uninstallState {
+			return true
+		}
+		return false
+	}
+
+	private func toggleModuleSelection(_ moduleId: String) {
+		if selectedModuleIds.contains(moduleId) {
+			selectedModuleIds.remove(moduleId)
+		} else {
+			selectedModuleIds.insert(moduleId)
+		}
+	}
+
+	private func confirmMessage(for action: PendingUninstallAction) -> String {
+		switch action {
+		case .product:
+			return String(format: String(localized: "将按 HDPIM 产品卸载流程移除 %@ %@。"), displayName, version)
+		case .modules(let moduleIds):
+			let names = moduleIds.sorted().joined(separator: "、")
+			if moduleIds.count > 1 {
+				return String(format: String(localized: "将按 HDPIM 模块卸载流程移除 %d 个模块：%@。"), moduleIds.count, names)
+			}
+			return String(format: String(localized: "将按 HDPIM 模块卸载流程移除模块 %@。"), names)
+		case .package(let packageKey):
+			return String(format: String(localized: "将按 HDPIM 包级卸载流程移除包 %@ %@。"), packageKey.packageName, packageKey.packageVersion)
+		}
+	}
+
+	private func startUninstall(_ action: PendingUninstallAction) {
+		if case .package = action {
+			pendingAction = nil
+			return
+		}
+
+		showUninstallProgress = true
+		Task {
+			switch action {
+			case .product:
+				await networkManager.uninstallProduct(
+					sapCode: installedProduct.sapCode,
+					version: installedProduct.version,
+					processorFamily: installedProduct.processorFamily,
+					productName: displayName
+				)
+			case .modules(let moduleIds):
+				await networkManager.uninstallModules(
+					sapCode: installedProduct.sapCode,
+					version: installedProduct.version,
+					processorFamily: installedProduct.processorFamily,
+					moduleIds: moduleIds,
+					productName: displayName
+				)
+			case .package(let packageKey):
+				await networkManager.uninstallPackages(
+					sapCode: installedProduct.sapCode,
+					version: installedProduct.version,
+					processorFamily: installedProduct.processorFamily,
+					packageKeys: [packageKey],
+					productName: displayName
+				)
+			}
+		}
+	}
+}
+
+private struct VersionDownloadButton: View {
+	let productId: String
+	let version: String
     let onSelect: (String) -> Void
     let onCustomDownload: (String) -> Void
-    
+
     var body: some View {
-        Button("下载") {
-            if productId == "APRO" {
+        Button(action: {
+            if isManifestInstallerProduct(productId) {
                 onSelect(version)
             } else {
                 onCustomDownload(version)
             }
+        }) {
+            Text("下载")
+                .font(.system(size: 14, weight: .medium))
+                .frame(maxWidth: .infinity)
+                .frame(height: 24)
+                .foregroundColor(.white)
         }
-        .foregroundColor(.white)
         .buttonStyle(BeautifulButtonStyle(baseColor: Color.blue))
         .padding(.top, 8)
     }
 }
 
-private struct VersionInfo: View {
+struct VersionInfo: View {
+    let productId: String
     let version: String
     let platform: String
     let info: Product.Platform
-    
-    private var productVersion: String? {
-        info.languageSet.first?.productVersion
+    let isGroupLatest: Bool
+    let isOverallLatest: Bool
+    let hasExistingPath: Bool
+    let hasDownloadedPackage: Bool
+
+    private var productVersion: String {
+        info.languageSet.first?.productVersion ?? ""
     }
-    
+
     private var buildGuid: String? {
         info.languageSet.first?.buildGuid
     }
-    
+
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: 6) {
                 Text(version)
                     .font(.system(size: 14, weight: .semibold))
-                    .foregroundColor(.primary.opacity(0.9))
-                
-                if let pv = productVersion, pv != version {
-                    Text("•")
-                        .foregroundColor(.secondary)
-                    Text("v\(pv)")
-                        .font(.system(size: 12))
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 2)
+                    .foregroundColor(.primary.opacity(0.92))
+
+                if isOverallLatest {
+                    OverallLatestBadge()
+                } else if isGroupLatest {
+                    GroupLatestBadge()
+                }
+
+                if hasExistingPath {
+                    ExistingPathButton(isVisible: true)
+                } else if hasDownloadedPackage {
+                    DownloadedPackageButton(isVisible: true)
+                }
+
+                if !productVersion.isEmpty, productVersion != version {
+                    Text("v\(productVersion)")
+                        .font(.system(size: 11))
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 1)
                         .background(
                             RoundedRectangle(cornerRadius: 4)
-                                .fill(Color.blue.opacity(0.1))
+                                .fill(Color.blue.opacity(0.08))
                         )
                         .foregroundColor(.blue.opacity(0.8))
                 }
@@ -633,59 +1610,125 @@ private struct VersionInfo: View {
 
             HStack(spacing: 4) {
                 Text(platform)
-                    .font(.system(size: 12))
-                    .foregroundColor(.secondary.opacity(0.8))
-                
-                if let guid = buildGuid {
-                    Text("•")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundColor(.secondary.opacity(0.85))
+
+                if let guid = buildGuid, !guid.isEmpty {
+                    Text("·")
                         .font(.system(size: 10))
-                        .foregroundColor(.secondary)
+                        .foregroundColor(.secondary.opacity(0.6))
                     Text(guid)
-                        .font(.system(size: 11))
+                        .font(.system(size: 10))
                         .foregroundColor(.secondary.opacity(0.7))
                         .textSelection(.enabled)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
                 }
             }
         }
     }
 }
 
-private struct ExistingPathButton: View {
+struct GroupLatestBadge: View {
+    var body: some View {
+        Text("最新")
+            .font(.system(size: 10, weight: .semibold))
+            .foregroundColor(.orange)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 2)
+            .background(
+                RoundedRectangle(cornerRadius: 4)
+                    .fill(Color.orange.opacity(0.12))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 4)
+                    .stroke(Color.orange.opacity(0.3), lineWidth: 0.5)
+            )
+    }
+}
+
+struct OverallLatestBadge: View {
+    var body: some View {
+        HStack(spacing: 3) {
+            Image(systemName: "sparkles")
+                .font(.system(size: 9, weight: .semibold))
+            Text("最新")
+                .font(.system(size: 10, weight: .semibold))
+        }
+        .foregroundColor(.blue)
+        .padding(.horizontal, 6)
+        .padding(.vertical, 2)
+        .background(
+            RoundedRectangle(cornerRadius: 4)
+                .fill(Color.blue.opacity(0.12))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 4)
+                .stroke(Color.blue.opacity(0.35), lineWidth: 0.5)
+        )
+    }
+}
+
+struct ExistingPathButton: View {
     let isVisible: Bool
-    
+
     var body: some View {
         if isVisible {
-            Text("已存在")
-                .font(.system(size: 11, weight: .medium))
-                .foregroundColor(.blue.opacity(0.9))
-                .padding(.horizontal, 8)
-                .padding(.vertical, 4)
+            Text("已安装")
+                .font(.system(size: 10, weight: .medium))
+                .foregroundColor(.green.opacity(0.9))
+                .padding(.horizontal, 6)
+                .padding(.vertical, 2)
                 .background(
-                    RoundedRectangle(cornerRadius: 5)
-                        .fill(Color.blue.opacity(0.1))
+                    RoundedRectangle(cornerRadius: 4)
+                        .fill(Color.green.opacity(0.12))
                 )
                 .overlay(
-                    RoundedRectangle(cornerRadius: 5)
-                        .stroke(Color.blue.opacity(0.2), lineWidth: 0.5)
+                    RoundedRectangle(cornerRadius: 4)
+                        .stroke(Color.green.opacity(0.25), lineWidth: 0.5)
                 )
         }
     }
 }
 
-private struct ExpandButton: View {
+struct DownloadedPackageButton: View {
+    let isVisible: Bool
+
+    var body: some View {
+        if isVisible {
+            Text("已下载")
+                .font(.system(size: 10, weight: .medium))
+                .foregroundColor(.blue.opacity(0.9))
+                .padding(.horizontal, 6)
+                .padding(.vertical, 2)
+                .background(
+                    RoundedRectangle(cornerRadius: 4)
+                        .fill(Color.blue.opacity(0.12))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 4)
+                        .stroke(Color.blue.opacity(0.25), lineWidth: 0.5)
+                )
+        }
+    }
+}
+
+struct ExpandButton: View {
     let isExpanded: Bool
     let onToggle: () -> Void
     let hasDependencies: Bool
-    
+
     var body: some View {
-        Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
+        Image(systemName: "chevron.right")
+            .rotationEffect(.degrees(isExpanded ? 90 : 0))
+            .animation(.easeInOut(duration: 0.2), value: isExpanded)
             .foregroundColor(.secondary)
             .contentShape(Rectangle())
             .onTapGesture(perform: onToggle)
     }
 }
 
-private struct DependenciesList: View {
+struct DependenciesList: View {
     let dependencies: [Product.Platform.LanguageSet.Dependency]
 
     var body: some View {
@@ -698,14 +1741,14 @@ private struct DependenciesList: View {
     }
 }
 
-private struct DependencyRow: View, Equatable {
+struct DependencyRow: View, Equatable {
     let dependency: Product.Platform.LanguageSet.Dependency
-    
+
     static func == (lhs: DependencyRow, rhs: DependencyRow) -> Bool {
         lhs.dependency.sapCode == rhs.dependency.sapCode &&
         lhs.dependency.productVersion == rhs.dependency.productVersion
     }
-    
+
     var body: some View {
         VStack(alignment: .leading, spacing: 5) {
             HStack(spacing: 8) {
@@ -713,11 +1756,11 @@ private struct DependencyRow: View, Equatable {
                     .foregroundColor(.blue.opacity(0.8))
                     .font(.system(size: 12))
                     .frame(width: 16)
-                
+
                 Text(dependency.sapCode)
                     .font(.system(size: 12, weight: .medium))
                     .foregroundColor(.primary.opacity(0.8))
-                
+
                 Text("\(dependency.productVersion)")
                     .font(.system(size: 11))
                     .padding(.horizontal, 5)
@@ -744,6 +1787,12 @@ private struct DependencyRow: View, Equatable {
                             .fill(Color.secondary.opacity(0.1))
                     )
                 }
+
+                Spacer(minLength: 4)
+
+                #if DEBUG
+                DependencyDebugChip(dependency: dependency)
+                #endif
             }
             .padding(.vertical, 2)
 
@@ -762,44 +1811,9 @@ private struct DependencyRow: View, Equatable {
             }
             .padding(.top, 2)
             .padding(.leading, 24)
-            
-            #if DEBUG
-            VStack(alignment: .leading, spacing: 2) {
-                HStack(spacing: 4) {
-                    Text("Match:")
-                        .font(.caption2)
-                        .foregroundColor(.secondary)
-                    Text(dependency.isMatchPlatform ? "✅" : "❌")
-                        .font(.caption2)
-                    
-                    Text("•")
-                        .font(.caption2)
-                        .foregroundColor(.secondary)
-                        
-                    Text("Target:")
-                        .font(.caption2)
-                        .foregroundColor(.secondary)
-                    Text(dependency.targetPlatform)
-                        .font(.caption2)
-                        .foregroundColor(.blue)
-                }
-                
-                if !dependency.selectedReason.isEmpty {
-                    HStack(spacing: 4) {
-                        Text("Reason:")
-                            .font(.caption2)
-                            .foregroundColor(.secondary)
-                        Text(dependency.selectedReason)
-                            .font(.caption2)
-                            .foregroundColor(.orange)
-                    }
-                }
-            }
-            .padding(.leading, 22)
-            #endif
         }
     }
-    
+
     private func getPlatformIcon(for platform: String) -> Image {
         switch platform {
         case "macarm64":
@@ -814,30 +1828,116 @@ private struct DependencyRow: View, Equatable {
     }
 }
 
-private struct ModulesList: View {
+#if DEBUG
+struct DependencyDebugChip: View {
+    let dependency: Product.Platform.LanguageSet.Dependency
+
+    private var tooltip: String {
+        var parts: [String] = []
+        parts.append("Target: \(dependency.targetPlatform)")
+        if !dependency.selectedReason.isEmpty {
+            parts.append("Reason: \(dependency.selectedReason)")
+        }
+        return parts.joined(separator: "\n")
+    }
+
+    var body: some View {
+        HStack(spacing: 3) {
+            Image(systemName: dependency.isMatchPlatform ? "checkmark.seal.fill" : "exclamationmark.triangle.fill")
+                .font(.system(size: 9))
+            Text(dependency.isMatchPlatform ? "match" : "mismatch")
+                .font(.system(size: 9, weight: .medium))
+        }
+        .foregroundColor(dependency.isMatchPlatform ? .green : .orange)
+        .padding(.horizontal, 5)
+        .padding(.vertical, 1)
+        .background(
+            RoundedRectangle(cornerRadius: 3)
+                .fill((dependency.isMatchPlatform ? Color.green : Color.orange).opacity(0.12))
+        )
+        .help(tooltip)
+    }
+}
+#endif
+
+struct ModulesList: View {
     let modules: [Product.Platform.Module]
-    
+
     var body: some View {
         ForEach(modules, id: \.id) { module in
             HStack(spacing: 8) {
                 Circle()
-                    .fill(Color.blue.opacity(0.3))
+                    .fill(Color.purple.opacity(0.35))
                     .frame(width: 6, height: 6)
-                
+
                 Text(module.displayName)
                     .font(.system(size: 12, weight: .medium))
                     .foregroundColor(.primary.opacity(0.8))
-                
+
                 if !module.deploymentType.isEmpty {
                     Text("(\(module.deploymentType))")
                         .font(.system(size: 11))
                         .foregroundColor(.secondary.opacity(0.8))
                 }
-                
+
                 Spacer()
             }
             .padding(.vertical, 3)
         }
+    }
+}
+
+private struct VersionPickerEmptyView: View {
+    let hint: String
+
+    var body: some View {
+        VStack(spacing: 14) {
+            ZStack {
+                Circle()
+                    .fill(Color.secondary.opacity(0.08))
+                    .frame(width: 64, height: 64)
+                Image(systemName: "line.3.horizontal.decrease.circle")
+                    .font(.system(size: 28))
+                    .foregroundColor(.secondary)
+            }
+
+            VStack(spacing: 4) {
+                Text("没有结果")
+                    .font(.system(size: 14, weight: .semibold))
+                Text(hint)
+                    .font(.system(size: 12))
+                    .foregroundColor(.secondary)
+                    .multilineTextAlignment(.center)
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 30)
+    }
+}
+
+private struct VersionListFooterView: View {
+    let totalCount: Int
+    let visibleCount: Int
+    let isFiltered: Bool
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Capsule()
+                .fill(Color.green)
+                .frame(width: 6, height: 6)
+            Text(footerText)
+                .font(.system(size: 12))
+                .foregroundColor(.secondary)
+        }
+        .padding(.top, 10)
+        .padding(.bottom, 16)
+    }
+
+    private var footerText: String {
+        if isFiltered && visibleCount != totalCount {
+            return "显示 \(visibleCount) / \(totalCount) 个版本"
+        }
+        return "获取到 \(totalCount) 个版本"
     }
 }
 
@@ -846,11 +1946,11 @@ private struct DuplicateTaskAlertView: View {
     let version: String
     let onCancel: () -> Void
     let iconImage: NSImage?
-    
+
     private var productName: String {
         findProduct(id: productId)?.displayName ?? productId
     }
-    
+
     var body: some View {
         VStack(spacing: 20) {
             ZStack {
@@ -874,20 +1974,20 @@ private struct DuplicateTaskAlertView: View {
                     .clipShape(Circle())
                     .offset(x: 24, y: -24)
             }
-            
+
             Text("下载任务已存在")
                 .font(.headline)
-            
+
             VStack(spacing: 8) {
                 Text("产品 \(productName) (版本 \(version)) 已有正在进行的下载任务")
                     .multilineTextAlignment(.center)
                     .foregroundColor(.secondary)
-                
+
                 Text("请在下载管理器中查看进度")
                     .font(.caption)
                     .foregroundColor(.secondary)
             }
-            
+
             Button("确定") {
                 onCancel()
             }

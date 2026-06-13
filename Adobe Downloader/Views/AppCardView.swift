@@ -8,33 +8,104 @@ import SwiftUI
 import Combine
 
 private enum AppCardConstants {
-    static let cardWidth: CGFloat = 250
-    static let cardHeight: CGFloat = 200
-    static let iconSize: CGFloat = 64
-    static let cornerRadius: CGFloat = 12
-    static let buttonHeight: CGFloat = 24
-    static let titleFontSize: CGFloat = 16
-    static let buttonFontSize: CGFloat = 14
-    
-    static let shadowOpacity: Double = 0.1
-    static let shadowRadius: CGFloat = 4
-    static let strokeOpacity: Double = 0.15
-    static let strokeWidth: CGFloat = 1
-    static let backgroundOpacity: Double = 0.05
-    static let hoverScale: CGFloat = 1.02
-    
-    static let iconPlaceholderOpacity: Double = 0.6
-    static let iconLoadingDuration: Double = 0.3
+    static let cardMinWidth: CGFloat = 200
+    static let cardIdealWidth: CGFloat = 220
+    static let cardMinHeight: CGFloat = 220
+    static let iconSize: CGFloat = 72
+    static let iconContainerSize: CGFloat = 88
+    static let cornerRadius: CGFloat = 14
+    static let buttonHeight: CGFloat = 30
+    static let titleFontSize: CGFloat = 14
+    static let buttonFontSize: CGFloat = 13
+}
+
+private struct AppCardMetrics {
+    let uniqueVersionCount: Int
+    let latestDependenciesCount: Int
+    let latestMinOSVersion: String
+    let latestModulesCount: Int
+    let isArchitectureCompatible: Bool
+    let minOSMajor: Int?
+    let minOSDisplayFormatted: String
+    let requiresHighOS: Bool
+    let shouldHideVersionMetric: Bool
+}
+
+@MainActor
+private enum AppCardMetricsCache {
+    private static var storage: [String: AppCardMetrics] = [:]
+
+    static func metrics(for uniqueProduct: UniqueProduct) -> AppCardMetrics {
+        if let metrics = storage[uniqueProduct.id] {
+            return metrics
+        }
+
+        let products = globalCcmResult.products.filter { $0.id == uniqueProduct.id }
+        let visibleMatches = products.compactMap { product -> (Product, Product.Platform)? in
+            if isManifestInstallerProduct(uniqueProduct.id),
+               let match = installerPlatformMatch(product: product, selectedVersion: product.version) {
+                return (product, match.platform)
+            }
+
+            guard let platform = HDPIMParityDecisionEngine.shared.preferredPlatform(for: product) else {
+                return nil
+            }
+            return (product, platform)
+        }
+        let latestVisibleMatch = visibleMatches.sorted {
+            AppStatics.compareVersions($0.0.version, $1.0.version) > 0
+        }.first
+        let rawMinOS = latestVisibleMatch?.1.range.first?.min ?? ""
+        let minOSParts = rawMinOS.split(whereSeparator: { $0 == "-" || $0 == "." }).map(String.init)
+        let minOSDisplayFormatted: String
+        switch minOSParts.count {
+        case 0:
+            minOSDisplayFormatted = ""
+        case 1:
+            minOSDisplayFormatted = minOSParts[0]
+        default:
+            minOSDisplayFormatted = "\(minOSParts[0]).\(minOSParts[1])"
+        }
+        let minOSMajor = Int(minOSParts.first ?? "")
+        let uniqueVersionCount = Set(visibleMatches.map(\.0.version)).count
+        let metrics = AppCardMetrics(
+            uniqueVersionCount: uniqueVersionCount,
+            latestDependenciesCount: latestVisibleMatch?.1.languageSet.first?.dependencies.count ?? 0,
+            latestMinOSVersion: rawMinOS.replacingOccurrences(of: "-", with: ""),
+            latestModulesCount: latestVisibleMatch?.1.modules.count ?? 0,
+            isArchitectureCompatible: !visibleMatches.isEmpty,
+            minOSMajor: minOSMajor,
+            minOSDisplayFormatted: minOSDisplayFormatted,
+            requiresHighOS: (minOSMajor ?? 0) >= 14,
+            shouldHideVersionMetric: uniqueVersionCount > 1
+        )
+        storage[uniqueProduct.id] = metrics
+        return metrics
+    }
+}
+
+@MainActor
+private enum AppCardInstallStateCache {
+    private static var productsBySapCode: [String: [HDPIMInstalledProductForUninstall]]?
+	private static var loadedRevision: Int?
+
+    static func products(for sapCode: String, revision: Int, force: Bool = false) -> [HDPIMInstalledProductForUninstall] {
+        if productsBySapCode == nil || force || loadedRevision != revision {
+            productsBySapCode = Dictionary(grouping: HDPIMUninstaller.installedProducts(), by: \.sapCode)
+			loadedRevision = revision
+        }
+        return productsBySapCode?[sapCode] ?? []
+    }
 }
 
 final class IconCache {
     static let shared = IconCache()
     private var cache = NSCache<NSString, NSImage>()
-    
+
     func getIcon(for url: String) -> NSImage? {
         cache.object(forKey: url as NSString)
     }
-    
+
     func setIcon(_ image: NSImage, for url: String) {
         cache.setObject(image, forKey: url as NSString)
     }
@@ -54,55 +125,68 @@ final class AppCardViewModel: ObservableObject {
     @Published var pendingVersion = ""
     @Published var pendingLanguage = ""
     @Published var showRedownloadConfirm = false
-    
+    @Published var installedProducts: [HDPIMInstalledProductForUninstall] = []
+
     let uniqueProduct: UniqueProduct
-    
+
     @Published var isDownloading = false
     private let userDefaults = UserDefaults.standard
-    
+    private let metrics: AppCardMetrics
+    private var didRefreshInstallState = false
+
     private var useDefaultDirectory: Bool {
         StorageData.shared.useDefaultDirectory
     }
-    
+
     private var defaultDirectory: String {
         StorageData.shared.defaultDirectory
     }
-    
+
     private var cancellables = Set<AnyCancellable>()
-    
+
     init(uniqueProduct: UniqueProduct) {
         self.uniqueProduct = uniqueProduct
+        self.metrics = AppCardMetricsCache.metrics(for: uniqueProduct)
 
         Task { @MainActor in
             setupObservers()
         }
     }
-    
+
     @MainActor
     private func setupObservers() {
         globalNetworkManager.$downloadTasks
             .receive(on: RunLoop.main)
             .sink { [weak self] tasks in
                 guard let self = self else { return }
-                let hasActiveTask = tasks.contains { 
+                let hasActiveTask = tasks.contains {
                     $0.productId == self.uniqueProduct.id && self.isTaskActive($0.status)
                 }
-                
+
                 if hasActiveTask != self.isDownloading {
                     self.isDownloading = hasActiveTask
-                    self.objectWillChange.send()
                 }
             }
             .store(in: &cancellables)
-        
+
         globalNetworkManager.objectWillChange
             .receive(on: RunLoop.main)
+            .throttle(for: .milliseconds(250), scheduler: RunLoop.main, latest: true)
             .sink { [weak self] _ in
                 self?.updateDownloadingStatus()
             }
             .store(in: &cancellables)
+
+		globalNetworkManager.$installStateRevision
+			.dropFirst()
+			.removeDuplicates()
+			.receive(on: RunLoop.main)
+			.sink { [weak self] _ in
+				self?.refreshInstallState(force: true)
+			}
+			.store(in: &cancellables)
     }
-    
+
     private func isTaskActive(_ status: DownloadStatus) -> Bool {
         switch status {
         case .downloading, .preparing, .waiting, .retrying:
@@ -113,30 +197,47 @@ final class AppCardViewModel: ObservableObject {
             return false
         }
     }
-    
+
     @MainActor
     func updateDownloadingStatus() {
-        let hasActiveTask = globalNetworkManager.downloadTasks.contains { 
+        let hasActiveTask = globalNetworkManager.downloadTasks.contains {
             $0.productId == uniqueProduct.id && isTaskActive($0.status)
         }
-        
+
         if hasActiveTask != self.isDownloading {
             self.isDownloading = hasActiveTask
-            self.objectWillChange.send()
         }
     }
-    
+
+    func refreshInstallState(force: Bool = false, reloadCache: Bool = false) {
+        if didRefreshInstallState && !force {
+            return
+        }
+        didRefreshInstallState = true
+        installedProducts = AppCardInstallStateCache.products(
+			for: uniqueProduct.id,
+			revision: globalNetworkManager.installStateRevision,
+			force: reloadCache
+		)
+    }
+
     func getDestinationURL(version: String, language: String) async throws -> URL {
-        let platform = globalProducts.first(where: { $0.id == uniqueProduct.id && $0.version == version })?.platforms.first?.id ?? "unknown"
-        let installerName = uniqueProduct.id == "APRO"
-            ? "Adobe Downloader \(uniqueProduct.id)_\(version)_\(platform).dmg"
-            : "Adobe Downloader \(uniqueProduct.id)_\(version)-\(language)-\(platform)"
+        let platform = installerSelectedPlatformId(
+            productId: uniqueProduct.id,
+            version: version
+        ) ?? "unknown"
+        let installerName = installerOutputName(
+            productId: uniqueProduct.id,
+            version: version,
+            language: language,
+            platform: platform
+        )
 
         if useDefaultDirectory && !defaultDirectory.isEmpty {
             return URL(fileURLWithPath: defaultDirectory)
                 .appendingPathComponent(installerName)
         }
-        
+
         return try await withCheckedThrowingContinuation { continuation in
             DispatchQueue.main.async {
                 let panel = NSOpenPanel()
@@ -145,7 +246,7 @@ final class AppCardViewModel: ObservableObject {
                 panel.canChooseDirectories = true
                 panel.canChooseFiles = false
                 panel.directoryURL = FileManager.default.urls(for: .downloadsDirectory, in: .userDomainMask).first
-                
+
                 if panel.runModal() == .OK, let selectedURL = panel.url {
                     continuation.resume(returning: selectedURL.appendingPathComponent(installerName))
                 } else {
@@ -165,26 +266,26 @@ final class AppCardViewModel: ObservableObject {
 
     func loadIcon() {
         if iconImage != nil { return }
-        
+
         if let bestIcon = globalProducts.first(where: { $0.id == uniqueProduct.id })?.getBestIcon(),
            let iconURL = URL(string: bestIcon.value) {
             if let cachedImage = IconCache.shared.getIcon(for: bestIcon.value) {
                 self.iconImage = cachedImage
                 return
             }
-            
+
             Task {
                 do {
                     var request = URLRequest(url: iconURL)
                     request.timeoutInterval = 10
-                    
+
                     let (data, response) = try await URLSession.shared.data(for: request)
-                    
+
                     guard let httpResponse = response as? HTTPURLResponse,
                           (200...299).contains(httpResponse.statusCode) else {
                         throw URLError(.badServerResponse)
                     }
-                    
+
                     await MainActor.run {
                         if let image = NSImage(data: data) {
                             IconCache.shared.setIcon(image, for: bestIcon.value)
@@ -218,8 +319,28 @@ final class AppCardViewModel: ObservableObject {
             }
         }
     }
-    
+
+    func isProductInstalled(version: String) -> Bool {
+        let platform = installerSelectedPlatformId(
+            productId: uniqueProduct.id,
+            version: version
+        ) ?? "unknown"
+        return globalNetworkManager.isProductInstalled(
+            productId: uniqueProduct.id,
+            version: version,
+            platform: platform
+        )
+    }
+
     func checkAndStartDownload(version: String, language: String) async {
+        if isProductInstalled(version: version) {
+            await MainActor.run {
+                errorMessage = "该产品版本已安装"
+                showError = true
+            }
+            return
+        }
+
         if let existingPath = globalNetworkManager.isVersionDownloaded(productId: uniqueProduct.id, version: version, language: language) {
             await MainActor.run {
                 existingFilePath = existingPath
@@ -228,8 +349,8 @@ final class AppCardViewModel: ObservableObject {
                 showExistingFileAlert = true
             }
         } else {
-            if uniqueProduct.id == "APRO" {
-                await startAPRODownload(version: version, language: language)
+            if isManifestInstallerProduct(uniqueProduct.id) {
+                await startInstallerDownload(version: version, language: language)
             } else {
                 await MainActor.run {
                     selectedVersion = version
@@ -239,11 +360,11 @@ final class AppCardViewModel: ObservableObject {
             }
         }
     }
-    
-    func startAPRODownload(version: String, language: String) async {
+
+    func startInstallerDownload(version: String, language: String) async {
         do {
             let destinationURL = try await getDestinationURL(version: version, language: language)
-            
+
             try await globalNetworkManager.startCustomDownload(
                 productId: uniqueProduct.id,
                 selectedVersion: version,
@@ -263,7 +384,7 @@ final class AppCardViewModel: ObservableObject {
                    task.language == pendingLanguage &&
                    task.directory == path
         }
-        
+
         if existingTask != nil {
             return
         }
@@ -273,10 +394,13 @@ final class AppCardViewModel: ObservableObject {
             version: pendingVersion,
             language: pendingLanguage,
             displayName: uniqueProduct.displayName,
-            platform: globalProducts.first(where: { $0.id == uniqueProduct.id })?.platforms.first?.id ?? "unknown",
+            platform: installerSelectedPlatformId(
+                productId: uniqueProduct.id,
+                version: pendingVersion
+            ) ?? "unknown",
             directory: path
         )
-        
+
         let savedTasks = await TaskPersistenceManager.shared.loadTasks()
         await MainActor.run {
             globalNetworkManager.downloadTasks = savedTasks
@@ -284,25 +408,91 @@ final class AppCardViewModel: ObservableObject {
             globalNetworkManager.objectWillChange.send()
         }
     }
-    
-    var dependenciesCount: Int {
-        return globalProducts.first(where: { $0.id == uniqueProduct.id })?.platforms.first?.languageSet.first?.dependencies.count ?? 0
+
+    var uniqueVersionCount: Int {
+        metrics.uniqueVersionCount
     }
-    
+
+    var latestDependenciesCount: Int {
+        metrics.latestDependenciesCount
+    }
+
+    var latestMinOSVersion: String {
+        metrics.latestMinOSVersion
+    }
+
+    var latestModulesCount: Int {
+        metrics.latestModulesCount
+    }
+
     var hasValidIcon: Bool {
         iconImage != nil
     }
-    
+
     var canDownload: Bool {
         !isDownloading
     }
-    
+
     var downloadButtonTitle: String {
-        isDownloading ? String(localized: "下载中") : String(localized: "下载")
+        if isDownloading {
+            return String(localized: "下载中")
+        }
+        if isInstalled {
+            return String(localized: "管理")
+        }
+        return String(localized: "下载")
     }
-    
+
     var downloadButtonIcon: String {
-        isDownloading ? "hourglass.circle.fill" : "arrow.down.circle"
+        if isDownloading {
+            return "hourglass.circle.fill"
+        }
+        if isInstalled {
+            return "checkmark.seal.fill"
+        }
+        return "arrow.down.circle"
+    }
+
+    var isInstalled: Bool {
+        !installedProducts.isEmpty
+    }
+
+    var installedVersionCount: Int {
+        Set(installedProducts.map(\.version)).count
+    }
+
+    var activeDownloadTask: NewDownloadTask? {
+        globalNetworkManager.downloadTasks.first { task in
+            task.productId == uniqueProduct.id && isTaskActive(task.status)
+        }
+    }
+
+    var isAnyVersionDownloaded: Bool {
+        globalNetworkManager.downloadTasks.contains { task in
+            guard task.productId == uniqueProduct.id else { return false }
+            if case .completed = task.status { return true }
+            return false
+        }
+    }
+
+    var isArchitectureCompatible: Bool {
+        metrics.isArchitectureCompatible
+    }
+
+    var minOSMajor: Int? {
+        metrics.minOSMajor
+    }
+
+    var minOSDisplayFormatted: String {
+        metrics.minOSDisplayFormatted
+    }
+
+    var requiresHighOS: Bool {
+        metrics.requiresHighOS
+    }
+
+    var shouldHideVersionMetric: Bool {
+        metrics.shouldHideVersionMetric
     }
 }
 
@@ -315,224 +505,278 @@ struct AppCardView: View {
     init(uniqueProduct: UniqueProduct) {
         _viewModel = StateObject(wrappedValue: AppCardViewModel(uniqueProduct: uniqueProduct))
     }
-    
+
     var body: some View {
-        CardContainer {
-            VStack {
-                IconView(viewModel: viewModel)
-                ProductInfoView(viewModel: viewModel)
-                Spacer()
-                DownloadButtonView(viewModel: viewModel)
+        VStack(spacing: 0) {
+            Spacer(minLength: 20)
+
+            CardIconView(viewModel: viewModel)
+                .frame(width: 96, height: 96)
+
+            Spacer(minLength: 16)
+
+            Text(viewModel.uniqueProduct.displayName)
+                .font(.system(size: 16, weight: .semibold))
+                .lineLimit(2)
+                .multilineTextAlignment(.center)
+                .fixedSize(horizontal: false, vertical: true)
+                .foregroundColor(.primary)
+                .padding(.horizontal, 12)
+
+            Spacer(minLength: 8)
+
+            DotBadgeRow(viewModel: viewModel)
+
+            Spacer(minLength: 0)
+
+            if let active = viewModel.activeDownloadTask {
+                ActiveDownloadBar(task: active)
+                    .padding(.horizontal, 12)
+                    .padding(.bottom, 12)
             }
-            .drawingGroup()
+
+            DownloadActionButton(viewModel: viewModel)
+                .padding(.horizontal, 12)
+                .padding(.bottom, 16)
         }
+        .frame(
+            minWidth: 200,
+            idealWidth: 220,
+            maxWidth: .infinity,
+            minHeight: 260,
+            alignment: .top
+        )
         .background(
-            RoundedRectangle(cornerRadius: 12)
-                .fill(isHovered ? Color(.controlBackgroundColor) : Color(.windowBackgroundColor).opacity(0.5))
-                .animation(.easeInOut(duration: 0.2), value: isHovered)
+            RoundedRectangle(cornerRadius: 16)
+                .fill(isHovered ? Color(.controlBackgroundColor).opacity(0.15) : Color.clear)
         )
         .overlay(
-            RoundedRectangle(cornerRadius: 12)
-                .stroke(isHovered ? Color.blue.opacity(0.5) : Color.gray.opacity(0.1), lineWidth: isHovered ? 2 : 1)
-                .animation(.easeInOut(duration: 0.2), value: isHovered)
+            RoundedRectangle(cornerRadius: 16)
+                .strokeBorder(
+                    isHovered ? Color.accentColor.opacity(0.3) : Color.secondary.opacity(0.2),
+                    lineWidth: 1
+                )
         )
-        .shadow(color: isHovered ? Color.black.opacity(0.1) : Color.black.opacity(0.05),
-                radius: isHovered ? 4 : 2,
-                x: 0,
-                y: isHovered ? 2 : 1)
-        .animation(.easeInOut(duration: 0.2), value: isHovered)
         .onHover { hovering in
-            self.isHovered = hovering
-        }
-        .animation(.spring(response: 0.3, dampingFraction: 0.7), value: isHovered)
-        .contentShape(Rectangle())
-        .modifier(CardModifier())
-        .modifier(SheetModifier(viewModel: viewModel))
-        .modifier(AlertModifier(viewModel: viewModel, confirmRedownload: true))
-        .onAppear(perform: setupViewModel)
-        .onChange(of: globalNetworkManager.downloadTasks.count) { _ in
-            updateDownloadStatus()
-        }
-    }
-    
-    private func setupViewModel() {
-        viewModel.updateDownloadingStatus()
-    }
-    
-    private func updateDownloadStatus() {
-        viewModel.updateDownloadingStatus()
-    }
-}
-
-private struct CardContainer<Content: View>: View {
-    let content: Content
-    
-    init(@ViewBuilder content: () -> Content) {
-        self.content = content()
-    }
-    
-    var body: some View {
-        content
-            .padding()
-            .frame(width: AppCardConstants.cardWidth, height: AppCardConstants.cardHeight)
-    }
-}
-
-private struct IconView: View {
-    @ObservedObject var viewModel: AppCardViewModel
-    @State private var isLoading = true
-    @State private var opacity = 0.0
-    
-    var body: some View {
-        Group {
-            if viewModel.hasValidIcon {
-                Image(nsImage: viewModel.iconImage!)
-                    .resizable()
-                    .interpolation(.high)
-                    .scaledToFit()
-                    .opacity(opacity)
-                    .onAppear {
-                        withAnimation(.easeIn(duration: AppCardConstants.iconLoadingDuration)) {
-                            opacity = 1.0
-                        }
-                    }
-            } else {
-                Image(systemName: "app.fill")
-                    .resizable()
-                    .scaledToFit()
-                    .foregroundColor(.secondary)
-                    .opacity(AppCardConstants.iconPlaceholderOpacity)
+            withAnimation(.easeInOut(duration: 0.15)) {
+                self.isHovered = hovering
             }
         }
-        .frame(width: AppCardConstants.iconSize, height: AppCardConstants.iconSize)
+        .contentShape(Rectangle())
+        .modifier(SheetModifier(viewModel: viewModel))
+        .modifier(AlertModifier(viewModel: viewModel, confirmRedownload: true))
+        .onAppear {
+            viewModel.updateDownloadingStatus()
+            viewModel.refreshInstallState()
+        }
+        .onChange(of: globalNetworkManager.downloadTasks.count) { _ in
+            viewModel.updateDownloadingStatus()
+        }
+    }
+}
+
+private struct CardIconView: View {
+    @ObservedObject var viewModel: AppCardViewModel
+    @State private var opacity = 0.0
+
+    var body: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: 18)
+                .fill(Color.secondary.opacity(0.05))
+                .frame(width: AppCardConstants.iconContainerSize, height: AppCardConstants.iconContainerSize)
+
+            Group {
+                if let image = viewModel.iconImage {
+                    Image(nsImage: image)
+                        .resizable()
+                        .interpolation(.high)
+                        .scaledToFit()
+                        .opacity(opacity)
+                        .onAppear {
+                            withAnimation(.easeIn(duration: 0.3)) {
+                                opacity = 1.0
+                            }
+                        }
+                } else {
+                    Image(systemName: "app.fill")
+                        .resizable()
+                        .scaledToFit()
+                        .foregroundColor(.secondary.opacity(0.4))
+                }
+            }
+            .frame(width: AppCardConstants.iconSize, height: AppCardConstants.iconSize)
+        }
         .onAppear(perform: viewModel.loadIcon)
     }
 }
 
-private struct ProductInfoView: View {
+private struct DotBadgeRow: View {
     @ObservedObject var viewModel: AppCardViewModel
-    
+
     var body: some View {
-        VStack(spacing: 8) {
-            Text(viewModel.uniqueProduct.displayName)
-                .font(.system(size: AppCardConstants.titleFontSize))
-                .fontWeight(.semibold)
-                .lineLimit(2)
-                .multilineTextAlignment(.center)
-                .fixedSize(horizontal: false, vertical: true)
-            
-            let products = findProducts(id: viewModel.uniqueProduct.id)
-            let versions = products.compactMap { product -> String? in
-                let platforms = product.platforms.filter { platform in
-                    StorageData.shared.allowedPlatform.contains(platform.id)
-                }
-                return platforms.isEmpty ? nil : product.version
-            }
-            let uniqueVersions = Set(versions)
-            
-            let dependenciesCount = products.first?.platforms.first?.languageSet.first?.dependencies.count ?? 0
-            let minOSVersion = products.first?.platforms.first?.range.first?.min ?? ""
-            let modulesCount = products.first?.platforms.first?.modules.count ?? 0
-            
-            HStack(spacing: 12) {
-                MetricView(icon: "tag", value: "\(uniqueVersions.count)")
-
-                if dependenciesCount > 0 {
-                    Divider()
-                        .frame(height: 12)
-                    MetricView(icon: "shippingbox", value: "\(dependenciesCount)")
-                }
-
-                if !minOSVersion.isEmpty {
-                    Divider()
-                        .frame(height: 12)
-                    MetricView(icon: "macwindow", value: minOSVersion.replacingOccurrences(of: "-", with: ""))
-                }
-                
-                if modulesCount > 0 {
-                    Divider()
-                        .frame(height: 12)
-                    MetricView(icon: "square.stack.3d.up", value: "\(modulesCount)")
+        let badges = makeBadges()
+        if badges.isEmpty {
+            Text(fallbackText)
+                .font(.system(size: 11))
+                .foregroundColor(.secondary.opacity(0.7))
+        } else {
+            HStack(spacing: 10) {
+                ForEach(Array(badges.enumerated()), id: \.offset) { _, badge in
+                    badge
                 }
             }
-            .background(Color(.clear))
-            .font(.caption)
-            .foregroundColor(.secondary)
+            .font(.system(size: 11, weight: .medium))
         }
-        .background(Color(.clear))
+    }
+
+    private var fallbackText: String {
+        if viewModel.latestDependenciesCount > 0 {
+            return "\(viewModel.latestDependenciesCount) 个依赖组件"
+        }
+        return String(localized: "最新版本可用")
+    }
+
+    private func makeBadges() -> [AnyView] {
+        var list: [AnyView] = []
+        if viewModel.isInstalled {
+            let text = viewModel.installedVersionCount > 1
+                ? "已安装 \(viewModel.installedVersionCount) 版本"
+                : "已安装"
+            list.append(AnyView(DotBadge(text: text, tint: .green)))
+        }
+        if viewModel.isAnyVersionDownloaded && list.count < 2 {
+            list.append(AnyView(DotBadge(text: "已下载", tint: .green)))
+        }
+        if !viewModel.isArchitectureCompatible && list.count < 2 {
+            list.append(AnyView(DotBadge(text: "需切架构", tint: .orange)))
+        }
+        if viewModel.uniqueVersionCount > 1 && list.count < 2 {
+            list.append(AnyView(DotBadge(text: "\(viewModel.uniqueVersionCount) 版本", tint: .secondary)))
+        }
+        if viewModel.requiresHighOS && list.count < 2 {
+            let label = viewModel.minOSDisplayFormatted.isEmpty
+                ? String(localized: "高系统需求")
+                : "macOS \(viewModel.minOSDisplayFormatted)+"
+            list.append(AnyView(DotBadge(text: label, tint: .yellow)))
+        }
+        return list
     }
 }
 
-private struct MetricView: View {
-    let icon: String
-    let value: String
-    
+private struct DotBadge: View {
+    let text: String
+    let tint: Color
+
     var body: some View {
         HStack(spacing: 4) {
-            Image(systemName: icon)
-                .imageScale(.small)
-            Text(value)
-                .fontWeight(.medium)
+            Circle()
+                .fill(tint)
+                .frame(width: 6, height: 6)
+            Text(text)
+                .foregroundColor(.secondary)
         }
     }
 }
 
-private struct DownloadButtonView: View {
+private struct ActiveDownloadBar: View {
+    @ObservedObject var task: NewDownloadTask
+
+    private var clampedProgress: Double {
+        min(max(task.totalProgress, 0), 1)
+    }
+
+    var body: some View {
+        VStack(spacing: 3) {
+            HStack(spacing: 4) {
+                Image(systemName: "arrow.down.circle.fill")
+                    .font(.system(size: 9))
+                Text("\(Int(clampedProgress * 100))%")
+                    .font(.system(size: 10, weight: .semibold))
+                    .monospacedDigit()
+                if task.totalSpeed > 0 {
+                    Text("·")
+                        .foregroundColor(.secondary.opacity(0.4))
+                    Text(DownloadFormatters.speed(task.totalSpeed))
+                        .font(.system(size: 10))
+                        .foregroundColor(.secondary)
+                }
+                Spacer(minLength: 0)
+            }
+            .foregroundColor(.blue.opacity(0.85))
+
+            GeometryReader { geo in
+                ZStack(alignment: .leading) {
+                    Capsule()
+                        .fill(Color.blue.opacity(0.12))
+                        .frame(height: 3)
+                    Capsule()
+                        .fill(
+                            LinearGradient(
+                                colors: [Color.blue.opacity(0.6), Color.blue],
+                                startPoint: .leading,
+                                endPoint: .trailing
+                            )
+                        )
+                        .frame(width: max(0, geo.size.width * clampedProgress), height: 3)
+                        .animation(.linear(duration: 0.3), value: clampedProgress)
+                }
+            }
+            .frame(height: 3)
+        }
+    }
+}
+
+private struct DownloadActionButton: View {
     @ObservedObject var viewModel: AppCardViewModel
-    @State private var isHovered = false
-    
+
     var body: some View {
         Button(action: { viewModel.showVersionPicker = true }) {
-            Label(viewModel.downloadButtonTitle,
-                  systemImage: viewModel.downloadButtonIcon)
-                .font(.system(size: AppCardConstants.buttonFontSize, weight: .medium))
-                .frame(minWidth: 0, maxWidth: .infinity)
-                .frame(height: AppCardConstants.buttonHeight)
-                .contentShape(Rectangle())
-                .foregroundColor(.white)
-        }
-        .buttonStyle(BeautifulButtonStyle(baseColor: viewModel.isDownloading ? Color.gray : Color.blue))
-        .disabled(!viewModel.canDownload)
-        .animation(.easeInOut(duration: 0.2), value: isHovered)
-        .onHover { hovering in
-            isHovered = hovering
-        }
-    }
-}
-
-private struct CardModifier: ViewModifier {
-    @State private var isHovered = false
-    
-    func body(content: Content) -> some View {
-        content
-            .background(Color(NSColor.clear))
-            .overlay(
-                RoundedRectangle(cornerRadius: AppCardConstants.cornerRadius)
-                    .stroke(Color.gray.opacity(AppCardConstants.strokeOpacity), 
-                           lineWidth: AppCardConstants.strokeWidth)
-            )
-            .shadow(
-                color: Color.primary.opacity(isHovered ? AppCardConstants.shadowOpacity * 2 : AppCardConstants.shadowOpacity),
-                radius: isHovered ? AppCardConstants.shadowRadius * 1.5 : AppCardConstants.shadowRadius,
-                x: 0,
-                y: isHovered ? 4 : 2
-            )
-            .scaleEffect(isHovered ? AppCardConstants.hoverScale : 1.0)
-            .animation(.easeInOut(duration: 0.2), value: isHovered)
-            .onHover { hovering in
-                isHovered = hovering
+            HStack(spacing: 4) {
+                Image(systemName: viewModel.downloadButtonIcon)
+                    .font(.system(size: 12))
+                Text(viewModel.downloadButtonTitle)
+                    .font(.system(size: AppCardConstants.buttonFontSize, weight: .semibold))
             }
+            .foregroundColor(.white)
+            .frame(maxWidth: .infinity, minHeight: AppCardConstants.buttonHeight)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(BeautifulButtonStyle(baseColor: buttonColor))
+        .disabled(viewModel.isDownloading)
+        .help(helpText)
+    }
+
+    private var buttonColor: Color {
+        if viewModel.isDownloading {
+            return Color.gray.opacity(0.6)
+        }
+        if viewModel.isInstalled {
+            return Color.green
+        }
+        return Color.blue
+    }
+
+    private var helpText: String {
+        if viewModel.isDownloading {
+            return String(localized: "已有下载任务进行中，可在下载管理查看进度")
+        }
+        if viewModel.isInstalled {
+            return String(localized: "管理已安装版本或卸载")
+        }
+        return String(localized: "选择版本并下载")
     }
 }
 
-private struct SheetModifier: ViewModifier {
+struct SheetModifier: ViewModifier {
     @ObservedObject var viewModel: AppCardViewModel
     @StorageValue(\.useDefaultLanguage) private var useDefaultLanguage
     @StorageValue(\.defaultLanguage) private var defaultLanguage
-    
+
     func body(content: Content) -> some View {
         content
-            .sheet(isPresented: $viewModel.showVersionPicker) {
+            .sheet(isPresented: $viewModel.showVersionPicker, onDismiss: {
+                viewModel.refreshInstallState(force: true, reloadCache: true)
+            }) {
                 if findProduct(id: viewModel.uniqueProduct.id) != nil {
                     NavigationVersionPickerView(productId: viewModel.uniqueProduct.id) { version in
                         Task {
@@ -627,18 +871,18 @@ struct AlertModifier: ViewModifier {
                 Text(viewModel.errorMessage)
             }
     }
-    
+
     private func startRedownload() async {
         globalNetworkManager.downloadTasks.removeAll { task in
             task.productId == viewModel.uniqueProduct.id &&
             task.productVersion == viewModel.pendingVersion &&
             task.language == viewModel.pendingLanguage
         }
-        
+
         if let existingPath = viewModel.existingFilePath {
             try? FileManager.default.removeItem(at: existingPath)
         }
-        
+
         await MainActor.run {
             viewModel.selectedVersion = viewModel.pendingVersion
             viewModel.selectedLanguage = viewModel.pendingLanguage

@@ -108,6 +108,7 @@
 				3C60E16E2CE3A6CB00600C07 /* AdobeDownloaderHelperTool */,
 				3CCC3AE12CC67B8F006E22B4 /* Products */,
 				3CCC3B112CC67F7A006E22B4 /* Localizables */,
+				3CDCE5C22F67CD300056E259 /* Frameworks */,
 			);
 			sourceTree = "<group>";
 		};
@@ -118,6 +119,13 @@
 				3C60E16D2CE3A6CB00600C07 /* com.x1a0he.macOS.Adobe-Downloader.helper */,
 			);
 			name = Products;
+			sourceTree = "<group>";
+		};
+		3CDCE5C22F67CD300056E259 /* Frameworks */ = {
+			isa = PBXGroup;
+			children = (
+			);
+			name = Frameworks;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -238,7 +246,7 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
-			shellScript = "set -e\nDEST_DIR=\"${TARGET_BUILD_DIR}/${WRAPPER_NAME}/Contents/Library/LaunchDaemons\"\nmkdir -p \"${DEST_DIR}\"\ncp \"${SRCROOT}/AdobeDownloaderHelperTool/com.x1a0he.macOS.Adobe-Downloader.helper.plist\" \"${DEST_DIR}/com.x1a0he.macOS.Adobe-Downloader.helper.plist\"\n";
+			shellScript = "set -e\nDEST_DIR=\"${TARGET_BUILD_DIR}/${WRAPPER_NAME}/Contents/Library/LaunchDaemons\"\nPLIST_SRC=\"${SRCROOT}/AdobeDownloaderHelperTool/com.x1a0he.macOS.Adobe-Downloader.helper.plist\"\nPLIST_DST=\"${DEST_DIR}/com.x1a0he.macOS.Adobe-Downloader.helper.plist\"\nHELPER_NAME=\"com.x1a0he.macOS.Adobe-Downloader.helper\"\nif [ \"${CONFIGURATION}\" = \"Debug\" ]; then\n    HELPER_PATH=\"${TARGET_BUILD_DIR}/${WRAPPER_NAME}/Contents/Library/LaunchServices/${HELPER_NAME}\"\nelse\n    HELPER_PATH=\"/Applications/${WRAPPER_NAME}/Contents/Library/LaunchServices/${HELPER_NAME}\"\nfi\nmkdir -p \"${DEST_DIR}\"\ncp \"${PLIST_SRC}\" \"${PLIST_DST}\"\n/usr/libexec/PlistBuddy -c \"Set :Program ${HELPER_PATH}\" \"${PLIST_DST}\"\n/usr/libexec/PlistBuddy -c \"Set :ProgramArguments:0 ${HELPER_PATH}\" \"${PLIST_DST}\"\n";
 		};
 /* End PBXShellScriptBuildPhase section */
 
@@ -452,7 +460,7 @@
 				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 220;
+				CURRENT_PROJECT_VERSION = 300;
 				DEAD_CODE_STRIPPING = YES;
 				DEVELOPMENT_ASSET_PATHS = "\"Adobe Downloader/Preview Content\"";
 				DEVELOPMENT_TEAM = TG862GVKHK;
@@ -460,6 +468,13 @@
 				ENABLE_PREVIEWS = YES;
 				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				GENERATE_INFOPLIST_FILE = YES;
+				HEADER_SEARCH_PATHS = (
+					"$(inherited)",
+					"\"$(SRCROOT)/Adobe Downloader/Native\"",
+					"\"$(SRCROOT)/Adobe Downloader/Native/minizip-ng\"",
+					"\"$(SRCROOT)/Adobe Downloader/Native/minizip-ng/compat\"",
+					"\"$(SRCROOT)/Adobe Downloader/Native/7zip\"",
+				);
 				INFOPLIST_KEY_CFBundleDisplayName = "Adobe Downloader";
 				INFOPLIST_KEY_NSDownloadsFolderUsageDescription = "需要访问下载文件夹来保存Adobe安装文件";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
@@ -467,11 +482,18 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
+				LIBRARY_SEARCH_PATHS = "$(inherited)";
 				MACOSX_DEPLOYMENT_TARGET = 13.0;
-				MARKETING_VERSION = 2.2.0;
+				MARKETING_VERSION = 3.0.0;
+				OTHER_LDFLAGS = (
+					"$(inherited)",
+					"-lz",
+					"-lbz2",
+				);
 				PRODUCT_BUNDLE_IDENTIFIER = "com.x1a0he.macOS.Adobe-Downloader";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_OBJC_BRIDGING_HEADER = "Adobe Downloader/Native/HDPIMLZMA2Bridge.h";
 				SWIFT_VERSION = 5.0;
 			};
 			name = Debug;
@@ -486,7 +508,7 @@
 				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
 				COMBINE_HIDPI_IMAGES = YES;
-				CURRENT_PROJECT_VERSION = 220;
+				CURRENT_PROJECT_VERSION = 300;
 				DEAD_CODE_STRIPPING = YES;
 				DEVELOPMENT_ASSET_PATHS = "\"Adobe Downloader/Preview Content\"";
 				DEVELOPMENT_TEAM = TG862GVKHK;
@@ -494,6 +516,13 @@
 				ENABLE_PREVIEWS = YES;
 				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				GENERATE_INFOPLIST_FILE = YES;
+				HEADER_SEARCH_PATHS = (
+					"$(inherited)",
+					"\"$(SRCROOT)/Adobe Downloader/Native\"",
+					"\"$(SRCROOT)/Adobe Downloader/Native/minizip-ng\"",
+					"\"$(SRCROOT)/Adobe Downloader/Native/minizip-ng/compat\"",
+					"\"$(SRCROOT)/Adobe Downloader/Native/7zip\"",
+				);
 				INFOPLIST_KEY_CFBundleDisplayName = "Adobe Downloader";
 				INFOPLIST_KEY_NSDownloadsFolderUsageDescription = "需要访问下载文件夹来保存Adobe安装文件";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
@@ -501,11 +530,18 @@
 					"$(inherited)",
 					"@executable_path/../Frameworks",
 				);
+				LIBRARY_SEARCH_PATHS = "$(inherited)";
 				MACOSX_DEPLOYMENT_TARGET = 13.0;
-				MARKETING_VERSION = 2.2.0;
+				MARKETING_VERSION = 3.0.0;
+				OTHER_LDFLAGS = (
+					"$(inherited)",
+					"-lz",
+					"-lbz2",
+				);
 				PRODUCT_BUNDLE_IDENTIFIER = "com.x1a0he.macOS.Adobe-Downloader";
 				PRODUCT_NAME = "$(TARGET_NAME)";
 				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_OBJC_BRIDGING_HEADER = "Adobe Downloader/Native/HDPIMLZMA2Bridge.h";
 				SWIFT_VERSION = 5.0;
 			};
 			name = Release;
@@ -547,8 +583,9 @@
 			isa = XCRemoteSwiftPackageReference;
 			repositoryURL = "https://github.com/sparkle-project/Sparkle";
 			requirement = {
-				kind = upToNextMajorVersion;
-				minimumVersion = 2.8.0;
+				kind = versionRange;
+				maximumVersion = 3.0.0;
+				minimumVersion = 2.9.0;
 			};
 		};
 /* End XCRemoteSwiftPackageReference section */

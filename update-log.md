@@ -1,8 +1,39 @@
 # Change Log
 
+## 2026-06-13 v3.0.0 更新日志
+
+Adobe Downloader 3.0.0 带来了下载、安装、卸载、系统适配和界面体验的全面升级。本版本重构了核心下载与安装流程，进一步增强了产品与加载项的管理能力。
+
+### 新增
+
+- 全新的下载机制
+  Adobe Downloader 对下载机制进行了进一步完善，现已支持加载项单独下载，用户可以更灵活地获取产品主体或指定加载项。
+
+- 全新的产品安装机制
+  本版本抛弃了原有的 Setup 组件依赖，改用新的安装引擎，支持所有产品的全量安装与增量安装，并新增加载项单独安装能力。
+
+- 全新的产品卸载机制
+  新增加载项卸载功能，现在可以针对某个产品的指定加载项进行单独卸载，而不必影响完整产品本体。
+
+- Adobe Creative Cloud 识别支持
+  得益于新的产品安装机制，通过 Adobe Downloader 安装的所有产品都可以在 Adobe Creative Cloud 中正确显示，包括相关依赖项也能被正确识别。
+
+### 优化
+
+- 适配 macOS 27
+  Adobe Downloader 已针对 macOS 27 进行适配，提升了新系统环境下的兼容性与使用体验。
+
+- 支持 Liquid Glass 风格
+  UI 界面进一步升级，引入更丰富的视觉表现，带来更现代、更细腻的交互体验。
+
+### 其他
+
+- 本版本还包含更多面向 3.0 的新特性与体验优化，等待你进一步探索。
+
 ## 2025-12-25 更新日志
 
 [//]: # (2.2.0)
+
 ```markdown
 1. 引入 SMAppService Daemon 的方式重做 Helper
 2. 加入 Helper 执行日志
@@ -12,16 +43,17 @@
 
 ====================
 
-1.	Reworked the Helper by introducing it via SMAppService Daemon
-2.	Introduced execution logs for the Helper
-3.	Fixed an issue where the cleanup tool lost its selected state and cleanup progress when switching tabs
-4.	Removed the Helper status from the Settings page
-5.	Introduced Helper Settings and a Helper Playground to observe Helper execution results and actual granted privileges
+1. Reworked the Helper by introducing it via SMAppService Daemon
+2. Introduced execution logs for the Helper
+3. Fixed an issue where the cleanup tool lost its selected state and cleanup progress when switching tabs
+4. Removed the Helper status from the Settings page
+5. Introduced Helper Settings and a Helper Playground to observe Helper execution results and actual granted privileges
 ```
 
 ## 2025-12-16 更新日志
 
 [//]: # (2.1.5)
+
 ```markdown
 1. 修正部分语言包拼写错误的问题，并修正 Setup 修改逻辑和检测逻辑
 2. 增加了更加完善的 fix-helper.sh 执行逻辑
@@ -37,6 +69,7 @@
 ## 2025-11-22 更新日志
 
 [//]: # (2.1.4)
+
 ```markdown
 1. 修复了清理工具执行清理时出现清理不全面的问题
 2. 新增修复 Helper 的 sh 脚本和入口
@@ -54,6 +87,7 @@
 ## 2025-08-17 更新日志
 
 [//]: # (2.1.3)
+
 ```markdown
 1. 垃圾 SMAppService 赶紧滚，回退 SMJobBless Helper
 2. 修复了安装时 Helper 权限不足导致 103 错误的问题
@@ -67,6 +101,7 @@
 ## 2025-08-11 更新日志
 
 [//]: # (2.1.2)
+
 ```markdown
 1. 修复了Helper无法连接的问题
 2. 修复了自定义下载永远是最新版本的问题
@@ -84,6 +119,7 @@
 ## 2025-07-22 更新日志
 
 [//]: # (2.1.1)
+
 ```markdown
 1. 修复了无法下载 Acrobat 的问题
 
@@ -95,6 +131,7 @@
 ## 2025-07-20 更新日志
 
 [//]: # (2.1)
+
 ```markdown
 1. 新增安装前终止 Setup 的特性
 2. 新增并发下载数控制
@@ -116,6 +153,7 @@
 ## 2025-04-23 更新日志
 
 [//]: # (2.0.2)
+
 ```markdown
 1. 修复了 Intel 机型下依赖包判断遇到 osx10 被误判为 arm 导致下载错误的问题
 2. 修复了设置界面上方的文字显示问题
@@ -125,7 +163,8 @@
 
 ====================
 
-1. Fixed an issue where dependency package detection on Intel-based models mistakenly identified osx10 as ARM architecture, leading to incorrect downloads.
+1. Fixed an issue where dependency package detection on Intel-based models mistakenly identified osx10 as ARM
+   architecture, leading to incorrect downloads.
 2. Resolved text display issues in the settings interface header.
 3. Adjusted the height of the download management interface from 500 to 600.
 4. Added functionality to copy all product and package list information in download tasks.
@@ -135,6 +174,7 @@
 ## 2025-04-06 更新日志
 
 [//]: # (2.0.1)
+
 ```markdown
 1. 修复了选择任意版本的情况下仍下载最新版本的问题
 2. 修复了在 Intel 机型下下载包为 arm64 的问题
@@ -154,6 +194,7 @@
 ## 2025-03-27 更新日志
 
 [//]: # (2.0.0)
+
 ```markdown
 1. 全新UI设计，引入了毛玻璃背景
 2. 当鼠标移入产品卡片时会有新的交互体验
