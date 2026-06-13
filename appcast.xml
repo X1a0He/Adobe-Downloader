@@ -3,12 +3,53 @@
     <channel>
         <title>Adobe Downloader</title>
         <item>
+            <title>3.0.0</title>
+            <pubDate>Sat, 13 Jun 2026 15:21:21 +0800</pubDate>
+            <sparkle:version>300</sparkle:version>
+            <sparkle:shortVersionString>3.0.0</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
+            <enclosure url="https://github.com/X1a0He/Adobe-Downloader/releases/download/3.0.0/Adobe.Downloader.dmg"
+                       length="7211520" type="application/octet-stream"
+                       sparkle:edSignature="7S0+dqAg6EudYVSovKnA1Cq41aX+YDTxN+d7W+MXBUVgNzHv0ybZaD6kYOd/a09nMJDW5x53hEHRI2nUqLQLAA=="/>
+            <description>
+                <![CDATA[
+                    <style>ul{margin-top: 0;margin-bottom: 7;padding-left: 18;}</style>
+                    <h4>Adobe Downloader 更新日志: </h4>
+                    <ul>
+                        <li>1. 全新的下载机制，Adobe Downloader 对下载机制进行了进一步完善，引入了加载项单独下载功能</li>
+                        <li>2. 全新的产品安装机制，Adobe Downloader 抛弃了原有的 Setup 组件依赖，采用新的安装引擎，支持所有产品的全量安装和增量安装，并引入了加载项单独安装功能</li>
+                        <li>3. 全新的产品卸载机制，Adobe Downloader 引入了加载项卸载功能，你可以对某个产品的加载项进行单独卸载</li>
+                        <li>4. 得益于全新的产品安装机制，你可以在 Adobe Creative Cloud 中找到通过 Adobe Downloader 安装的所有产品，包括依赖项也能够被正确识别</li>
+                        <li>5. 适配 macOS 27，并支持 Liquid Glass 风格，带来更加丰富的 UI 界面</li>
+                        <li>6. 更多 Adobe Downloader 3.0 新特性，等待你来体验</li>
+                    </ul>
+                    <h4>PS: </h4>
+                    <hr>
+                    <h4>Adobe Downloader Changes: </h4>
+                    <ul>
+                        <li>1. Introduced a brand-new download mechanism. Adobe Downloader further improves the download workflow and now supports downloading add-ons</li>
+                        <li>separately.</li>
+                        <li>2. Introduced a brand-new product installation mechanism. Adobe Downloader no longer depends on the original Setup component and now uses a new</li>
+                        <li>installation engine, supporting full and incremental installation for all products, as well as separate add-on installation.</li>
+                        <li>3. Introduced a brand-new product uninstallation mechanism. Adobe Downloader now supports uninstalling add-ons separately for a specific product.</li>
+                        <li>4. Thanks to the new installation mechanism, all products installed through Adobe Downloader can now be found in Adobe Creative Cloud, including</li>
+                        <li>correctly recognized dependencies.</li>
+                        <li>5. Added support for macOS 27 and Liquid Glass style, with a richer UI experience.</li>
+                        <li>6. More Adobe Downloader 3.0 features are ready for you to explore.</li>
+                    </ul>
+                    <h4>PS: </h4>
+                ]]>
+            </description>
+        </item>
+        <item>
             <title>2.2.0</title>
             <pubDate>Thu, 25 Dec 2025 13:01:04 +0800</pubDate>
             <sparkle:version>220</sparkle:version>
             <sparkle:shortVersionString>2.2.0</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
-            <enclosure url="https://github.com/X1a0He/Adobe-Downloader/releases/download/2.2.0/Adobe.Downloader.dmg" length="4403712" type="application/octet-stream" sparkle:edSignature="W9qDecmbUr/rp0xWmaLi1EbaSCh7JDwRd3+rOwqsARPE1X6X9pHxdsHDnv49oz040CDqIzIqmC3gwNkas8rHAg=="/>
+            <enclosure url="https://github.com/X1a0He/Adobe-Downloader/releases/download/2.2.0/Adobe.Downloader.dmg"
+                       length="4403712" type="application/octet-stream"
+                       sparkle:edSignature="W9qDecmbUr/rp0xWmaLi1EbaSCh7JDwRd3+rOwqsARPE1X6X9pHxdsHDnv49oz040CDqIzIqmC3gwNkas8rHAg=="/>
             <description>
                 <![CDATA[
                     <style>ul{margin-top: 0;margin-bottom: 7;padding-left: 18;}</style>
@@ -38,7 +79,9 @@
             <sparkle:version>215</sparkle:version>
             <sparkle:shortVersionString>2.1.5</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
-            <enclosure url="https://github.com/X1a0He/Adobe-Downloader/releases/download/2.1.5/Adobe.Downloader.dmg" length="4211712" type="application/octet-stream" sparkle:edSignature="6BBAALHygNEHL7ZBJkfm6CZ2w/eZVCacKg1RgVvCeiM0XDuho2rE40Yx6l2L8LaIMESGjUvHTSXBeJy3+gFVBA=="/>
+            <enclosure url="https://github.com/X1a0He/Adobe-Downloader/releases/download/2.1.5/Adobe.Downloader.dmg"
+                       length="4211712" type="application/octet-stream"
+                       sparkle:edSignature="6BBAALHygNEHL7ZBJkfm6CZ2w/eZVCacKg1RgVvCeiM0XDuho2rE40Yx6l2L8LaIMESGjUvHTSXBeJy3+gFVBA=="/>
             <description>
                 <![CDATA[
                     <style>ul{margin-top: 0;margin-bottom: 7;padding-left: 18;}</style>
@@ -64,7 +107,9 @@
             <sparkle:version>214</sparkle:version>
             <sparkle:shortVersionString>2.1.4</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
-            <enclosure url="https://github.com/X1a0He/Adobe-Downloader/releases/download/2.1.4/Adobe.Downloader.dmg" length="4208128" type="application/octet-stream" sparkle:edSignature="ggNGnwLOVNbpDrrQpOsTBnsKuYW4VzM5woL3e/u4kZD/M5240/CTZOpJqJnZZcUShZ8qObp6ioNZ85CjGxjXAA=="/>
+            <enclosure url="https://github.com/X1a0He/Adobe-Downloader/releases/download/2.1.4/Adobe.Downloader.dmg"
+                       length="4208128" type="application/octet-stream"
+                       sparkle:edSignature="ggNGnwLOVNbpDrrQpOsTBnsKuYW4VzM5woL3e/u4kZD/M5240/CTZOpJqJnZZcUShZ8qObp6ioNZ85CjGxjXAA=="/>
             <description>
                 <![CDATA[
                     <style>ul{margin-top: 0;margin-bottom: 7;padding-left: 18;}</style>
@@ -92,7 +137,9 @@
             <sparkle:version>213</sparkle:version>
             <sparkle:shortVersionString>2.1.3</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
-            <enclosure url="https://github.com/X1a0He/Adobe-Downloader/releases/download/2.1.3/Adobe.Downloader.dmg" length="4002304" type="application/octet-stream" sparkle:edSignature="heFZadEXxYZD7SN4+fEZT+diGFC2tGJMe6FKZW/ge8kwlyanQfZjXWi6lYBKnWKPcUPcRFzOs8OFQ1xG5BX0Aw=="/>
+            <enclosure url="https://github.com/X1a0He/Adobe-Downloader/releases/download/2.1.3/Adobe.Downloader.dmg"
+                       length="4002304" type="application/octet-stream"
+                       sparkle:edSignature="heFZadEXxYZD7SN4+fEZT+diGFC2tGJMe6FKZW/ge8kwlyanQfZjXWi6lYBKnWKPcUPcRFzOs8OFQ1xG5BX0Aw=="/>
             <description>
                 <![CDATA[
                     <style>ul{margin-top: 0;margin-bottom: 7;padding-left: 18;}</style>
@@ -116,7 +163,9 @@
             <sparkle:version>212</sparkle:version>
             <sparkle:shortVersionString>2.1.2</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
-            <enclosure url="https://github.com/X1a0He/Adobe-Downloader/releases/download/2.1.2/Adobe.Downloader.dmg" length="4026368" type="application/octet-stream" sparkle:edSignature="LO/iyoV0Z58Xwg2OPia6x1urNbTBgXX5whJGW3E7pcggwsi9b7TJXdr4geHlCVUw77TKLwTgd9ZaQznS83lkAw=="/>
+            <enclosure url="https://github.com/X1a0He/Adobe-Downloader/releases/download/2.1.2/Adobe.Downloader.dmg"
+                       length="4026368" type="application/octet-stream"
+                       sparkle:edSignature="LO/iyoV0Z58Xwg2OPia6x1urNbTBgXX5whJGW3E7pcggwsi9b7TJXdr4geHlCVUw77TKLwTgd9ZaQznS83lkAw=="/>
             <description>
                 <![CDATA[
                     <style>ul{margin-top: 0;margin-bottom: 7;padding-left: 18;}</style>
@@ -144,7 +193,9 @@
             <sparkle:version>211</sparkle:version>
             <sparkle:shortVersionString>2.1.1</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
-            <enclosure url="https://github.com/X1a0He/Adobe-Downloader/releases/download/2.1.1/Adobe.Downloader.dmg" length="4898302" type="application/octet-stream" sparkle:edSignature="KSdEqZLBjiqs3Bg1kKtNmC4OnaAuh7O5nr60RVNAw6AcnzdmLY/XtuQExMezm8kFotUfWYy3oqBHdF8rFAYSAA=="/>
+            <enclosure url="https://github.com/X1a0He/Adobe-Downloader/releases/download/2.1.1/Adobe.Downloader.dmg"
+                       length="4898302" type="application/octet-stream"
+                       sparkle:edSignature="KSdEqZLBjiqs3Bg1kKtNmC4OnaAuh7O5nr60RVNAw6AcnzdmLY/XtuQExMezm8kFotUfWYy3oqBHdF8rFAYSAA=="/>
             <description>
                 <![CDATA[
                     <style>ul{margin-top: 0;margin-bottom: 7;padding-left: 18;}</style>
@@ -166,7 +217,9 @@
             <sparkle:version>210</sparkle:version>
             <sparkle:shortVersionString>2.1</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
-            <enclosure url="https://github.com/X1a0He/Adobe-Downloader/releases/download/2.1.0/Adobe.Downloader.dmg" length="4859082" type="application/octet-stream" sparkle:edSignature="/kj3r/o+4sZSlFxS0/T0tI3ju7pKD1oFeJNhUh9++gafwnDYY1mVVy0CRzetVU3R6jw9uz+liEvl6rYmkrKKCg=="/>
+            <enclosure url="https://github.com/X1a0He/Adobe-Downloader/releases/download/2.1.0/Adobe.Downloader.dmg"
+                       length="4859082" type="application/octet-stream"
+                       sparkle:edSignature="/kj3r/o+4sZSlFxS0/T0tI3ju7pKD1oFeJNhUh9++gafwnDYY1mVVy0CRzetVU3R6jw9uz+liEvl6rYmkrKKCg=="/>
             <description>
                 <![CDATA[
                     <style>ul{margin-top: 0;margin-bottom: 7;padding-left: 18;}</style>
@@ -198,7 +251,9 @@
             <sparkle:version>202</sparkle:version>
             <sparkle:shortVersionString>2.0.2</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>12.0</sparkle:minimumSystemVersion>
-            <enclosure url="https://github.com/X1a0He/Adobe-Downloader/releases/download/2.0.2/Adobe.Downloader.dmg" length="4291392" type="application/octet-stream" sparkle:edSignature="z5QjP+jzjuhvBbBVsiX+BrVK6OqNfi17tabK2UKBr1uhDimOip1R/pyjIFPk+pf4enSbv1y0GF09sE4ShGjNBg=="/>
+            <enclosure url="https://github.com/X1a0He/Adobe-Downloader/releases/download/2.0.2/Adobe.Downloader.dmg"
+                       length="4291392" type="application/octet-stream"
+                       sparkle:edSignature="z5QjP+jzjuhvBbBVsiX+BrVK6OqNfi17tabK2UKBr1uhDimOip1R/pyjIFPk+pf4enSbv1y0GF09sE4ShGjNBg=="/>
             <description>
                 <![CDATA[
                     <style>ul{margin-top: 0;margin-bottom: 7;padding-left: 18;}</style>
@@ -228,7 +283,9 @@
             <sparkle:version>201</sparkle:version>
             <sparkle:shortVersionString>2.0.1</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>12.0</sparkle:minimumSystemVersion>
-            <enclosure url="https://github.com/X1a0He/Adobe-Downloader/releases/download/2.0.1/Adobe.Downloader.dmg" length="4275793" type="application/octet-stream" sparkle:edSignature="DhJ+gUR/OKLEhrssPnQOYL+mGI09ucr4RGX7U4DHZEBNPBKARzOX+zLDml3rwxmuExMSCIVa30qlzhH8zDPBDA=="/>
+            <enclosure url="https://github.com/X1a0He/Adobe-Downloader/releases/download/2.0.1/Adobe.Downloader.dmg"
+                       length="4275793" type="application/octet-stream"
+                       sparkle:edSignature="DhJ+gUR/OKLEhrssPnQOYL+mGI09ucr4RGX7U4DHZEBNPBKARzOX+zLDml3rwxmuExMSCIVa30qlzhH8zDPBDA=="/>
             <description>
                 <![CDATA[
                     <style>ul{margin-top: 0;margin-bottom: 7;padding-left: 18;}</style>
@@ -258,7 +315,9 @@
             <sparkle:version>200</sparkle:version>
             <sparkle:shortVersionString>2.0.0</sparkle:shortVersionString>
             <sparkle:minimumSystemVersion>12.0</sparkle:minimumSystemVersion>
-            <enclosure url="https://github.com/X1a0He/Adobe-Downloader/releases/download/2.0.0/Adobe.Downloader.dmg" length="4165730" type="application/octet-stream" sparkle:edSignature="CnJs75BRR6Id+9GMibJgFqj9bMox0LZasEMceHWXfPvIV5amPwJW6eRrSAGUSbE5LgNAmWObbshGphf5kozaBA=="/>
+            <enclosure url="https://github.com/X1a0He/Adobe-Downloader/releases/download/2.0.0/Adobe.Downloader.dmg"
+                       length="4165730" type="application/octet-stream"
+                       sparkle:edSignature="CnJs75BRR6Id+9GMibJgFqj9bMox0LZasEMceHWXfPvIV5amPwJW6eRrSAGUSbE5LgNAmWObbshGphf5kozaBA=="/>
             <description>
                 <![CDATA[
                     <style>ul{margin-top: 0;margin-bottom: 7;padding-left: 18;}</style>
