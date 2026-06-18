@@ -8,6 +8,7 @@ import CryptoKit
 import Security
 
 class SignatureValidator {
+    private static let hashBufferSize = 1024 * 1024
 
     static func sha256Hash(of fileURL: URL) throws -> String {
         let fileHandle = try FileHandle(forReadingFrom: fileURL)
@@ -55,6 +56,80 @@ class SignatureValidator {
         return digest.map { String(format: "%02x", $0) }.joined()
     }
 
+    static func md5Hash(of fileURL: URL) throws -> String {
+        let fileHandle = try FileHandle(forReadingFrom: fileURL)
+        defer { fileHandle.closeFile() }
+
+        var hasher = Insecure.MD5()
+        let bufferSize = 1024 * 1024
+
+        while autoreleasepool(invoking: {
+            let data = fileHandle.readData(ofLength: bufferSize)
+            if data.isEmpty { return false }
+            hasher.update(data: data)
+            return true
+        }) {}
+
+        let digest = hasher.finalize()
+        return digest.map { String(format: "%02x", $0) }.joined()
+    }
+
+    static func segmentHash(
+        fileHandle: FileHandle,
+        offset: Int64,
+        size: Int64,
+        algorithm: String,
+        expectedHash: String
+    ) throws -> (hash: String, bytesRead: Int64) {
+        let normalizedAlgorithm = algorithm.lowercased()
+
+        switch normalizedAlgorithm {
+        case "sha256", "sha-256", "type2":
+            var hasher = SHA256()
+            return try hashRange(fileHandle: fileHandle, offset: offset, size: size, hasher: &hasher)
+        case "sha1", "sha-1":
+            var hasher = Insecure.SHA1()
+            return try hashRange(fileHandle: fileHandle, offset: offset, size: size, hasher: &hasher)
+        case "md5", "type1":
+            var hasher = Insecure.MD5()
+            return try hashRange(fileHandle: fileHandle, offset: offset, size: size, hasher: &hasher)
+        default:
+            if expectedHash.count == 64 {
+                var hasher = SHA256()
+                return try hashRange(fileHandle: fileHandle, offset: offset, size: size, hasher: &hasher)
+            }
+            var hasher = Insecure.MD5()
+            return try hashRange(fileHandle: fileHandle, offset: offset, size: size, hasher: &hasher)
+        }
+    }
+
+    private static func hashRange<H: HashFunction>(
+        fileHandle: FileHandle,
+        offset: Int64,
+        size: Int64,
+        hasher: inout H
+    ) throws -> (hash: String, bytesRead: Int64) {
+        try fileHandle.seek(toOffset: UInt64(offset))
+
+        var remaining = size
+        var bytesRead: Int64 = 0
+
+        while autoreleasepool(invoking: { () -> Bool in
+            guard remaining > 0 else { return false }
+            let readLength = Int(min(Int64(hashBufferSize), remaining))
+            let data = fileHandle.readData(ofLength: readLength)
+            if data.isEmpty { return false }
+            hasher.update(data: data)
+            let count = Int64(data.count)
+            bytesRead += count
+            remaining -= count
+            return true
+        }) {}
+
+        let digest = hasher.finalize()
+        return (digest.map { String(format: "%02x", $0) }.joined(), bytesRead)
+    }
+
     static func validateFileHash(fileURL: URL, expectedHash: String, algorithm: String = "sha256") throws -> Bool {
         let computedHash: String
 
@@ -64,8 +139,7 @@ class SignatureValidator {
         case "sha1":
             computedHash = try sha1Hash(of: fileURL)
         case "md5":
-            let data = try Data(contentsOf: fileURL)
-            computedHash = md5Hash(of: data)
+            computedHash = try md5Hash(of: fileURL)
         default:
             computedHash = try sha256Hash(of: fileURL)
         }
@@ -89,34 +163,24 @@ class SignatureValidator {
                 ? validationInfo.lastSegmentSize
                 : validationInfo.segmentSize
 
-            fileHandle.seek(toFileOffset: UInt64(startOffset))
-            let segmentData = fileHandle.readData(ofLength: Int(segmentSize))
+            let result = try segmentHash(
+                fileHandle: fileHandle,
+                offset: startOffset,
+                size: segmentSize,
+                algorithm: validationInfo.algorithm,
+                expectedHash: segment.hash
+            )
 
-            guard segmentData.count == Int(segmentSize) else {
+            guard result.bytesRead == segmentSize else {
                 return segment.segmentNumber
             }
 
-            let hash = segmentHash(data: segmentData, algorithm: validationInfo.algorithm, expectedHash: segment.hash)
-            if hash.lowercased() != segment.hash.lowercased() {
+            if result.hash.lowercased() != segment.hash.lowercased() {
                 return segment.segmentNumber
             }
         }
 
         return nil
-    }
-
-    private static func segmentHash(data: Data, algorithm: String, expectedHash: String) -> String {
-        switch algorithm.lowercased() {
-        case "sha256", "sha-256", "type2":
-            return sha256Hash(of: data)
-        case "sha1", "sha-1":
-            let digest = Insecure.SHA1.hash(data: data)
-            return digest.map { String(format: "%02x", $0) }.joined()
-        case "md5", "type1":
-            return md5Hash(of: data)
-        default:
-            return expectedHash.count == 64 ? sha256Hash(of: data) : md5Hash(of: data)
-        }
     }
 
     static func verifyRSASignature(data: Data, signature: Data, publicKeyPEM: String) -> Bool {

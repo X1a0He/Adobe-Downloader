@@ -4,6 +4,7 @@
 //
 
 import Foundation
+import Darwin
 
 final class PDMAssetDownloadManager {
 
@@ -483,10 +484,12 @@ final class PDMAssetDownloadManager {
             }
 
             let readSize = min(Int(remaining), bufferSize)
-            let (result, bytesRead) = communicator.downloadRemainingData(
-                buffer: buffer,
-                bufferSize: readSize
-            )
+            let (result, bytesRead) = autoreleasepool {
+                communicator.downloadRemainingData(
+                    buffer: buffer,
+                    bufferSize: readSize
+                )
+            }
 
             if let responseError = validateDownloadResponse(
                 communicator: communicator,
@@ -503,7 +506,13 @@ final class PDMAssetDownloadManager {
             switch result {
             case .moreData:
                 if bytesRead > 0 {
-                    fileHandle.write(Data(bytes: buffer, count: bytesRead))
+                    do {
+                        try writeBuffer(buffer, count: bytesRead, to: fileHandle)
+                    } catch {
+                        aamd.updateSegmentData(segment: 0, bytesDownloaded: totalDownloaded)
+                        communicator.closeStream()
+                        return .error(PDMDownloadError.downloadFailed(error.localizedDescription))
+                    }
                     totalDownloaded += Int64(bytesRead)
                     remaining -= Int64(bytesRead)
                     await progressTracker.addDownloadedBytes(Int64(bytesRead))
@@ -518,7 +527,13 @@ final class PDMAssetDownloadManager {
 
             case .complete, .streamEnd:
                 if bytesRead > 0 {
-                    fileHandle.write(Data(bytes: buffer, count: bytesRead))
+                    do {
+                        try writeBuffer(buffer, count: bytesRead, to: fileHandle)
+                    } catch {
+                        aamd.updateSegmentData(segment: 0, bytesDownloaded: totalDownloaded)
+                        communicator.closeStream()
+                        return .error(PDMDownloadError.downloadFailed(error.localizedDescription))
+                    }
                     totalDownloaded += Int64(bytesRead)
                     remaining -= Int64(bytesRead)
                     await progressTracker.addDownloadedBytes(Int64(bytesRead))
@@ -607,15 +622,23 @@ final class PDMAssetDownloadManager {
                 return .cancelled
             }
 
-            let (result, bytesRead) = communicator.downloadRemainingData(
-                buffer: buffer,
-                bufferSize: bufferSize
-            )
+            let (result, bytesRead) = autoreleasepool {
+                communicator.downloadRemainingData(
+                    buffer: buffer,
+                    bufferSize: bufferSize
+                )
+            }
 
             switch result {
             case .moreData:
                 if bytesRead > 0 {
-                    fileHandle.write(Data(bytes: buffer, count: bytesRead))
+                    do {
+                        try writeBuffer(buffer, count: bytesRead, to: fileHandle)
+                    } catch {
+                        aamd.updateSegmentData(segment: 0, bytesDownloaded: totalDownloaded)
+                        communicator.closeStream()
+                        return .error(PDMDownloadError.downloadFailed(error.localizedDescription))
+                    }
                     totalDownloaded += Int64(bytesRead)
                     await progressTracker.addDownloadedBytes(Int64(bytesRead))
                     rangeAvailabilityHandler?(totalDownloaded, false)
@@ -629,7 +652,13 @@ final class PDMAssetDownloadManager {
 
             case .complete, .streamEnd:
                 if bytesRead > 0 {
-                    fileHandle.write(Data(bytes: buffer, count: bytesRead))
+                    do {
+                        try writeBuffer(buffer, count: bytesRead, to: fileHandle)
+                    } catch {
+                        aamd.updateSegmentData(segment: 0, bytesDownloaded: totalDownloaded)
+                        communicator.closeStream()
+                        return .error(PDMDownloadError.downloadFailed(error.localizedDescription))
+                    }
                     totalDownloaded += Int64(bytesRead)
                     await progressTracker.addDownloadedBytes(Int64(bytesRead))
                 }
@@ -830,10 +859,12 @@ final class PDMAssetDownloadManager {
                 return .cancelled
             }
 
-            let (result, bytesRead) = segmentComm.downloadRemainingData(
-                buffer: buffer,
-                bufferSize: bufferSize
-            )
+            let (result, bytesRead) = autoreleasepool {
+                segmentComm.downloadRemainingData(
+                    buffer: buffer,
+                    bufferSize: bufferSize
+                )
+            }
 
             if let responseError = validateDownloadResponse(
                 communicator: segmentComm,
@@ -850,7 +881,13 @@ final class PDMAssetDownloadManager {
             switch result {
             case .moreData:
                 if bytesRead > 0 {
-                    fileHandle.write(Data(bytes: buffer, count: bytesRead))
+                    do {
+                        try writeBuffer(buffer, count: bytesRead, to: fileHandle)
+                    } catch {
+                        aamd.updateSegmentData(segment: segmentIndex, bytesDownloaded: bytesDownloaded)
+                        segmentComm.closeStream()
+                        return .error(PDMDownloadError.downloadFailed(error.localizedDescription))
+                    }
                     bytesDownloaded += Int64(bytesRead)
                     bytesSinceLastAAMDUpdate += Int64(bytesRead)
                     if bytesDownloaded > segmentSize {
@@ -867,7 +904,13 @@ final class PDMAssetDownloadManager {
 
             case .complete, .streamEnd:
                 if bytesRead > 0 {
-                    fileHandle.write(Data(bytes: buffer, count: bytesRead))
+                    do {
+                        try writeBuffer(buffer, count: bytesRead, to: fileHandle)
+                    } catch {
+                        aamd.updateSegmentData(segment: segmentIndex, bytesDownloaded: bytesDownloaded)
+                        segmentComm.closeStream()
+                        return .error(PDMDownloadError.downloadFailed(error.localizedDescription))
+                    }
                     bytesDownloaded += Int64(bytesRead)
                     await progressTracker.addDownloadedBytes(Int64(bytesRead))
                 }
@@ -880,19 +923,11 @@ final class PDMAssetDownloadManager {
                 }
 
                 if !segment.expectedHash.isEmpty, let info = validationInfo {
-                    guard let readHandle = try? FileHandle(forReadingFrom: destinationURL) else {
-                        return .error(PDMDownloadError.downloadFailed("Cannot open file for hash validation"))
-                    }
-                    defer { try? readHandle.close() }
-
                     do {
-                        try readHandle.seek(toOffset: UInt64(segment.startByte))
-                        let segmentData = readHandle.readData(ofLength: Int(segmentSize))
-                        guard segmentData.count == Int(segmentSize) else {
-                            return .error(PDMDownloadError.downloadFailed("Cannot read full segment for validation"))
-                        }
-                        let valid = validationManager.validateSegment(
-                            data: segmentData,
+                        let valid = try validationManager.validateSegment(
+                            fileURL: destinationURL,
+                            startByte: segment.startByte,
+                            segmentSize: segmentSize,
                             expectedHash: segment.expectedHash,
                             algorithm: info.algorithm
                         )
@@ -959,6 +994,29 @@ final class PDMAssetDownloadManager {
         }
 
         return PDMDownloadError.downloadFailed("Unexpected HTTP status \(statusCode) for range \(expectedStart)-\(expectedEnd)")
+    }
+
+    private func writeBuffer(
+        _ buffer: UnsafeMutablePointer<UInt8>,
+        count: Int,
+        to fileHandle: FileHandle
+    ) throws {
+        var written = 0
+        let descriptor = fileHandle.fileDescriptor
+
+        while written < count {
+            let result = Darwin.write(descriptor, buffer.advanced(by: written), count - written)
+            if result > 0 {
+                written += result
+                continue
+            }
+
+            if result == -1 && errno == EINTR {
+                continue
+            }
+
+            throw PDMDownloadError.downloadFailed(String(cString: strerror(errno)))
+        }
     }
 
     private func contentRangeMatches(

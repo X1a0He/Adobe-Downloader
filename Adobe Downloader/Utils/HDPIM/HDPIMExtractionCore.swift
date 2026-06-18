@@ -1,5 +1,10 @@
 import Foundation
 
+enum HDPIMExtractionConcurrency {
+    static let maxConcurrentEntries = 3
+    static let entrySemaphore = DispatchSemaphore(value: maxConcurrentEntries)
+}
+
 struct HDPIMExtractionRequest {
     let sourceURL: URL
     let destinationURL: URL
@@ -230,6 +235,8 @@ final class HDPIMZipExtractor {
                         let session = try self.archiveExtractor.makeSession(zipURL: zipURL)
                         while let entry = try awaitNextEntry(from: workQueue) {
                             try self.archiveExtractor.throwIfCancelled(cancellationCheck)
+                            HDPIMExtractionConcurrency.entrySemaphore.wait()
+                            defer { HDPIMExtractionConcurrency.entrySemaphore.signal() }
                             let outputURL = destinationURL.appendingPathComponent(entry.normalizedPath, isDirectory: false)
                             let restored: Bool
                             do {

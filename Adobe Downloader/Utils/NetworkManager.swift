@@ -180,6 +180,7 @@ class NetworkManager: ObservableObject {
            await globalCancelTracker.cancel(taskId)
 
            if let task = downloadTasks.first(where: { $0.id == taskId }) {
+               globalNewDownloadUtils.stopActiveDownloads(for: task)
                if task.status.isActive {
                    task.setStatus(.failed(DownloadStatus.FailureInfo(
                        message: String(localized: "下载已取消"),

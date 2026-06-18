@@ -77,6 +77,29 @@ final class PDMValidationManager {
         return computedHash.lowercased() == expectedHash.lowercased()
     }
 
+    func validateSegment(
+        fileURL: URL,
+        startByte: Int64,
+        segmentSize: Int64,
+        expectedHash: String,
+        algorithm: String
+    ) throws -> Bool {
+        guard !expectedHash.isEmpty else { return true }
+
+        let fileHandle = try FileHandle(forReadingFrom: fileURL)
+        defer { try? fileHandle.close() }
+
+        let result = try SignatureValidator.segmentHash(
+            fileHandle: fileHandle,
+            offset: startByte,
+            size: segmentSize,
+            algorithm: algorithm,
+            expectedHash: expectedHash
+        )
+
+        return result.bytesRead == segmentSize && result.hash.lowercased() == expectedHash.lowercased()
+    }
+
     func validateFile(
         at fileURL: URL,
         validationInfo: ValidationInfo,
@@ -103,16 +126,19 @@ final class PDMValidationManager {
             }
 
             let offset = Int64(segmentIndex) * validationInfo.segmentSize
-            try fileHandle.seek(toOffset: UInt64(offset))
-            guard let segmentData = try fileHandle.read(upToCount: Int(segmentSize)) else {
+            let result = try SignatureValidator.segmentHash(
+                fileHandle: fileHandle,
+                offset: offset,
+                size: segmentSize,
+                algorithm: validationInfo.algorithm,
+                expectedHash: segment.hash
+            )
+
+            guard result.bytesRead == segmentSize else {
                 return false
             }
 
-            if !validateSegment(
-                data: segmentData,
-                expectedHash: segment.hash,
-                algorithm: validationInfo.algorithm
-            ) {
+            if result.hash.lowercased() != segment.hash.lowercased() {
                 throw PDMDownloadError.segmentValidationFailed(segmentIndex)
             }
         }

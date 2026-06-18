@@ -449,21 +449,22 @@ final class HDPIMMiniZipExtractor {
         var writtenSize: UInt64 = 0
         var crc: UInt32 = 0
 
-        while true {
+        while try autoreleasepool(invoking: { () -> Bool in
             try throwIfCancelled(cancellationCheck)
             let readBytes = unzReadCurrentFile(archive, &buffer, UInt32(bufferSize))
             if readBytes < 0 {
                 throw HDPIMMiniZipError.readFailed(path)
             }
             if readBytes == 0 {
-                break
+                return false
             }
             let data = Data(buffer.prefix(Int(readBytes)))
             try handle.write(contentsOf: data)
             writtenSize += UInt64(readBytes)
             crc = HDPIMCRC32(crc, data)
             chunkHandler?(Int(readBytes))
-        }
+            return true
+        }) {}
 
         let closeStatus = unzCloseCurrentFile(archive)
         shouldClose = false
@@ -536,17 +537,18 @@ final class HDPIMMiniZipExtractor {
         let bufferSize = 64 * 1024
         var buffer = [UInt8](repeating: 0, count: bufferSize)
 
-        while true {
+        while try autoreleasepool(invoking: { () -> Bool in
             try throwIfCancelled(cancellationCheck)
             let readBytes = unzReadCurrentFile(archive, &buffer, UInt32(bufferSize))
             if readBytes < 0 {
                 throw HDPIMMiniZipError.readFailed(path)
             }
             if readBytes == 0 {
-                break
+                return false
             }
             try decoder.processChunk(Data(buffer.prefix(Int(readBytes))))
-        }
+            return true
+        }) {}
 
         let decodedSize = try decoder.finish(withExpectedSize: outputSize, writingToPath: fullPath)
 
@@ -629,14 +631,14 @@ final class HDPIMMiniZipExtractor {
         var rawCRC: UInt32 = 0
         var decodedSize: UInt64 = 0
 
-        while true {
+        while try autoreleasepool(invoking: { () -> Bool in
             try throwIfCancelled(cancellationCheck)
             let readBytes = unzReadCurrentFile(archive, &buffer, UInt32(bufferSize))
             if readBytes < 0 {
                 throw HDPIMMiniZipError.readFailed(path)
             }
             if readBytes == 0 {
-                break
+                return false
             }
 
             let data = Data(buffer.prefix(Int(readBytes)))
@@ -660,7 +662,8 @@ final class HDPIMMiniZipExtractor {
                 try handle.write(contentsOf: output)
                 decodedSize += UInt64(output.count)
             }
-        }
+            return true
+        }) {}
 
         if let decoder {
             let output = try decoder.process(chunk: Data(), finish: true)
@@ -722,13 +725,14 @@ final class HDPIMMiniZipExtractor {
         }
 
         var crc: UInt32 = 0
-        while true {
+        while autoreleasepool(invoking: { () -> Bool in
             let data = handle.readData(ofLength: 1024 * 1024)
             if data.isEmpty {
-                break
+                return false
             }
             crc = HDPIMCRC32(crc, data)
-        }
+            return true
+        }) {}
         return crc
     }
 

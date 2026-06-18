@@ -525,6 +525,7 @@ final class PDMHttpCommunicator {
     }
 
     private func captureResponseMetadata() {
+        if statusCodeChecked { return }
         guard let stream = readStream,
               let responseMsg = CFReadStreamCopyProperty(
                   stream,
