@@ -441,6 +441,7 @@ struct InstallProgressView: View {
 
     @State private var selectedPanel: InstallProgressPanel
     @State private var lastOutcome: InstallProgressOutcome
+    @State private var scrollViewportHeight: CGFloat = 0
 
     init(
         data: InstallProgressViewData,
@@ -456,55 +457,75 @@ struct InstallProgressView: View {
     }
 
     var body: some View {
-        VStack(spacing: 18) {
-            InstallSummarySection(data: data)
+        VStack(spacing: 0) {
+            ScrollView {
+                VStack(spacing: 18) {
+                    InstallSummarySection(data: data)
 
-            InstallPhaseSection(data: data)
+                    InstallPhaseSection(data: data)
 
-            if let currentPackageName = data.currentPackageName,
-               data.shouldShowCurrentPackage,
-               !data.isCompleted {
-                CurrentPackageSection(packageName: currentPackageName, phase: data.phase, operation: data.operation)
-            }
-
-            VStack(spacing: 14) {
-                Picker("", selection: $selectedPanel) {
-                    ForEach(InstallProgressPanel.allCases, id: \.self) { panel in
-                        Text(panel.title(for: data.operation))
-                            .tag(panel)
+                    if let currentPackageName = data.currentPackageName,
+                       data.shouldShowCurrentPackage,
+                       !data.isCompleted {
+                        CurrentPackageSection(packageName: currentPackageName, phase: data.phase, operation: data.operation)
                     }
-                }
-                .pickerStyle(.segmented)
 
-                Group {
-                    switch selectedPanel {
-                    case .overview:
-                        InstallOverviewPanel(data: data)
-                    case .logs:
-                        InstallLogPanel(data: data)
+                    VStack(spacing: 14) {
+                        Picker("", selection: $selectedPanel) {
+                            ForEach(InstallProgressPanel.allCases, id: \.self) { panel in
+                                Text(panel.title(for: data.operation))
+                                    .tag(panel)
+                            }
+                        }
+                        .pickerStyle(.segmented)
+
+                        Group {
+                            switch selectedPanel {
+                            case .overview:
+                                InstallOverviewPanel(data: data)
+                            case .logs:
+                                InstallLogPanel(data: data)
+                            }
+                        }
+                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                        .padding(18)
+                        .background(
+                            RoundedRectangle(cornerRadius: 12)
+                                .fill(Color(NSColor.controlBackgroundColor).opacity(0.75))
+                        )
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 12)
+                                .strokeBorder(Color.secondary.opacity(0.12), lineWidth: 1)
+                        )
                     }
+                    .frame(maxWidth: .infinity, minHeight: 220, maxHeight: .infinity, alignment: .topLeading)
                 }
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-                .padding(18)
-                .background(
-                    RoundedRectangle(cornerRadius: 12)
-                        .fill(Color(NSColor.controlBackgroundColor).opacity(0.75))
-                )
-                .overlay(
-                    RoundedRectangle(cornerRadius: 12)
-                        .strokeBorder(Color.secondary.opacity(0.12), lineWidth: 1)
-                )
+                .padding(.horizontal, 24)
+                .padding(.top, 24)
+                .padding(.bottom, 18)
+                .frame(maxWidth: .infinity, minHeight: scrollViewportHeight, alignment: .top)
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            .background(
+                GeometryReader { proxy in
+                    Color.clear
+                        .onAppear { scrollViewportHeight = proxy.size.height }
+                        .onChange(of: proxy.size.height) { newValue in
+                            scrollViewportHeight = newValue
+                        }
+                }
+            )
+
+            Divider()
 
             InstallActionSection(
                 data: data,
                 onCancel: onCancel,
                 onRetry: onRetry
             )
+            .padding(.horizontal, 24)
+            .padding(.vertical, 16)
         }
-        .padding(24)
-        .frame(minWidth: 760, minHeight: 420)
+        .frame(minWidth: 760, minHeight: 600)
         .background(Color(NSColor.windowBackgroundColor))
         .onChange(of: data.outcome) { newValue in
             guard newValue != lastOutcome else {
