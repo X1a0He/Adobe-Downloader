@@ -195,6 +195,7 @@ struct InstallProgressViewData {
     let phase: InstallProgressPhase
     let outcome: InstallProgressOutcome
     let operation: InstallProgressOperation
+    let isUserCancelled: Bool
     let currentPackageName: String?
     private let contextStatus: String
 
@@ -208,7 +209,8 @@ struct InstallProgressViewData {
         phase: InstallProgressPhase,
         outcome: InstallProgressOutcome,
         operation: InstallProgressOperation = .install,
-        contextStatus: String? = nil
+        contextStatus: String? = nil,
+        isUserCancelled: Bool = false
     ) {
         self.productName = productName
         self.progress = progress
@@ -219,6 +221,7 @@ struct InstallProgressViewData {
         self.phase = phase
         self.outcome = outcome
         self.operation = operation
+        self.isUserCancelled = isUserCancelled
         self.contextStatus = contextStatus ?? status
         self.currentPackageName = InstallProgressTextParser.currentPackageName(from: self.contextStatus, logs: logs)
     }
@@ -267,6 +270,9 @@ struct InstallProgressViewData {
                 return String(format: String(localized: "%@ 卸载完成"), productName)
             }
         case .failed:
+            if isUserCancelled {
+                return String(format: String(localized: "%@ 已取消"), productName)
+            }
             switch operation {
             case .install:
                 return String(format: String(localized: "%@ 安装失败"), productName)
@@ -310,7 +316,7 @@ struct InstallProgressViewData {
         case .completed:
             return operation.completedBadge
         case .failed:
-            return operation.failedBadge
+            return isUserCancelled ? String(localized: "已取消") : operation.failedBadge
         case .running:
             return "\(Int(normalizedProgress * 100))%"
         }

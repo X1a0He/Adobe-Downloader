@@ -1568,6 +1568,8 @@ struct VersionInfo: View {
     let hasExistingPath: Bool
     let hasDownloadedPackage: Bool
 
+    @State private var didCopyBuildGuid = false
+
     private var productVersion: String {
         info.languageSet.first?.productVersion ?? ""
     }
@@ -1623,8 +1625,25 @@ struct VersionInfo: View {
                         .textSelection(.enabled)
                         .lineLimit(1)
                         .truncationMode(.middle)
+
+                    Button(action: { copyBuildGuid(guid) }) {
+                        Image(systemName: didCopyBuildGuid ? "checkmark" : "doc.on.doc")
+                            .font(.system(size: 10))
+                            .foregroundColor(.white)
+                    }
+                    .buttonStyle(GlassButtonStyle(tint: didCopyBuildGuid ? .green : .blue))
+                    .help(String(localized: "复制 buildGuid"))
                 }
             }
+        }
+    }
+
+    private func copyBuildGuid(_ guid: String) {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(guid, forType: .string)
+        withAnimation { didCopyBuildGuid = true }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+            withAnimation { didCopyBuildGuid = false }
         }
     }
 }

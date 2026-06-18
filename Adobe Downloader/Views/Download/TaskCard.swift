@@ -123,8 +123,9 @@ struct TaskCard: View {
                 onCancel: {
                     if case .running = installViewData.outcome {
                         globalNetworkManager.cancelInstallation()
+                    } else {
+                        isInstalling = false
                     }
-                    isInstalling = false
                 },
                 onRetry: {
                     Task {

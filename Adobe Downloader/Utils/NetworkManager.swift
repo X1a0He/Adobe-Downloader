@@ -25,6 +25,7 @@ class NetworkManager: ObservableObject {
 	private var lastInstallationProgress = 0.0
 	private var lastInstallationStatus = "准备安装..."
 	private var lastInstallationPhase: InstallProgressPhase = .preparing
+	private var installationCancelledByUser = false
 	private var installationSessionID = UUID()
 	private var lastUninstallProgress = 0.0
 	private var lastUninstallStatus = String(localized: "准备卸载...")
@@ -267,6 +268,7 @@ class NetworkManager: ObservableObject {
         let sessionID = UUID()
         await MainActor.run {
             installationSessionID = sessionID
+            installationCancelledByUser = false
             installationState = .installing(progress: 0, status: "准备安装...")
             installLogs = []
             installCommand = ""
@@ -333,6 +335,7 @@ class NetworkManager: ObservableObject {
     }
 
     func cancelInstallation() {
+        installationCancelledByUser = true
         Task {
             await installManager.cancel()
         }
@@ -349,12 +352,14 @@ class NetworkManager: ObservableObject {
         lastInstallationProgress = 0
         lastInstallationStatus = "准备安装..."
         lastInstallationPhase = .preparing
+        installationCancelledByUser = false
     }
 
     func retryInstallation(at path: URL) async {
         let sessionID = UUID()
         await MainActor.run {
             installationSessionID = sessionID
+            installationCancelledByUser = false
             installationState = .installing(progress: 0, status: "正在重试安装...")
             installLogs = []
             installCommand = ""
@@ -448,16 +453,18 @@ class NetworkManager: ObservableObject {
             )
         case .failed(let error, let errorDetails):
             let fallbackStatus = lastInstallationStatus
+            let cancelledByUser = installationCancelledByUser
             return InstallProgressViewData(
                 productName: productName,
                 progress: lastInstallationProgress,
-                status: normalizedInstallFailureStatus(from: error),
+                status: cancelledByUser ? String(localized: "安装已取消") : normalizedInstallFailureStatus(from: error),
                 logs: installLogs,
                 installCommand: installCommand,
-                errorDetails: errorDetails,
+                errorDetails: cancelledByUser ? nil : errorDetails,
                 phase: lastInstallationPhase,
                 outcome: .failed,
-                contextStatus: fallbackStatus
+                contextStatus: fallbackStatus,
+                isUserCancelled: cancelledByUser
             )
         }
 	}
