@@ -461,12 +461,22 @@ class HDPIMInstallPipeline {
                 try HDPIMDatabase.shared.recordInstalledProducts(productContexts)
             }
 
+            progressHandler(0.93, "正在注册卸载条目...")
+            HDPIMARPCompletion.createARPEntries(
+                for: productContexts,
+                progressHandler: progressHandler,
+                logHandler: logHandler
+            )
+
             progressHandler(0.95, "正在清理临时文件...")
             do {
                 try await backup.cleanup()
             } catch {
                 log("[HDPIM Pipeline] 清理备份目录失败: \(error.localizedDescription)")
             }
+
+            progressHandler(0.98, "正在修正文件权限...")
+            HDPIMUserOwnershipFixer.restoreUserOwnership(logHandler: logHandler)
 
             progressHandler(1.0, "安装完成")
 
@@ -1246,6 +1256,14 @@ class HDPIMInstallPipeline {
                 dependencies = []
             }
 
+            let installLanguageValue = makeInstallLanguage(
+                from: group.applicationInfo,
+                requestedLanguage: installLanguage
+            )
+            let uninstallDisplayName = group.applicationInfo.localizedUninstallDisplayName(
+                installLanguage: installLanguageValue
+            ) ?? productName
+
             return HDPIMNativeProductContext(
                 sapCode: group.sapCode,
                 codexVersion: group.version,
@@ -1257,11 +1275,9 @@ class HDPIMInstallPipeline {
                     group.version
                 ]) ?? group.version,
                 baseVersion: group.applicationInfo.baseVersion,
-                installLanguage: makeInstallLanguage(
-                    from: group.applicationInfo,
-                    requestedLanguage: installLanguage
-                ),
+                installLanguage: installLanguageValue,
                 productName: productName,
+                uninstallDisplayName: uninstallDisplayName,
                 amtConfigLEID: firstNonEmptyString([
                     group.applicationInfo.amtConfig["AMTConfig.LEID"],
                     group.applicationInfo.amtConfig["LEID"]

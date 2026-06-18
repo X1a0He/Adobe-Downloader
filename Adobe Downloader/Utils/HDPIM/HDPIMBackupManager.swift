@@ -14,7 +14,7 @@ class HDPIMBackupManager {
 
     init() {
         self.sessionId = UUID().uuidString
-        let appSupport = URL(fileURLWithPath: NSHomeDirectory(), isDirectory: true)
+        let appSupport = URL(fileURLWithPath: HDPIMRuntimeEnvironment.userHomeDirectory(), isDirectory: true)
             .appendingPathComponent("Library/Application Support", isDirectory: true)
         self.backupRoot = appSupport
             .appendingPathComponent("Adobe Downloader")

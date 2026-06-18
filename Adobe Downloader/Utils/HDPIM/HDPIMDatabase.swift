@@ -178,6 +178,7 @@ struct HDPIMNativeProductContext {
     let baseVersion: String
     let installLanguage: String
     let productName: String
+    let uninstallDisplayName: String
     let amtConfigLEID: String?
     let amtConfigAppID: String?
     let amtConfigPath: String?

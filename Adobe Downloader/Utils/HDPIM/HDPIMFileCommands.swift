@@ -67,10 +67,10 @@ private func isProtectedRecursiveDeleteRoot(_ path: String) -> Bool {
         "/Library/Application Support",
         "/Library/Application Support/Adobe",
         "/Applications",
-        NSHomeDirectory(),
-        NSHomeDirectory() + "/Library",
-        NSHomeDirectory() + "/Library/Application Support",
-        NSHomeDirectory() + "/Library/Preferences"
+        HDPIMRuntimeEnvironment.userHomeDirectory(),
+        HDPIMRuntimeEnvironment.userHomeDirectory() + "/Library",
+        HDPIMRuntimeEnvironment.userHomeDirectory() + "/Library/Application Support",
+        HDPIMRuntimeEnvironment.userHomeDirectory() + "/Library/Preferences"
     ].contains(normalizedPath)
 }
 
@@ -148,8 +148,8 @@ private func isUserPreferencesPath(pimxPath: String, actualPath: String) -> Bool
     let normalizedActual = actualPath.trimmingCharacters(in: .whitespacesAndNewlines)
     return normalizedPimx.hasPrefix("[userpreferences]/")
         || normalizedPimx.hasPrefix("[usercommon]/")
-        || normalizedActual.hasPrefix(NSHomeDirectory() + "/Library/Preferences/")
-        || normalizedActual.hasPrefix(NSHomeDirectory() + "/Library/Application Support/")
+        || normalizedActual.hasPrefix(HDPIMRuntimeEnvironment.userHomeDirectory() + "/Library/Preferences/")
+        || normalizedActual.hasPrefix(HDPIMRuntimeEnvironment.userHomeDirectory() + "/Library/Application Support/")
 }
 
 private func makeDeleteEntry(

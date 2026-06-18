@@ -164,6 +164,9 @@
         }
       }
     },
+    "%@ 已取消" : {
+
+    },
     "%@ 执行失败" : {
       "extractionState" : "stale",
       "localizations" : {
@@ -2462,6 +2465,7 @@
       }
     },
     "命令已复制到剪贴板" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -4760,6 +4764,7 @@
       }
     },
     "查看命令" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {

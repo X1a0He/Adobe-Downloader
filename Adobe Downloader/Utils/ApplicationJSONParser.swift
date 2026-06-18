@@ -68,6 +68,46 @@ struct ApplicationInfo {
     func getPackagesByType(_ type: String) -> [ParsedPackage] {
         packages.filter { $0.type.lowercased() == type.lowercased() }
     }
+
+    func localizedUninstallDisplayName(installLanguage: String) -> String? {
+        guard let data = rawJSON.data(using: .utf8),
+              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return nil
+        }
+
+        let token = installLanguage
+            .split(separator: ",")
+            .first
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) } ?? installLanguage
+
+        let node = ApplicationJSONParser.getNestedValue(json, path: "AddRemoveInfo.DisplayName.Language")
+
+        if let entries = node as? [[String: Any]] {
+            for wanted in [token, "en_US"] {
+                for entry in entries where entry["locale"] as? String == wanted {
+                    if let value = (entry["value"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines),
+                       !value.isEmpty {
+                        return value
+                    }
+                }
+            }
+
+            for entry in entries {
+                if let value = (entry["value"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines),
+                   !value.isEmpty {
+                    return value
+                }
+            }
+
+            return nil
+        }
+
+        if let direct = (node as? String)?.trimmingCharacters(in: .whitespacesAndNewlines), !direct.isEmpty {
+            return direct
+        }
+
+        return nil
+    }
 }
 
 struct ParsedPackage: Codable, Equatable {

@@ -71,14 +71,7 @@ private struct HDPIMUninstallCompletionSnapshot {
 	let repairPIMXPaths: Set<String>
 
 	var appGuid: String {
-		let trimmedBuildGuid = buildGuid.trimmingCharacters(in: .whitespacesAndNewlines)
-		if !trimmedBuildGuid.isEmpty {
-			return trimmedBuildGuid
-		}
-
-		let normalizedVersion = version.replacingOccurrences(of: ".", with: "_")
-		let suffix = processorFamily == .arm64Bit ? "arm64" : "32"
-		return "\(sapCode)_\(normalizedVersion)_\(suffix)"
+		HDPIMARPNaming.appGuid(sapCode: sapCode, version: version)
 	}
 
 	var uninstallAppPath: String {
