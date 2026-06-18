@@ -1037,10 +1037,6 @@ private struct InstallActionSection: View {
                 .buttonStyle(BeautifulButtonStyle(baseColor: .blue))
                 .disabled(data.logs.isEmpty)
 
-                if !data.installCommand.isEmpty {
-                    CommandPopover(command: data.installCommand, operation: data.operation)
-                }
-
                 if let onRetry = onRetry {
                     Button(action: onRetry) {
                         Label("重试", systemImage: "arrow.clockwise")
@@ -1106,78 +1102,6 @@ private struct InstallActionSection: View {
         copiedMessage = message
         DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
             copiedMessage = nil
-        }
-    }
-}
-
-private struct CommandPopover: View {
-    let command: String
-    let operation: InstallProgressOperation
-
-    @State private var showPopover = false
-    @State private var showCopiedAlert = false
-
-    var body: some View {
-        Button(action: { showPopover.toggle() }) {
-            Label("查看命令", systemImage: "terminal.fill")
-                .font(.system(size: 13, weight: .medium))
-                .foregroundColor(.white)
-        }
-        .buttonStyle(BeautifulButtonStyle(baseColor: .blue))
-        .popover(isPresented: $showPopover, arrowEdge: .bottom) {
-            VStack(alignment: .leading, spacing: 12) {
-                HStack {
-                    Text(operation.commandTitle)
-                        .font(.headline)
-                        .foregroundColor(.primary)
-
-                    Spacer()
-
-                    Button(action: {
-                        copyText(command)
-                        showCopiedAlert = true
-
-                        DispatchQueue.main.asyncAfter(deadline: .now() + 2) {
-                            showCopiedAlert = false
-                        }
-                    }) {
-                        Label("复制", systemImage: "doc.on.doc")
-                            .font(.system(size: 12, weight: .medium))
-                            .foregroundColor(.white)
-                    }
-                    .buttonStyle(BeautifulButtonStyle(baseColor: .blue))
-                }
-
-                if showCopiedAlert {
-                    HStack(spacing: 6) {
-                        Image(systemName: "checkmark.circle.fill")
-                            .foregroundColor(.green)
-                        Text("命令已复制到剪贴板")
-                            .font(.system(size: 12))
-                            .foregroundColor(.green)
-                    }
-                    .padding(6)
-                    .background(Color.green.opacity(0.1))
-                    .cornerRadius(4)
-                }
-
-                Text(command)
-                    .font(.system(size: 12, design: .monospaced))
-                    .foregroundColor(.primary.opacity(0.82))
-                    .textSelection(.enabled)
-                    .padding(12)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .background(
-                        RoundedRectangle(cornerRadius: 8)
-                            .fill(Color(NSColor.textBackgroundColor))
-                    )
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 8)
-                            .strokeBorder(Color.secondary.opacity(0.2), lineWidth: 1)
-                    )
-            }
-            .padding(16)
-            .frame(width: 450)
         }
     }
 }

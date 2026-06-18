@@ -122,7 +122,7 @@ static NSString *HDPIMLZMAResultMessage(SRes result, ELzmaStatus status) {
             &outputSize,
             input,
             &inputSize,
-            finish ? LZMA_FINISH_END : LZMA_FINISH_ANY,
+            LZMA_FINISH_ANY,
             &status
         );
 
