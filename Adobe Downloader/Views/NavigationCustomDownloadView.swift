@@ -13,6 +13,85 @@ class CustomDownloadLoadingState: ObservableObject {
     @Published var error: String?
 }
 
+private struct DownloadedPackageScanItem: Sendable {
+    let id: UUID
+    let sapCode: String
+    let fullPackageName: String
+    let downloadSize: Int64
+}
+
+private enum CustomDownloadPackageInfoLoader {
+    static func fetch(
+        productId: String,
+        version: String,
+        useDelta: Bool,
+        requestedLanguage: String,
+        progressHandler: @escaping (String) -> Void
+    ) async throws -> ([Package], [DependenciesToDownload]) {
+        guard let product = findProduct(id: productId, version: version) else {
+            throw NetworkError.invalidData("找不到产品信息")
+        }
+
+        if isManifestInstallerProduct(productId) {
+            return makeInstallerPackageInfo(
+                productId: productId,
+                version: version,
+                requestedLanguage: requestedLanguage,
+                product: product
+            )
+        }
+
+        let decision = try await HDPIMParityDecisionEngine.shared.resolveDownloadDecision(
+            productId: product.id,
+            version: version,
+            requestedLanguage: requestedLanguage,
+            progressHandler: progressHandler
+        )
+
+        return HDPIMParityDecisionEngine.shared.makeDownloadPresentation(from: decision, useDelta: useDelta)
+    }
+
+    private static func makeInstallerPackageInfo(
+        productId: String,
+        version: String,
+        requestedLanguage: String,
+        product: Product
+    ) -> ([Package], [DependenciesToDownload]) {
+        guard let match = installerPlatformMatch(product: product, selectedVersion: version) else {
+            return ([], [])
+        }
+
+        let platform = match.platform
+        let languageSet = match.languageSet
+        let productVersion = installerProductVersion(product: product, languageSet: languageSet, selectedVersion: version)
+        let package = Package(
+            type: "dmg",
+            fullPackageName: installerOutputName(
+                productId: productId,
+                version: version,
+                language: requestedLanguage,
+                platform: platform.id
+            ),
+            downloadSize: Int64(max(languageSet.installSize, 0)),
+            downloadURL: languageSet.lbsURL,
+            manifestURL: languageSet.manifestURL,
+            packageVersion: productVersion
+        )
+        package.isSelected = true
+        package.isRequired = true
+        package.isDefaultSelected = true
+
+        let dependency = DependenciesToDownload(
+            sapCode: productId,
+            version: version,
+            buildGuid: languageSet.buildGuid,
+            platform: platform.id
+        )
+        dependency.packages = [package]
+        return ([package], [dependency])
+    }
+}
+
 struct NavigationCustomDownloadView: View {
     @StateObject private var loadingState = CustomDownloadLoadingState()
     @State private var allPackages: [Package] = []
@@ -135,60 +214,16 @@ struct NavigationCustomDownloadView: View {
     }
 
     private func fetchPackageInfo() async throws -> ([Package], [DependenciesToDownload]) {
-        guard let product = findProduct(id: productId, version: version) else {
-            throw NetworkError.invalidData("找不到产品信息")
-        }
-
-        if isManifestInstallerProduct(productId) {
-            return makeInstallerPackageInfo(product: product)
-        }
-
-        let decision = try await HDPIMParityDecisionEngine.shared.resolveDownloadDecision(
-            productId: product.id,
+        try await CustomDownloadPackageInfoLoader.fetch(
+            productId: productId,
             version: version,
+            useDelta: useDelta,
             requestedLanguage: StorageData.shared.defaultLanguage
         ) { message in
             Task { @MainActor in
                 loadingState.currentTask = message
             }
         }
-
-        return HDPIMParityDecisionEngine.shared.makeDownloadPresentation(from: decision, useDelta: useDelta)
-    }
-
-    private func makeInstallerPackageInfo(product: Product) -> ([Package], [DependenciesToDownload]) {
-        guard let match = installerPlatformMatch(product: product, selectedVersion: version) else {
-            return ([], [])
-        }
-
-        let platform = match.platform
-        let languageSet = match.languageSet
-        let productVersion = installerProductVersion(product: product, languageSet: languageSet, selectedVersion: version)
-        let package = Package(
-            type: "dmg",
-            fullPackageName: installerOutputName(
-                productId: productId,
-                version: version,
-                language: StorageData.shared.defaultLanguage,
-                platform: platform.id
-            ),
-            downloadSize: Int64(max(languageSet.installSize, 0)),
-            downloadURL: languageSet.lbsURL,
-            manifestURL: languageSet.manifestURL,
-            packageVersion: productVersion
-        )
-        package.isSelected = true
-        package.isRequired = true
-        package.isDefaultSelected = true
-
-        let dependency = DependenciesToDownload(
-            sapCode: productId,
-            version: version,
-            buildGuid: languageSet.buildGuid,
-            platform: platform.id
-        )
-        dependency.packages = [package]
-        return ([package], [dependency])
     }
 
     private func createCompletedCustomTask(path: URL, dependencies: [DependenciesToDownload]) async {
@@ -831,7 +866,9 @@ private struct NavigationCustomPackageSelectorView: View {
     @State private var searchText: String = ""
     @State private var activeFilters: Set<CustomPackageFilter> = []
     @State private var collapsedDependencies: Set<String> = []
+    @State private var didInitializeSelection = false
     @State private var didInitializeCollapse = false
+    @State private var downloadedScanTask: Task<Void, Never>?
     @State private var copyToastTask: Task<Void, Never>?
 
     let productId: String
@@ -862,6 +899,7 @@ private struct NavigationCustomPackageSelectorView: View {
             )
 
             let grouped = filteredDependencies
+            let selectedStats = selectedStatsByDependency
 
             if grouped.isEmpty {
                 CustomPackageEmptyView(
@@ -885,6 +923,8 @@ private struct NavigationCustomPackageSelectorView: View {
                                 selectedPackages: $selectedPackages,
                                 requiredPackages: requiredPackages,
                                 downloadedPackages: downloadedPackages,
+                                selectedCount: selectedStats[entry.dependency.sapCode]?.count ?? 0,
+                                selectedSize: selectedStats[entry.dependency.sapCode]?.size ?? 0,
                                 isForceExpanded: shouldForceExpand,
                                 isCollapsed: collapsedDependencies.contains(entry.dependency.sapCode),
                                 onToggleCollapse: { sapCode in
@@ -927,9 +967,13 @@ private struct NavigationCustomPackageSelectorView: View {
         )
         .navigationTitle("自定义下载")
         .onAppear {
-            initializeSelection()
-            initializeDownloadedPackages()
+            initializeSelectionIfNeeded()
+            scanDownloadedPackagesIfNeeded()
             initializeCollapseIfNeeded()
+        }
+        .onDisappear {
+            downloadedScanTask?.cancel()
+            downloadedScanTask = nil
         }
         .overlay(alignment: .top) {
             if showCopiedAlert {
@@ -1007,15 +1051,37 @@ private struct NavigationCustomPackageSelectorView: View {
         selectedDownloadPackageIds.count
     }
 
+    private var selectedStatsByDependency: [String: (count: Int, size: Int64)] {
+        var result: [String: (count: Int, size: Int64)] = [:]
+        let selectedIds = selectedDownloadPackageIds
+        for dependency in dependenciesToDownload {
+            var count = 0
+            var size: Int64 = 0
+            for package in dependency.packages where selectedIds.contains(package.id) {
+                count += 1
+                size += package.downloadSize
+            }
+            result[dependency.sapCode] = (count, size)
+        }
+        return result
+    }
+
+    private var packageById: [UUID: Package] {
+        Dictionary(uniqueKeysWithValues: packages.map { ($0.id, $0) })
+    }
+
     private var formattedTotalSize: String {
+        let lookup = packageById
         let totalSize = selectedDownloadPackageIds.compactMap { id in
-            packages.first { $0.id == id }?.downloadSize
+            lookup[id]?.downloadSize
         }.reduce(0, +)
 
         return ByteCountFormatter.string(fromByteCount: totalSize, countStyle: .file)
     }
 
-    private func initializeSelection() {
+    private func initializeSelectionIfNeeded() {
+        guard !didInitializeSelection else { return }
+        didInitializeSelection = true
         selectedPackages.removeAll()
         requiredPackages.removeAll()
         downloadedPackages.removeAll()
@@ -1033,24 +1099,43 @@ private struct NavigationCustomPackageSelectorView: View {
         }
     }
 
-    private func initializeDownloadedPackages() {
+    private func scanDownloadedPackagesIfNeeded() {
+        guard downloadedScanTask == nil else { return }
         guard let existingDirectory = existingDownloadDirectory() else { return }
+        let isInstallerProduct = isManifestInstallerProduct(productId)
+        let scanItems = dependenciesToDownload.flatMap { dependency in
+            dependency.packages.map { package in
+                DownloadedPackageScanItem(
+                    id: package.id,
+                    sapCode: dependency.sapCode,
+                    fullPackageName: package.fullPackageName,
+                    downloadSize: package.downloadSize
+                )
+            }
+        }
 
-        for dependency in dependenciesToDownload {
-            for package in dependency.packages {
-                guard isDownloadedPackage(package, in: dependency, existingDirectory: existingDirectory) else {
-                    continue
+        downloadedScanTask = Task {
+            let downloadedIds = await Task.detached(priority: .utility) {
+                var ids = Set<UUID>()
+
+                for item in scanItems {
+                    guard !Task.isCancelled else { return ids }
+                    guard Self.isDownloadedPackage(
+                        item,
+                        existingDirectory: existingDirectory,
+                        isInstallerProduct: isInstallerProduct
+                    ) else {
+                        continue
+                    }
+                    ids.insert(item.id)
                 }
 
-                downloadedPackages.insert(package.id)
-                selectedPackages.insert(package.id)
-                package.isSelected = true
-                package.downloaded = true
-                package.status = .completed
-                package.downloadedSize = package.downloadSize
-                package.progress = 1
-                package.speed = 0
-            }
+                return ids
+            }.value
+
+            guard !Task.isCancelled else { return }
+            applyDownloadedPackages(downloadedIds)
+            downloadedScanTask = nil
         }
     }
 
@@ -1089,27 +1174,44 @@ private struct NavigationCustomPackageSelectorView: View {
         return FileManager.default.fileExists(atPath: directory.path) ? directory : nil
     }
 
-    private func isDownloadedPackage(
-        _ package: Package,
-        in dependency: DependenciesToDownload,
-        existingDirectory: URL
+    private static func isDownloadedPackage(
+        _ item: DownloadedPackageScanItem,
+        existingDirectory: URL,
+        isInstallerProduct: Bool
     ) -> Bool {
-        let packageURL = isManifestInstallerProduct(productId)
+        let packageURL = isInstallerProduct
             ? existingDirectory
             : existingDirectory
-                .appendingPathComponent(dependency.sapCode)
-                .appendingPathComponent(package.fullPackageName)
+                .appendingPathComponent(item.sapCode)
+                .appendingPathComponent(item.fullPackageName)
 
         guard FileManager.default.fileExists(atPath: packageURL.path) else {
             return false
         }
 
-        guard package.downloadSize > 0 else {
+        guard item.downloadSize > 0 else {
             return true
         }
 
         let actualSize = ((try? FileManager.default.attributesOfItem(atPath: packageURL.path)[.size]) as? NSNumber)?.int64Value ?? 0
-        return actualSize == package.downloadSize
+        return actualSize == item.downloadSize
+    }
+
+    private func applyDownloadedPackages(_ ids: Set<UUID>) {
+        guard !ids.isEmpty else { return }
+        downloadedPackages.formUnion(ids)
+        selectedPackages.formUnion(ids)
+
+        for dependency in dependenciesToDownload {
+            for package in dependency.packages where ids.contains(package.id) {
+                package.isSelected = true
+                package.downloaded = true
+                package.status = .completed
+                package.downloadedSize = package.downloadSize
+                package.progress = 1
+                package.speed = 0
+            }
+        }
     }
 
     private func initializeCollapseIfNeeded() {
@@ -1225,6 +1327,8 @@ private struct DependencySection: View {
     @Binding var selectedPackages: Set<UUID>
     let requiredPackages: Set<UUID>
     let downloadedPackages: Set<UUID>
+    let selectedCount: Int
+    let selectedSize: Int64
     let isForceExpanded: Bool
     let isCollapsed: Bool
     let onToggleCollapse: (String) -> Void
@@ -1240,20 +1344,8 @@ private struct DependencySection: View {
         dependency.sapCode == productId
     }
 
-    private var selectedCountInGroup: Int {
-        dependency.packages.filter {
-            selectedPackages.contains($0.id) && !downloadedPackages.contains($0.id)
-        }.count
-    }
-
-    private var totalSizeInGroup: Int64 {
-        dependency.packages
-            .filter { selectedPackages.contains($0.id) && !downloadedPackages.contains($0.id) }
-            .reduce(Int64(0)) { $0 + $1.downloadSize }
-    }
-
     private var groupSizeText: String {
-        ByteCountFormatter.string(fromByteCount: totalSizeInGroup, countStyle: .file)
+        ByteCountFormatter.string(fromByteCount: selectedSize, countStyle: .file)
     }
 
     var body: some View {
@@ -1362,7 +1454,7 @@ private struct DependencySection: View {
 
             Spacer(minLength: 8)
 
-            Text("\(selectedCountInGroup) / \(dependency.packages.count)")
+            Text("\(selectedCount) / \(dependency.packages.count)")
                 .font(.system(size: 11, weight: .medium))
                 .foregroundColor(.secondary.opacity(0.85))
                 .monospacedDigit()
