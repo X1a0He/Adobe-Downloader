@@ -1,7 +1,7 @@
 import Foundation
 
 enum DeltaSelection {
-    case delta(DeltaPackageInfo, URL)
+    case delta(DeltaPackageInfo)
     case fullPackage
     case skip
 }
@@ -44,16 +44,7 @@ final class HDPIMDeltaSelector {
             return .fullPackage
         }
 
-        do {
-            let diffJsonURL = try await fetchAndValidateDiffJson(
-                metadataPath: matching.metadataFilePath,
-                sapCode: sapCode
-            )
-            return .delta(matching, diffJsonURL)
-        } catch {
-            print("[DeltaSelector] diffJsonDownloadFailure: \(error.localizedDescription)")
-            return .fullPackage
-        }
+        return .delta(matching)
     }
 
     func markDeltaFailed(sapCode: String, codexVersion: String, processorFamily: HDPIMProcessorFamily, failedVersion: String) {

@@ -157,7 +157,7 @@ struct DownloadManagerView: View {
         let tasks = networkManager.downloadTasks
         switch sortOrder {
         case .addTime:
-            return tasks
+            return tasks.sorted { $0.createAt > $1.createAt }
         case .name:
             return tasks.sorted { $0.displayName < $1.displayName }
         case .status:

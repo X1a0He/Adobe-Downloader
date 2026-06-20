@@ -6,6 +6,7 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include <zlib.h>
+#include <bzlib.h>
 
 static NSError *HDPIMMakeLZMAError(NSString *message) {
     return [NSError errorWithDomain:@"HDPIMLZMA2"
@@ -187,6 +188,58 @@ NSData *HDPIMLZMA2Decompress(NSData *input, NSError **error) {
                                         length:input.length - 1
                                   freeWhenDone:NO];
     return [decoder processChunk:body finish:YES error:error];
+}
+
+static NSError *HDPIMMakeBZ2Error(NSString *message) {
+    return [NSError errorWithDomain:@"HDPIMBZ2"
+                               code:1
+                           userInfo:@{NSLocalizedDescriptionKey: message}];
+}
+
+NSData *HDPIMBZ2Decompress(NSData *input, NSError **error) {
+    if (input.length == 0) {
+        if (error) {
+            *error = HDPIMMakeBZ2Error(@"bzip2 输入数据为空");
+        }
+        return nil;
+    }
+
+    NSUInteger initialCapacity = input.length * 8;
+    if (initialCapacity < 65536) {
+        initialCapacity = 65536;
+    }
+    const unsigned int maxCapacity = 512u * 1024u * 1024u;
+    if (initialCapacity > maxCapacity) {
+        initialCapacity = maxCapacity;
+    }
+
+    unsigned int capacity = (unsigned int)initialCapacity;
+    while (YES) {
+        NSMutableData *output = [NSMutableData dataWithLength:capacity];
+        unsigned int destLen = capacity;
+        int result = BZ2_bzBuffToBuffDecompress((char *)output.mutableBytes,
+                                                 &destLen,
+                                                 (char *)input.bytes,
+                                                 (unsigned int)input.length,
+                                                 0,
+                                                 0);
+        if (result == BZ_OK) {
+            output.length = destLen;
+            return output;
+        }
+        if (result == BZ_OUTBUFF_FULL && capacity < maxCapacity) {
+            unsigned int next = capacity * 2;
+            if (next > maxCapacity || next < capacity) {
+                next = maxCapacity;
+            }
+            capacity = next;
+            continue;
+        }
+        if (error) {
+            *error = HDPIMMakeBZ2Error([NSString stringWithFormat:@"bzip2 解码失败: result=%d", result]);
+        }
+        return nil;
+    }
 }
 
 @interface HDPIMSevenZipLZMA2Decoder () {

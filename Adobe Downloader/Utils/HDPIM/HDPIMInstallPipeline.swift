@@ -33,7 +33,7 @@ class HDPIMInstallPipeline {
     private enum PackageExecutionMode {
         case full(HDPIMInstalledPackageSnapshot?)
         case databaseOnly(HDPIMInstalledPackageSnapshot)
-        case delta(HDPIMInstalledPackageSnapshot, DeltaPackageInfo, URL)
+        case delta(HDPIMInstalledPackageSnapshot, DeltaPackageInfo)
     }
 
     private struct PackagePersistenceArtifacts {
@@ -210,7 +210,7 @@ class HDPIMInstallPipeline {
                     progressHandler(baseProgress + 0.08, "正在复用 \(pkg.packageName) 的已安装包信息...")
                     persistenceArtifacts = makePersistenceArtifacts(from: installedPackage)
 
-                case .full(_), .delta(_, _, _):
+                case .full(_), .delta(_, _):
                     log("[HDPIM Pipeline] 开始解压 (\(index+1)/\(totalPackages)): \(pkg.packageName) (\(pkg.zipPath.lastPathComponent))")
                     let zipSize = (try? FileManager.default.attributesOfItem(atPath: pkg.zipPath.path)[.size] as? Int64) ?? 0
                     log("[HDPIM Pipeline] ZIP 大小: \(ByteCountFormatter.string(fromByteCount: zipSize, countStyle: .file))")
@@ -319,103 +319,64 @@ class HDPIMInstallPipeline {
                             validatedPackage: extractedPackage
                         )
 
-                    case .delta(let installedPackage, let deltaInfo, let diffJsonURL):
+                    case .delta(let installedPackage, let deltaInfo):
                         log("[HDPIM Pipeline] 包 \(pkg.packageName) 命中 delta 更新，基线版本: \(installedPackage.packageVersion)")
-                        let deltaProgressState = CommandProgressState()
-                        let deltaHelper = HDPIMDeltaHelper()
-                        do {
-                            try await deltaHelper.execute(
+                        guard let diffJsonURL = extractedPackage.extractionResult.diffJSONURLs.first else {
+                            log("[HDPIM Pipeline] 差分包内未找到 diff.json，标记 delta 失败并中止")
+                            HDPIMDeltaSelector.shared.markDeltaFailed(
                                 sapCode: pkg.sapCode,
                                 codexVersion: pkg.version,
-                                platform: pkg.platform,
-                                installDir: pkg.productInstallDir,
-                                extractDir: extractedPackage.extractDir.path,
-                                deltaInfo: deltaInfo,
-                                diffJsonURL: diffJsonURL,
-                                packageName: pkg.packageName,
-                                packageVersion: installedPackage.packageVersion,
-                                progressHandler: { fraction, message in
-                                    let clampedFraction = min(max(fraction, 0), 1)
-                                    let mappedProgress = baseProgress + 0.02 + clampedFraction * 0.06
-                                    let percent = Int(clampedFraction * 100)
-                                    let coarseStep = percent / 2
-                                    let status = message.contains(pkg.packageName)
-                                        ? message
-                                        : "正在增量更新 \(pkg.packageName)... \(percent)%"
-
-                                    guard deltaProgressState.lastReportedStatus != status
-                                            || deltaProgressState.lastReportedStep != coarseStep
-                                            || percent == 100 else {
-                                        return
-                                    }
-
-                                    deltaProgressState.lastReportedStatus = status
-                                    deltaProgressState.lastReportedStep = coarseStep
-                                    progressHandler(mappedProgress, status)
-                                },
-                                databaseAlreadyOpen: true
+                                processorFamily: HDPIMProcessorFamily.from(platform: pkg.platform),
+                                failedVersion: installedPackage.packageVersion
                             )
-
-                            let artifacts = try helper.preparePackageArtifacts(
-                                parsedPackage: pkg.parsed,
-                                validatedExtract: extractedPackage.validation,
-                                sapCode: pkg.sapCode,
-                                version: pkg.version,
-                                platform: pkg.platform,
-                                amtConfigAppID: amtConfigAppID
-                            )
-                            persistenceArtifacts = makePersistenceArtifacts(
-                                from: artifacts,
-                                validatedPackage: extractedPackage
-                            )
-                        } catch {
-                            log("[HDPIM Pipeline] Delta 更新失败，回退 full install: \(error.localizedDescription)")
-                            progressHandler(baseProgress + 0.02, "正在回退为完整安装 \(pkg.packageName)...")
-                            let commandState = CommandProgressState()
-                            let result = try await helper.installPackage(
-                                parsedPackage: pkg.parsed,
-                                extractDir: extractedPackage.extractDir,
-                                sapCode: pkg.sapCode,
-                                version: pkg.version,
-                                platform: pkg.platform,
-                                amtConfigAppID: amtConfigAppID,
-                                installDir: installDir,
-                                aliasPackageName: pkg.aliasPackageName,
-                                productInstallDir: pkg.productInstallDir,
-                                validatedExtract: extractedPackage.validation,
-                                progressHandler: { cmdIndex, cmdTotal, cmdName in
-                                    let normalizedTotal = max(cmdTotal, 1)
-                                    let ratio = Double(cmdIndex + 1) / Double(normalizedTotal)
-                                    let cmdProgress = baseProgress + 0.02 + ratio * 0.06
-                                    let percent = Int(ratio * 100)
-                                    let coarseStep = percent / 2
-
-                                    let status: String
-                                    if cmdName.contains("正在处理:") {
-                                        status = "[\(pkg.packageName)] \(cmdName)"
-                                    } else {
-                                        status = "正在安装 \(pkg.packageName)... \(percent)%"
-                                    }
-
-                                    guard commandState.lastReportedStatus != status
-                                            || commandState.lastReportedStep != coarseStep
-                                            || cmdName.contains("正在处理:")
-                                            || percent == 100 else {
-                                        return
-                                    }
-
-                                    commandState.lastReportedStatus = status
-                                    commandState.lastReportedStep = coarseStep
-                                    progressHandler(cmdProgress, status)
-                                }
-                            )
-
-                            allExecutedCommands.append(contentsOf: result.executedCommands)
-                            persistenceArtifacts = makePersistenceArtifacts(
-                                from: result,
-                                validatedPackage: extractedPackage
-                            )
+                            throw HDPIMInstallError.extractionFailed("\(pkg.packageName): 差分包缺少 diff.json")
                         }
+                        let deltaProgressState = CommandProgressState()
+                        let deltaHelper = HDPIMDeltaHelper()
+                        try await deltaHelper.execute(
+                            sapCode: pkg.sapCode,
+                            codexVersion: pkg.version,
+                            platform: pkg.platform,
+                            installDir: pkg.productInstallDir,
+                            extractDir: extractedPackage.extractDir.path,
+                            deltaInfo: deltaInfo,
+                            diffJsonURL: diffJsonURL,
+                            packageName: pkg.packageName,
+                            packageVersion: installedPackage.packageVersion,
+                            progressHandler: { fraction, message in
+                                let clampedFraction = min(max(fraction, 0), 1)
+                                let mappedProgress = baseProgress + 0.02 + clampedFraction * 0.06
+                                let percent = Int(clampedFraction * 100)
+                                let coarseStep = percent / 2
+                                let status = message.contains(pkg.packageName)
+                                    ? message
+                                    : "正在增量更新 \(pkg.packageName)... \(percent)%"
+
+                                guard deltaProgressState.lastReportedStatus != status
+                                        || deltaProgressState.lastReportedStep != coarseStep
+                                        || percent == 100 else {
+                                    return
+                                }
+
+                                deltaProgressState.lastReportedStatus = status
+                                deltaProgressState.lastReportedStep = coarseStep
+                                progressHandler(mappedProgress, status)
+                            },
+                            databaseAlreadyOpen: true
+                        )
+
+                        let artifacts = try helper.preparePackageArtifacts(
+                            parsedPackage: pkg.parsed,
+                            validatedExtract: extractedPackage.validation,
+                            sapCode: pkg.sapCode,
+                            version: pkg.version,
+                            platform: pkg.platform,
+                            amtConfigAppID: amtConfigAppID
+                        )
+                        persistenceArtifacts = makePersistenceArtifacts(
+                            from: artifacts,
+                            validatedPackage: extractedPackage
+                        )
 
                     case .databaseOnly:
                         fatalError("unexpected package execution mode")
@@ -630,7 +591,7 @@ class HDPIMInstallPipeline {
                     applicationInfo: appInfo,
                     zipPath: zipPath,
                     sapDir: sapDir,
-                    compressionType: appInfo.compressionType,
+                    compressionType: parsedPkg.fullPackageName.contains("_delta_") ? "" : appInfo.compressionType,
                     aliasPackageName: aliasName,
                     productInstallDir: productInstallDir
                 ))
@@ -727,8 +688,8 @@ class HDPIMInstallPipeline {
         )
 
         switch deltaSelection {
-        case .delta(let deltaInfo, let diffJsonURL):
-            return .delta(installedPackage, deltaInfo, diffJsonURL)
+        case .delta(let deltaInfo):
+            return .delta(installedPackage, deltaInfo)
         case .fullPackage, .skip:
             return .full(installedPackage)
         }
@@ -744,7 +705,7 @@ class HDPIMInstallPipeline {
             installedPackage = snapshot
         case .databaseOnly(let snapshot):
             installedPackage = snapshot
-        case .delta(let snapshot, _, _):
+        case .delta(let snapshot, _):
             installedPackage = snapshot
         }
 
@@ -767,7 +728,7 @@ class HDPIMInstallPipeline {
             installedPackage = snapshot
         case .databaseOnly(let snapshot):
             installedPackage = snapshot
-        case .delta(let snapshot, _, _):
+        case .delta(let snapshot, _):
             installedPackage = snapshot
         }
 
@@ -814,7 +775,8 @@ class HDPIMInstallPipeline {
             extractDir: extractDir,
             aliasPackageName: pkg.aliasPackageName,
             productInstallDir: pkg.productInstallDir,
-            propertyTable: propertyTable
+            propertyTable: propertyTable,
+            skipAssetSourceValidation: pkg.parsed.fullPackageName.contains("_delta_")
         )
 
         return ValidatedExtractPackage(
@@ -1006,13 +968,16 @@ class HDPIMInstallPipeline {
             return
         }
 
-        log("[HDPIM Pipeline] 包 \(package.packageName) 需要备份 \(backupDirs.count) 个目录: \(backupDirs.map(\.path))")
+        log("[HDPIM Pipeline] 包 \(package.packageName) 需要备份 \(backupDirs.count) 个目录")
+        var lastBackupPercent = -1
         try await backup.backupDirectories(
             backupDirs,
-            progressHandler: { index, total, dir in
-                progressHandler(progress, "正在备份 \(package.packageName) 的现有文件 (\(index + 1)/\(total)): \(dir.lastPathComponent)")
-            },
-            logHandler: log
+            progressHandler: { index, total, _ in
+                let percent = total > 0 ? (index + 1) * 100 / total : 100
+                guard percent != lastBackupPercent else { return }
+                lastBackupPercent = percent
+                progressHandler(progress, "正在备份 \(package.packageName) 的现有文件... \(percent)%")
+            }
         )
     }
 
@@ -1029,6 +994,10 @@ class HDPIMInstallPipeline {
         package: PackageToInstall,
         extractedPackage: ValidatedExtractPackage
     ) -> [URL] {
+        if package.parsed.fullPackageName.contains("_delta_") {
+            return collectDeltaBackupTargets(package: package, extractedPackage: extractedPackage)
+        }
+
         let fileManager = FileManager.default
         let propertyTable = HDPIMPropertyTable()
         propertyTable.setupSystemDirectories()
@@ -1044,6 +1013,9 @@ class HDPIMInstallPipeline {
             fallbackInstallDir: package.productInstallDir
         )
         let expandedPaths = candidates.compactMap { candidate -> String? in
+            if self.isDeterminedSystemFolder(candidate.path) {
+                return nil
+            }
             let expandedPath = propertyTable.expandPath(candidate.path)
                 .trimmingCharacters(in: .whitespacesAndNewlines)
             guard !expandedPath.isEmpty, !expandedPath.contains("[") else {
@@ -1069,6 +1041,52 @@ class HDPIMInstallPipeline {
         }
 
         return mergedPaths.map { URL(fileURLWithPath: $0, isDirectory: true) }
+    }
+
+    private func collectDeltaBackupTargets(
+        package: PackageToInstall,
+        extractedPackage: ValidatedExtractPackage
+    ) -> [URL] {
+        guard let diffJsonURL = extractedPackage.extractionResult.diffJSONURLs.first,
+              let data = try? Data(contentsOf: diffJsonURL),
+              let entries = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] else {
+            return []
+        }
+
+        let propertyTable = HDPIMPropertyTable()
+        propertyTable.setupSystemDirectories()
+        propertyTable.setInstallDir(package.productInstallDir)
+        propertyTable.setProductInstallDir(package.productInstallDir)
+        propertyTable.setSourceFolder(extractedPackage.extractDir.path)
+        propertyTable.setMediaFolder(extractedPackage.extractDir.path)
+
+        let fileManager = FileManager.default
+        var targets: [String] = []
+
+        for entry in entries {
+            let action = ((entry["deltaAction"] as? String) ?? (entry["action"] as? String) ?? "").uppercased()
+            guard action == "PATCH" || action == "PATCH_FILE"
+                    || action == "DELETE" || action == "DELETE_FILE" else {
+                continue
+            }
+
+            let rawDestination = (entry["destination"] as? String) ?? (entry["target"] as? String) ?? ""
+            guard !rawDestination.isEmpty else { continue }
+            guard !isDeterminedSystemFolder(rawDestination) else { continue }
+
+            let expanded = propertyTable.expandPath(rawDestination)
+                .trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !expanded.isEmpty, !expanded.contains("["),
+                  !shouldSkipExpandedBackupPath(expanded),
+                  fileManager.fileExists(atPath: expanded) else {
+                continue
+            }
+
+            targets.append(normalizedBackupPath(expanded))
+        }
+
+        let uniqueTargets = Array(Set(targets)).filter { backedUpPaths.insert($0).inserted }
+        return uniqueTargets.map { URL(fileURLWithPath: $0) }
     }
 
     private func backupCandidates(
@@ -1137,6 +1155,23 @@ class HDPIMInstallPipeline {
             return standardized
         }
         return standardized.hasSuffix("/") ? String(standardized.dropLast()) : standardized
+    }
+
+    private func isDeterminedSystemFolder(_ rawPath: String) -> Bool {
+        var normalized = rawPath.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if normalized.hasSuffix("/") {
+            normalized = String(normalized.dropLast())
+        }
+        let determinedFolders: Set<String> = [
+            "[adobecommon]", "[adobeprogramfiles]", "[programfiles]",
+            "[sharedapplicationdata]", "[shareddocuments]", "[shareddesktop]",
+            "[utilities]", "[fontsfolder]", "[library]", "[librarypreferences]",
+            "[scriptingadditions]", "[system32folder]", "[startmenu]", "[startmenusubfolder]",
+            "[userpreferences]", "[usercommon]", "[userhome]", "[userdocuments]",
+            "[userdesktop]", "[userpictures]", "[usertemplates]", "[userfavorites]",
+            "[userroamingappdata]", "[userlocalappdata]"
+        ]
+        return determinedFolders.contains(normalized)
     }
 
     private func shouldSkipExpandedBackupPath(_ path: String) -> Bool {

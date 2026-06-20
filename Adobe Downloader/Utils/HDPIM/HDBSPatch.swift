@@ -146,67 +146,23 @@ final class HDBSPatch {
     private func decompressBlock(_ data: Data, offset: Int, size: Int) throws -> [UInt8] {
         guard size > 0 else { return [] }
 
-        let compressedSlice = data[offset..<offset+size]
-        let compressedBytes = Array(compressedSlice)
+        let compressedData = data.subdata(in: offset..<offset+size)
 
-        if let result = try? decompressBZ2(compressedBytes) {
-            return result
+        if compressedData.count >= 3,
+           compressedData[compressedData.startIndex] == 0x42,
+           compressedData[compressedData.startIndex + 1] == 0x5A,
+           compressedData[compressedData.startIndex + 2] == 0x68 {
+            if let result = HDPIMBZ2Decompress(compressedData, nil) {
+                return [UInt8](result)
+            }
+            throw PatchError.decompressFailed("bzip2 decode failed at offset \(offset)")
         }
 
-        if let result = try? decompressLZMA(compressedBytes) {
-            return result
-        }
-
-        if let result = decompressRaw(compressedBytes) {
+        if let result = try? decompressLZMA(Array(compressedData)) {
             return result
         }
 
         throw PatchError.decompressFailed("Unknown compression at offset \(offset)")
-    }
-
-    private func decompressBZ2(_ input: [UInt8]) throws -> [UInt8] {
-        guard input.count >= 2, input[0] == 0x42, input[1] == 0x5A else {
-            throw PatchError.decompressFailed("Not BZ2")
-        }
-
-        var outputBuffer = [UInt8](repeating: 0, count: input.count * 20)
-        var outputSize = outputBuffer.count
-
-        let result = input.withUnsafeBufferPointer { inputBuf in
-            outputBuffer.withUnsafeMutableBufferPointer { outputBuf in
-                compression_decode_buffer(
-                    outputBuf.baseAddress!, outputSize,
-                    inputBuf.baseAddress!, input.count,
-                    nil,
-                    COMPRESSION_LZMA
-                )
-            }
-        }
-
-        if result > 0 {
-            return Array(outputBuffer[0..<result])
-        }
-
-        var dynamicSize = input.count * 10
-        while dynamicSize < 256 * 1024 * 1024 {
-            var buf = [UInt8](repeating: 0, count: dynamicSize)
-            let r = input.withUnsafeBufferPointer { inBuf in
-                buf.withUnsafeMutableBufferPointer { outBuf in
-                    compression_decode_buffer(
-                        outBuf.baseAddress!, dynamicSize,
-                        inBuf.baseAddress!, input.count,
-                        nil,
-                        COMPRESSION_LZMA
-                    )
-                }
-            }
-            if r > 0 && r < dynamicSize {
-                return Array(buf[0..<r])
-            }
-            dynamicSize *= 2
-        }
-
-        throw PatchError.decompressFailed("BZ2 decompression failed")
     }
 
     private func decompressLZMA(_ input: [UInt8]) throws -> [UInt8] {
@@ -229,9 +185,5 @@ final class HDBSPatch {
             dynamicSize *= 2
         }
         throw PatchError.decompressFailed("LZMA decompression failed")
-    }
-
-    private func decompressRaw(_ input: [UInt8]) -> [UInt8]? {
-        return input
     }
 }

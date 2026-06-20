@@ -35,7 +35,6 @@ class HDPIMBackupManager {
 
         for (index, dir) in existingDirs.enumerated() {
             progressHandler?(index, existingDirs.count, dir)
-            logHandler?("[HDPIM Backup] 开始备份 (\(index + 1)/\(existingDirs.count)): \(dir.path)")
             let backupDest = backupRoot.appendingPathComponent(dir.lastPathComponent + "_\(UUID().uuidString.prefix(8))")
 
             let result = try await HDPIMCommandExecutor.executeShell(
@@ -47,7 +46,6 @@ class HDPIMBackupManager {
             }
 
             backupMap.append((original: dir, backup: backupDest))
-            logHandler?("[HDPIM Backup] 备份完成 (\(index + 1)/\(existingDirs.count)): \(dir.path)")
         }
     }
 

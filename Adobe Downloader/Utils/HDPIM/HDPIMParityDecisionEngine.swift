@@ -78,6 +78,43 @@ struct HDPIMResolvedPackageDecision {
     let installedPackageVersion: String?
     let skipReason: String?
     let hostValidation: HDPIMHostValidationSnapshot?
+    let selectedDeltaPackage: DeltaPackageInfo?
+}
+
+extension HDPIMResolvedPackageDecision {
+    func withSelectedDeltaPackage(_ delta: DeltaPackageInfo, installedVersion: String) -> HDPIMResolvedPackageDecision {
+        HDPIMResolvedPackageDecision(
+            parsedPackage: parsedPackage,
+            packageVersion: packageVersion,
+            isRequired: isRequired,
+            isSelectedByDefault: isSelectedByDefault,
+            isAdobeDownloaderPreselected: isAdobeDownloaderPreselected,
+            isOfficiallyEligible: isOfficiallyEligible,
+            officialFilterReasons: officialFilterReasons,
+            moduleIds: moduleIds,
+            installedPackageVersion: installedVersion,
+            skipReason: skipReason,
+            hostValidation: hostValidation,
+            selectedDeltaPackage: delta
+        )
+    }
+
+    func withInstalledPackageVersion(_ installedVersion: String) -> HDPIMResolvedPackageDecision {
+        HDPIMResolvedPackageDecision(
+            parsedPackage: parsedPackage,
+            packageVersion: packageVersion,
+            isRequired: isRequired,
+            isSelectedByDefault: isSelectedByDefault,
+            isAdobeDownloaderPreselected: isAdobeDownloaderPreselected,
+            isOfficiallyEligible: isOfficiallyEligible,
+            officialFilterReasons: officialFilterReasons,
+            moduleIds: moduleIds,
+            installedPackageVersion: installedVersion,
+            skipReason: skipReason,
+            hostValidation: hostValidation,
+            selectedDeltaPackage: selectedDeltaPackage
+        )
+    }
 }
 
 struct HDPIMResolvedDependencyDecision {
@@ -532,6 +569,15 @@ final class HDPIMParityDecisionEngine {
                 databaseAvailable: databaseAvailable
             )
 
+            let enrichedPackages = enrichPackageDecisionsWithDelta(
+                packageDecisions,
+                sapCode: dependencySeed.sapCode,
+                codexVersion: resolvedVersion,
+                platform: dependencySeed.platform,
+                expectedInstallDir: expandedInstallDirectory(for: applicationInfo),
+                databaseAvailable: databaseAvailable
+            )
+
             log(
                 "依赖 \(dependencySeed.sapCode) 决策完成：resolvedVersion=\(resolvedVersion)，skip=\(shouldSkipProduct)，finalPackages=\(packageDecisions.count)"
             )
@@ -555,7 +601,7 @@ final class HDPIMParityDecisionEngine {
                         reason: skipReason ?? ""
                     ),
                     applicationInfo: applicationInfo,
-                    packages: packageDecisions
+                    packages: enrichedPackages
                 )
             )
         }
@@ -627,7 +673,7 @@ final class HDPIMParityDecisionEngine {
         await decisionCacheStore.clear()
     }
 
-    func makeDownloadPresentation(from decision: HDPIMResolvedProductDecision) -> ([Package], [DependenciesToDownload]) {
+    func makeDownloadPresentation(from decision: HDPIMResolvedProductDecision, useDelta: Bool = false) -> ([Package], [DependenciesToDownload]) {
         var allPackages: [Package] = []
         var dependencies: [DependenciesToDownload] = []
 
@@ -650,29 +696,44 @@ final class HDPIMParityDecisionEngine {
             )
 
             dependencyModel.packages = dependency.packages.compactMap { packageDecision in
-                guard (!packageDecision.parsedPackage.path.isEmpty || !packageDecision.parsedPackage.manifestURL.isEmpty),
-                      !packageDecision.parsedPackage.fullPackageName.isEmpty else {
+                let parsed = packageDecision.parsedPackage
+                guard (!parsed.path.isEmpty || !parsed.manifestURL.isEmpty),
+                      !parsed.fullPackageName.isEmpty else {
                     return nil
                 }
 
+                if useDelta {
+                    let installedVersion = packageDecision.installedPackageVersion?
+                        .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                    if !installedVersion.isEmpty, installedVersion == packageDecision.packageVersion {
+                        return nil
+                    }
+                }
+
+                let delta = useDelta ? packageDecision.selectedDeltaPackage : nil
+
                 let package = Package(
-                    type: packageDecision.parsedPackage.type,
-                    fullPackageName: packageDecision.parsedPackage.fullPackageName,
-                    downloadSize: packageDecision.parsedPackage.downloadSize,
-                    downloadURL: packageDecision.parsedPackage.path,
-                    manifestURL: packageDecision.parsedPackage.manifestURL,
+                    type: parsed.type,
+                    fullPackageName: delta.map { self.deltaFullPackageName($0) } ?? parsed.fullPackageName,
+                    downloadSize: delta?.downloadSize ?? parsed.downloadSize,
+                    downloadURL: delta?.path ?? parsed.path,
+                    manifestURL: delta != nil ? "" : parsed.manifestURL,
                     packageVersion: packageDecision.packageVersion,
-                    condition: packageDecision.parsedPackage.condition,
+                    condition: parsed.condition,
                     isRequired: packageDecision.isRequired,
                     isDefaultSelected: packageDecision.isSelectedByDefault,
                     isAdobeDownloaderPreselected: packageDecision.isAdobeDownloaderPreselected,
                     isOfficiallyEligible: packageDecision.isOfficiallyEligible,
                     officialFilterReasons: packageDecision.officialFilterReasons,
-                    validationURL: packageDecision.parsedPackage.validationURLType2,
-                    validationURLType1: packageDecision.parsedPackage.validationURLType1,
-                    packageHashKey: packageDecision.parsedPackage.packageHashKey
+                    validationURL: parsed.validationURLType2,
+                    validationURLType1: delta.flatMap { $0.validationURL.isEmpty ? nil : $0.validationURL } ?? parsed.validationURLType1,
+                    packageHashKey: delta != nil ? "" : parsed.packageHashKey
                 )
                 package.hostValidation = nil
+                if let delta {
+                    package.deltaBasePackageVersion = delta.basePackageVersion
+                    package.baselinePackageName = parsed.packageName
+                }
                 return package
             }
 
@@ -756,7 +817,8 @@ final class HDPIMParityDecisionEngine {
                     moduleIds: packageDecision.moduleIds,
                     installedPackageVersion: packageDecision.installedPackageVersion,
                     skipReason: packageDecision.skipReason,
-                    hostValidation: hostValidation
+                    hostValidation: hostValidation,
+                    selectedDeltaPackage: packageDecision.selectedDeltaPackage
                 )
             }
 
@@ -1501,13 +1563,8 @@ final class HDPIMParityDecisionEngine {
 
             if workflow == .download {
                 var officialFilterReasons: [String] = []
-                let isAdobeDownloaderPreselected = sapCode.uppercased() == "PHSP"
-                    && (
-                        parsedPackage.packageName.localizedCaseInsensitiveContains("CafModels")
-                        || parsedPackage.fullPackageName.localizedCaseInsensitiveContains("CafModels")
-                    )
 
-                if !passesModuleSelection && !isAdobeDownloaderPreselected {
+                if !passesModuleSelection {
                     officialFilterReasons.append("模块配置不匹配")
                 }
 
@@ -1530,7 +1587,6 @@ final class HDPIMParityDecisionEngine {
                 let hasModuleCatalog = !applicationInfo.modules.isEmpty
                 let isSelectedByDefault = isOfficiallyEligible && (
                     isRequired
-                    || isAdobeDownloaderPreselected
                     || (!hasModuleCatalog && passesModuleSelection)
                     || (hasModuleCatalog && !moduleIds.isEmpty && passesModuleSelection)
                 )
@@ -1546,13 +1602,14 @@ final class HDPIMParityDecisionEngine {
                         packageVersion: packageVersion,
                         isRequired: isRequired,
                         isSelectedByDefault: isSelectedByDefault && !isRequired,
-                        isAdobeDownloaderPreselected: isOfficiallyEligible && isAdobeDownloaderPreselected && !isRequired,
+                        isAdobeDownloaderPreselected: false,
                         isOfficiallyEligible: isOfficiallyEligible,
                         officialFilterReasons: officialFilterReasons,
                         moduleIds: Array(Set(moduleIds)).sorted(),
                         installedPackageVersion: nil,
                         skipReason: skipReason,
-                        hostValidation: nil
+                        hostValidation: nil,
+                        selectedDeltaPackage: nil
                     )
                 )
                 continue
@@ -1607,7 +1664,8 @@ final class HDPIMParityDecisionEngine {
                     moduleIds: Array(Set(moduleIds)).sorted(),
                     installedPackageVersion: installedPackageVersion,
                     skipReason: nil,
-                    hostValidation: nil
+                    hostValidation: nil,
+                    selectedDeltaPackage: nil
                 )
             )
         }
@@ -1901,6 +1959,80 @@ final class HDPIMParityDecisionEngine {
         )) ?? false
 
         return isInstalled ? packageVersion : nil
+    }
+
+    private func enrichPackageDecisionsWithDelta(
+        _ decisions: [HDPIMResolvedPackageDecision],
+        sapCode: String,
+        codexVersion: String,
+        platform: String,
+        expectedInstallDir: String,
+        databaseAvailable: Bool
+    ) -> [HDPIMResolvedPackageDecision] {
+        guard databaseAvailable else {
+            log("【delta诊断】\(sapCode) enrich 跳过：databaseAvailable=false")
+            return decisions
+        }
+
+        let processorFamily = HDPIMProcessorFamily.from(platform: platform)
+        log("【delta诊断】\(sapCode) home=\(HDPIMRuntimeEnvironment.userHomeDirectory()) NSHome=\(NSHomeDirectory())")
+        let failedVersions = HDPIMDatabase.shared.getDeltaFailVersions(
+            sapCode: sapCode,
+            version: codexVersion,
+            processorFamily: processorFamily
+        )
+        var enriched: [HDPIMResolvedPackageDecision] = []
+
+        for decision in decisions {
+            guard !decision.parsedPackage.packageName.isEmpty else {
+                enriched.append(decision)
+                continue
+            }
+
+            let snapshots = HDPIMDatabase.shared.getInstalledPackageSnapshots(
+                sapCode: sapCode,
+                processorFamily: processorFamily,
+                packageName: decision.parsedPackage.packageName,
+                expectedInstallDir: expectedInstallDir
+            )
+            let installedVersion = snapshots.first?.packageVersion.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+
+            guard !installedVersion.isEmpty else {
+                enriched.append(decision)
+                continue
+            }
+
+            if installedVersion == decision.packageVersion {
+                log("包 \(sapCode)/\(decision.parsedPackage.packageName) 已是目标版本 \(installedVersion)，增量更新时无需下载")
+                enriched.append(decision.withInstalledPackageVersion(installedVersion))
+                continue
+            }
+
+            guard !failedVersions.contains(installedVersion),
+                  !decision.parsedPackage.deltaPackages.isEmpty,
+                  let deltaInfo = decision.parsedPackage.deltaPackages.first(where: {
+                      $0.basePackageVersion == installedVersion
+                          && !$0.path.isEmpty
+                          && !$0.metadataFilePath.isEmpty
+                  }) else {
+                enriched.append(decision.withInstalledPackageVersion(installedVersion))
+                continue
+            }
+
+            log("包 \(sapCode)/\(decision.parsedPackage.packageName) 命中增量更新：基线=\(installedVersion)，差分包=\(deltaInfo.packageName)，下载量=\(deltaInfo.downloadSize)")
+            enriched.append(decision.withSelectedDeltaPackage(deltaInfo, installedVersion: installedVersion))
+        }
+
+        return enriched
+    }
+
+    private func deltaFullPackageName(_ delta: DeltaPackageInfo) -> String {
+        let name = delta.packageName.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !name.isEmpty {
+            return name.hasSuffix(".zip") ? name : "\(name).zip"
+        }
+        let pathName = URL(fileURLWithPath: delta.path).lastPathComponent
+        return pathName.isEmpty ? "\(delta.basePackageVersion)_delta.zip" : pathName
     }
 
     private func makePlatformSelectionDiagnostics(
@@ -2219,7 +2351,11 @@ final class HDPIMParityDecisionEngine {
     }
 
     private func openDatabaseIfNeeded() -> Bool {
-        (try? HDPIMDatabase.shared.open()) != nil
+        if (try? HDPIMDatabase.shared.open()) != nil {
+            return true
+        }
+        HDPIMDatabase.shared.close()
+        return (try? HDPIMDatabase.shared.openReadOnly()) != nil
     }
 
     private func processorFamily(fromRawValue rawValue: String) -> HDPIMProcessorFamily {

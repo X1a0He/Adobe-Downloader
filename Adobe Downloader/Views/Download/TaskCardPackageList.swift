@@ -448,7 +448,7 @@ private struct PackageItemRow: View {
     var body: some View {
         VStack(spacing: 4) {
             HStack(spacing: 6) {
-                Text(package.fullPackageName)
+                Text("\(package.fullPackageName) (\(package.packageVersion))")
                     .font(.system(size: 11, weight: .medium))
                     .foregroundColor(.primary.opacity(0.8))
                     .lineLimit(1)

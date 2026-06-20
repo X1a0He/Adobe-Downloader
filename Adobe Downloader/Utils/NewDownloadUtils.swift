@@ -373,20 +373,38 @@ class NewDownloadUtils {
                 if let jsonData = applicationJson.data(using: .utf8),
                    var appInfo = try JSONSerialization.jsonObject(with: jsonData) as? [String: Any] {
 
-                    let selectedPackageNames = Set(dependencyToDownload.packages.flatMap { packageReferenceNames($0.fullPackageName) })
+                    let deltaPackagesByBaseline = Dictionary(
+                        dependencyToDownload.packages
+                            .filter { !$0.deltaBasePackageVersion.isEmpty && !$0.baselinePackageName.isEmpty }
+                            .map { ($0.baselinePackageName, $0) },
+                        uniquingKeysWith: { current, _ in current }
+                    )
+                    let selectedPackageNames = Set(dependencyToDownload.packages.flatMap { package -> [String] in
+                        package.baselinePackageName.isEmpty
+                            ? packageReferenceNames(package.fullPackageName)
+                            : packageReferenceNames(package.baselinePackageName)
+                    })
                     
                     if var packages = appInfo["Packages"] as? [String: Any],
                        let packageArray = packages["Package"] as? [[String: Any]] {
 
-                        let filteredPackages = packageArray.filter { package in
-                            if let packageName = package["PackageName"] as? String {
-                                let fullPackageName = packageName.hasSuffix(".zip") ? packageName : "\(packageName).zip"
-                                return selectedPackageNames.contains(fullPackageName) || selectedPackageNames.contains(packageName)
+                        let filteredPackages = packageArray.compactMap { package -> [String: Any]? in
+                            let logicalName = (package["PackageName"] as? String) ?? ""
+                            let derivedFullName = logicalName.hasSuffix(".zip") ? logicalName : "\(logicalName).zip"
+                            let nodeFullName = (package["fullPackageName"] as? String) ?? derivedFullName
+                            let isSelected = !logicalName.isEmpty
+                                ? (selectedPackageNames.contains(derivedFullName) || selectedPackageNames.contains(logicalName))
+                                : selectedPackageNames.contains(nodeFullName)
+                            guard isSelected else { return nil }
+
+                            if let deltaPackage = deltaPackagesByBaseline[logicalName] {
+                                var deltaNode = package
+                                deltaNode["fullPackageName"] = deltaPackage.fullPackageName
+                                deltaNode["Path"] = deltaPackage.downloadURL
+                                deltaNode["DownloadSize"] = deltaPackage.downloadSize
+                                return deltaNode
                             }
-                            if let fullPackageName = package["fullPackageName"] as? String {
-                                return selectedPackageNames.contains(fullPackageName)
-                            }
-                            return false
+                            return package
                         }
                         
                         packages["Package"] = filteredPackages

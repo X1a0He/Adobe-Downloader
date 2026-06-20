@@ -41,6 +41,14 @@ final class HDPIMDeltaHelper {
 
         progressHandler?(0.1, "Generating delta commands...")
 
+        let propertyTable = HDPIMPropertyTable()
+        propertyTable.setupSystemDirectories()
+        propertyTable.setInstallDir(installDir)
+        propertyTable.setProductInstallDir(installDir)
+        propertyTable.setSourceFolder(extractDir)
+        propertyTable.setMediaFolder(extractDir)
+        commandEngine.propertyTable = propertyTable
+
         let commands: [DeltaCommand]
         do {
             commands = try commandEngine.generateCommands(

@@ -988,6 +988,7 @@ private struct InstallLogPanel: View {
                             }
                             .padding(12)
                         }
+                        .frame(maxHeight: 360)
                         .background(
                             RoundedRectangle(cornerRadius: 10)
                                 .fill(Color(NSColor.textBackgroundColor).opacity(0.52))

@@ -4,6 +4,7 @@
 NS_ASSUME_NONNULL_BEGIN
 
 FOUNDATION_EXPORT NSData * _Nullable HDPIMLZMA2Decompress(NSData *input, NSError **error);
+FOUNDATION_EXPORT NSData * _Nullable HDPIMBZ2Decompress(NSData *input, NSError **error);
 FOUNDATION_EXPORT uint32_t HDPIMCRC32(uint32_t crc, NSData *data);
 FOUNDATION_EXPORT BOOL HDPIMUnpackAppleDouble(NSString *appleDoubleFilePath, NSString *targetFilePath, NSError **error);
 

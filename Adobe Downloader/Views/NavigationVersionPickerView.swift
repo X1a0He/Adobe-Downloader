@@ -22,13 +22,13 @@ private enum VersionPickerConstants {
 }
 
 enum VersionPickerDestination: Hashable {
-    case customDownload(productId: String, version: String)
+    case customDownload(productId: String, version: String, useDelta: Bool)
     case duplicateTaskAlert(productId: String, version: String)
 
     static func == (lhs: VersionPickerDestination, rhs: VersionPickerDestination) -> Bool {
         switch (lhs, rhs) {
-        case (.customDownload(let lProductId, let lVersion), .customDownload(let rProductId, let rVersion)):
-            return lProductId == rProductId && lVersion == rVersion
+        case (.customDownload(let lProductId, let lVersion, let lUseDelta), .customDownload(let rProductId, let rVersion, let rUseDelta)):
+            return lProductId == rProductId && lVersion == rVersion && lUseDelta == rUseDelta
         case (.duplicateTaskAlert(let lProductId, let lVersion), .duplicateTaskAlert(let rProductId, let rVersion)):
             return lProductId == rProductId && lVersion == rVersion
         default:
@@ -38,10 +38,11 @@ enum VersionPickerDestination: Hashable {
 
     func hash(into hasher: inout Hasher) {
         switch self {
-        case .customDownload(let productId, let version):
+        case .customDownload(let productId, let version, let useDelta):
             hasher.combine("customDownload")
             hasher.combine(productId)
             hasher.combine(version)
+            hasher.combine(useDelta)
         case .duplicateTaskAlert(let productId, let version):
             hasher.combine("duplicateTaskAlert")
             hasher.combine(productId)
@@ -84,6 +85,11 @@ struct VersionGroup: Identifiable {
     let major: Int
     let items: [(key: String, value: Product.Platform)]
     var id: Int { major }
+}
+
+struct VersionSizeEstimate: Equatable {
+    let fullSize: Int64
+    let deltaSize: Int64?
 }
 
 struct NavigationVersionPickerView: View {
@@ -130,8 +136,8 @@ struct NavigationVersionPickerView: View {
                     downloadAppleSilicon: downloadAppleSilicon,
                     onSelect: onSelect,
                     dismiss: dismiss,
-                    onCustomDownload: { version in
-                        navigationPath.append(VersionPickerDestination.customDownload(productId: productId, version: version))
+                    onCustomDownload: { version, useDelta in
+                        navigationPath.append(VersionPickerDestination.customDownload(productId: productId, version: version, useDelta: useDelta))
                     }
                 )
             }
@@ -145,10 +151,11 @@ struct NavigationVersionPickerView: View {
             )
             .navigationDestination(for: VersionPickerDestination.self) { destination in
                 switch destination {
-                case .customDownload(let productId, let version):
+                case .customDownload(let productId, let version, let useDelta):
                     NavigationCustomDownloadView(
                         productId: productId,
                         version: version,
+                        useDelta: useDelta,
                         onDownloadStart: { dependencies in
                             handleCustomDownload(dependencies: dependencies)
                         },
@@ -515,10 +522,10 @@ private struct VersionListView: View {
     let downloadAppleSilicon: Bool
     let onSelect: (String) -> Void
     let dismiss: DismissAction
-    let onCustomDownload: (String) -> Void
+    let onCustomDownload: (String, Bool) -> Void
     @StorageValue(\.defaultLanguage) private var defaultLanguage
     @State private var cachedVersions: [(key: String, value: Product.Platform)] = []
-    @State private var cachedPackageSizes: [String: Int64] = [:]
+    @State private var cachedPackageSizes: [String: VersionSizeEstimate] = [:]
     @State private var sizeLoadingVersions: Set<String> = []
 
     var body: some View {
@@ -673,8 +680,8 @@ private struct VersionListView: View {
         }
     }
 
-    private func handleCustomDownload(_ version: String) {
-        onCustomDownload(version)
+    private func handleCustomDownload(_ version: String, _ useDelta: Bool) {
+        onCustomDownload(version, useDelta)
     }
 }
 
@@ -683,11 +690,11 @@ private struct VersionGroupSection: View {
     let group: VersionGroup
     let overallLatestKey: String?
     @Binding var expandedVersions: Set<String>
-    @Binding var cachedPackageSizes: [String: Int64]
+    @Binding var cachedPackageSizes: [String: VersionSizeEstimate]
     @Binding var sizeLoadingVersions: Set<String>
     let onSelect: (String) -> Void
     let onToggle: (String) -> Void
-    let onCustomDownload: (String) -> Void
+    let onCustomDownload: (String, Bool) -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -743,11 +750,11 @@ private struct VersionRow: View, Equatable {
     let isExpanded: Bool
     let isGroupLatest: Bool
     let isOverallLatest: Bool
-    @Binding var cachedPackageSizes: [String: Int64]
+    @Binding var cachedPackageSizes: [String: VersionSizeEstimate]
     @Binding var sizeLoadingVersions: Set<String>
     let onSelect: (String) -> Void
     let onToggle: (String) -> Void
-    let onCustomDownload: (String) -> Void
+    let onCustomDownload: (String, Bool) -> Void
 
 	static func == (lhs: VersionRow, rhs: VersionRow) -> Bool {
 		lhs.productId == rhs.productId &&
@@ -911,10 +918,10 @@ private struct VersionDetails: View {
 	let info: Product.Platform
 	let version: String
 	let installedProduct: HDPIMInstalledProductForUninstall?
-	@Binding var cachedPackageSizes: [String: Int64]
+	@Binding var cachedPackageSizes: [String: VersionSizeEstimate]
 	@Binding var sizeLoadingVersions: Set<String>
 	let onSelect: (String) -> Void
-	let onCustomDownload: (String) -> Void
+	let onCustomDownload: (String, Bool) -> Void
 	let onUninstallFinished: () -> Void
 
     private var hasRawDependencies: Bool {
@@ -1012,14 +1019,23 @@ private struct VersionDetails: View {
                 .cornerRadius(6)
             }
 
-            VersionDownloadButton(
-                productId: productId,
-                version: version,
-                onSelect: onSelect,
-                onCustomDownload: { version in
-                    onCustomDownload(version)
+            HStack(spacing: 8) {
+                VersionDownloadButton(
+                    productId: productId,
+                    version: version,
+                    onSelect: onSelect,
+                    onCustomDownload: onCustomDownload
+                )
+
+                if cachedPackageSizes[version]?.deltaSize != nil {
+                    DeltaUpdateButton(
+                        version: version,
+                        onDeltaUpdate: { version in
+                            onCustomDownload(version, true)
+                        }
+                    )
                 }
-            )
+            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .padding(.bottom, 8)
@@ -1035,7 +1051,7 @@ private struct VersionDetails: View {
         if isManifestInstallerProduct(productId) {
             let size = await resolveInstallerSize(version: version)
             await MainActor.run {
-                cachedPackageSizes[version] = size
+                cachedPackageSizes[version] = VersionSizeEstimate(fullSize: size, deltaSize: nil)
                 _ = sizeLoadingVersions.remove(version)
             }
             return
@@ -1047,13 +1063,22 @@ private struct VersionDetails: View {
                 version: version,
                 requestedLanguage: StorageData.shared.defaultLanguage
             )
-            let (_, deps) = HDPIMParityDecisionEngine.shared.makeDownloadPresentation(from: decision)
-            let total = deps.reduce(Int64(0)) { acc, dep in
+            let (_, fullDeps) = HDPIMParityDecisionEngine.shared.makeDownloadPresentation(from: decision, useDelta: false)
+            let fullTotal = fullDeps.reduce(Int64(0)) { acc, dep in
                 acc + dep.packages.filter { $0.isSelected }
                     .reduce(Int64(0)) { $0 + $1.downloadSize }
             }
+            let hasDelta = decision.dependencies.flatMap { $0.packages }.contains { $0.selectedDeltaPackage != nil }
+            var deltaTotal: Int64? = nil
+            if hasDelta {
+                let (_, deltaDeps) = HDPIMParityDecisionEngine.shared.makeDownloadPresentation(from: decision, useDelta: true)
+                deltaTotal = deltaDeps.reduce(Int64(0)) { acc, dep in
+                    acc + dep.packages.filter { $0.isSelected }
+                        .reduce(Int64(0)) { $0 + $1.downloadSize }
+                }
+            }
             await MainActor.run {
-                cachedPackageSizes[version] = total
+                cachedPackageSizes[version] = VersionSizeEstimate(fullSize: fullTotal, deltaSize: deltaTotal)
                 _ = sizeLoadingVersions.remove(version)
             }
         } catch {
@@ -1141,7 +1166,7 @@ private struct VersionDetails: View {
 
 private struct VersionSizeEstimateView: View {
 	let version: String
-	@Binding var cachedPackageSizes: [String: Int64]
+	@Binding var cachedPackageSizes: [String: VersionSizeEstimate]
 	@Binding var sizeLoadingVersions: Set<String>
 
     var body: some View {
@@ -1149,10 +1174,25 @@ private struct VersionSizeEstimateView: View {
             Image(systemName: "arrow.down.doc")
                 .font(.system(size: 11))
                 .foregroundColor(.secondary.opacity(0.75))
-            if let size = cachedPackageSizes[version], size > 0 {
-                Text("预计下载 ~\(ByteCountFormatter.string(fromByteCount: size, countStyle: .file))")
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundColor(.primary.opacity(0.8))
+            if let estimate = cachedPackageSizes[version], estimate.fullSize > 0 {
+                if let deltaSize = estimate.deltaSize {
+                    Text("全量包 ~\(ByteCountFormatter.string(fromByteCount: estimate.fullSize, countStyle: .file))")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundColor(.primary.opacity(0.8))
+                    Text("·")
+                        .font(.system(size: 11))
+                        .foregroundColor(.secondary.opacity(0.4))
+                    Image(systemName: "arrow.triangle.2.circlepath")
+                        .font(.system(size: 10))
+                        .foregroundColor(.green.opacity(0.85))
+                    Text("增量包 ~\(ByteCountFormatter.string(fromByteCount: deltaSize, countStyle: .file))")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundColor(.green)
+                } else {
+                    Text("预计下载 ~\(ByteCountFormatter.string(fromByteCount: estimate.fullSize, countStyle: .file))")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundColor(.primary.opacity(0.8))
+                }
             } else if sizeLoadingVersions.contains(version) {
                 ProgressView()
                     .controlSize(.mini)
@@ -1537,14 +1577,14 @@ private struct VersionDownloadButton: View {
 	let productId: String
 	let version: String
     let onSelect: (String) -> Void
-    let onCustomDownload: (String) -> Void
+    let onCustomDownload: (String, Bool) -> Void
 
     var body: some View {
         Button(action: {
             if isManifestInstallerProduct(productId) {
                 onSelect(version)
             } else {
-                onCustomDownload(version)
+                onCustomDownload(version, false)
             }
         }) {
             Text("下载")
@@ -1555,6 +1595,28 @@ private struct VersionDownloadButton: View {
         }
         .buttonStyle(BeautifulButtonStyle(baseColor: Color.blue))
         .padding(.top, 8)
+    }
+}
+
+private struct DeltaUpdateButton: View {
+    let version: String
+    let onDeltaUpdate: (String) -> Void
+
+    var body: some View {
+        Button(action: { onDeltaUpdate(version) }) {
+            HStack(spacing: 4) {
+                Image(systemName: "arrow.triangle.2.circlepath")
+                    .font(.system(size: 12, weight: .medium))
+                Text("增量更新")
+                    .font(.system(size: 14, weight: .medium))
+            }
+            .frame(height: 24)
+            .padding(.horizontal, 14)
+            .foregroundColor(.white)
+        }
+        .buttonStyle(BeautifulButtonStyle(baseColor: Color.green))
+        .padding(.top, 8)
+        .help(String(localized: "基于已安装版本仅下载差异部分，节省下载流量"))
     }
 }
 

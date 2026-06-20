@@ -30,6 +30,8 @@ class HDPIMRollbackHelper {
                 print("Warning: 恢复备份失败: \(error.localizedDescription)")
             }
         }
+
+        HDPIMUserOwnershipFixer.restoreUserOwnership(logHandler: { print("[HDPIM Rollback] \($0)") })
     }
 
 	static func executeUninstallPIMX(

@@ -38,6 +38,12 @@ class NewDownloadTask: Identifiable, ObservableObject, @unchecked Sendable  {
         totalStatus ?? .waiting
     }
 
+    var isDeltaUpdate: Bool {
+        dependenciesToDownload.contains { dependency in
+            dependency.packages.contains { !$0.deltaBasePackageVersion.isEmpty }
+        }
+    }
+
     var destinationURL: URL { directory }
 
     var formattedTotalSize: String {

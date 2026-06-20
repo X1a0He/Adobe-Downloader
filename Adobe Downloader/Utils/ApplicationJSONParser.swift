@@ -22,6 +22,10 @@ struct DeltaPackageInfo: Codable, Equatable {
     var basePackageVersion: String = ""
     var packageName: String = ""
     var metadataFilePath: String = ""
+    var path: String = ""
+    var downloadSize: Int64 = 0
+    var extractSize: Int64 = 0
+    var validationURL: String = ""
     var properties: [String: String] = [:]
 }
 
@@ -297,9 +301,33 @@ class ApplicationJSONParser {
                 dp.basePackageVersion = delta["BasePackageVersion"] as? String ?? ""
                 dp.packageName = delta["PackageName"] as? String ?? ""
                 dp.metadataFilePath = delta["MetadataFilePath"] as? String ?? ""
-                if let dict = delta as? [String: String] {
-                    dp.properties = dict
+                dp.path = delta["Path"] as? String ?? ""
+
+                switch delta["DownloadSize"] {
+                case let n as NSNumber: dp.downloadSize = n.int64Value
+                case let s as String: dp.downloadSize = Int64(s) ?? 0
+                default: dp.downloadSize = 0
                 }
+
+                switch delta["ExtractSize"] {
+                case let n as NSNumber: dp.extractSize = n.int64Value
+                case let s as String: dp.extractSize = Int64(s) ?? 0
+                default: dp.extractSize = 0
+                }
+
+                dp.validationURL = firstString(
+                    delta,
+                    keys: ["ValidationURL", "validationURL", "validationUrl", "validation_url"]
+                ) ?? ""
+
+                var props: [String: String] = [:]
+                for (key, value) in delta {
+                    if let stringValue = value as? String {
+                        props[key] = stringValue
+                    }
+                }
+                dp.properties = props
+
                 return dp
             }
         }

@@ -553,7 +553,8 @@ class HDPIMInstallHelper {
         extractDir: URL,
         aliasPackageName: String,
         productInstallDir: String,
-        propertyTable: HDPIMPropertyTable
+        propertyTable: HDPIMPropertyTable,
+        skipAssetSourceValidation: Bool = false
     ) throws -> ExtractedPackageValidationResult {
         guard FileManager.default.fileExists(atPath: extractDir.path) else {
             throw HDPIMInstallError.extractionFailed("解压目录不存在: \(extractDir.path)")
@@ -577,7 +578,9 @@ class HDPIMInstallHelper {
 
         let parser = PIMXParser(propertyTable: validationTable)
         let packageInfo = try parser.parse(pimxURL: pimxURL, xmlData: pimxData, extractDir: extractDir)
-        try validateRequiredAssetSources(packageName: parsedPackage.packageName, assetReferences: packageInfo.assetReferences)
+        if !skipAssetSourceValidation {
+            try validateRequiredAssetSources(packageName: parsedPackage.packageName, assetReferences: packageInfo.assetReferences)
+        }
 
         return ExtractedPackageValidationResult(
             pimxURL: pimxURL,

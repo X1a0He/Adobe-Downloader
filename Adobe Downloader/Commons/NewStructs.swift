@@ -262,6 +262,8 @@ class Package: Identifiable, ObservableObject, Codable {
 
     @Published var isSelected: Bool = false
     var isBaselineDownloaded: Bool = false
+    var deltaBasePackageVersion: String = ""
+    var baselinePackageName: String = ""
     var isRequired: Bool = false
     var isDefaultSelected: Bool = false
     var isAdobeDownloaderPreselected: Bool = false
@@ -385,7 +387,7 @@ class Package: Identifiable, ObservableObject, Codable {
     }
 
     enum CodingKeys: String, CodingKey {
-        case id, type, fullPackageName, downloadSize, downloadURL, manifestURL, packageVersion, validationURL, validationURLType1, packageHashKey, condition, isRequired, isDefaultSelected, isAdobeDownloaderPreselected, isOfficiallyEligible, officialFilterReasons, isSelected, isBaselineDownloaded, hostValidation
+        case id, type, fullPackageName, downloadSize, downloadURL, manifestURL, packageVersion, validationURL, validationURLType1, packageHashKey, condition, isRequired, isDefaultSelected, isAdobeDownloaderPreselected, isOfficiallyEligible, officialFilterReasons, isSelected, isBaselineDownloaded, deltaBasePackageVersion, baselinePackageName, hostValidation
     }
 
     func encode(to encoder: Encoder) throws {
@@ -408,6 +410,8 @@ class Package: Identifiable, ObservableObject, Codable {
         try container.encode(officialFilterReasons, forKey: .officialFilterReasons)
         try container.encode(isSelected, forKey: .isSelected)
         try container.encode(isBaselineDownloaded, forKey: .isBaselineDownloaded)
+        try container.encode(deltaBasePackageVersion, forKey: .deltaBasePackageVersion)
+        try container.encode(baselinePackageName, forKey: .baselinePackageName)
         try container.encodeIfPresent(hostValidation, forKey: .hostValidation)
     }
 
@@ -431,6 +435,8 @@ class Package: Identifiable, ObservableObject, Codable {
         officialFilterReasons = try container.decodeIfPresent([String].self, forKey: .officialFilterReasons) ?? []
         isSelected = (try container.decodeIfPresent(Bool.self, forKey: .isSelected) ?? false) || isRequired || isDefaultSelected
         isBaselineDownloaded = try container.decodeIfPresent(Bool.self, forKey: .isBaselineDownloaded) ?? false
+        deltaBasePackageVersion = try container.decodeIfPresent(String.self, forKey: .deltaBasePackageVersion) ?? ""
+        baselinePackageName = try container.decodeIfPresent(String.self, forKey: .baselinePackageName) ?? ""
         hostValidation = try container.decodeIfPresent(HDPIMHostValidationSnapshot.self, forKey: .hostValidation)
     }
 }

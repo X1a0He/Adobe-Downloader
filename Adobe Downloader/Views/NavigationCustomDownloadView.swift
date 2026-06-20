@@ -25,12 +25,14 @@ struct NavigationCustomDownloadView: View {
 
     let productId: String
     let version: String
+    let useDelta: Bool
     let onDownloadStart: ([DependenciesToDownload]) -> Void
     let onDismiss: () -> Void
 
-    init(productId: String, version: String, onDownloadStart: @escaping ([DependenciesToDownload]) -> Void, onDismiss: @escaping () -> Void) {
+    init(productId: String, version: String, useDelta: Bool = false, onDownloadStart: @escaping ([DependenciesToDownload]) -> Void, onDismiss: @escaping () -> Void) {
         self.productId = productId
         self.version = version
+        self.useDelta = useDelta
         self.onDownloadStart = onDownloadStart
         self.onDismiss = onDismiss
     }
@@ -151,7 +153,7 @@ struct NavigationCustomDownloadView: View {
             }
         }
 
-        return HDPIMParityDecisionEngine.shared.makeDownloadPresentation(from: decision)
+        return HDPIMParityDecisionEngine.shared.makeDownloadPresentation(from: decision, useDelta: useDelta)
     }
 
     private func makeInstallerPackageInfo(product: Product) -> ([Package], [DependenciesToDownload]) {

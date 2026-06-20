@@ -8,6 +8,17 @@ private func formatDurationLocal(_ seconds: TimeInterval) -> String {
     return String(format: "%02d:%02d:%02d", hours, minutes, secs)
 }
 
+private let taskDateFormatterLocal: DateFormatter = {
+    let formatter = DateFormatter()
+    formatter.locale = Locale(identifier: "en_US_POSIX")
+    formatter.dateFormat = "yyyy.MM.dd HH:mm:ss"
+    return formatter
+}()
+
+private func formatTaskDateLocal(_ date: Date) -> String {
+    taskDateFormatterLocal.string(from: date)
+}
+
 struct TaskCard: View {
     @ObservedObject var task: NewDownloadTask
     let onAction: (TaskAction) -> Void
@@ -61,6 +72,9 @@ struct TaskCard: View {
 
             case .completed(let info):
                 CompletedInfoView(task: task, info: info, onOpenInFinder: openInFinder)
+                    .padding(.horizontal, 24)
+                    .padding(.bottom, 8)
+                CompletedTimeInfoView(task: task, info: info)
                     .padding(.horizontal, 24)
                     .padding(.bottom, 16)
 
@@ -416,6 +430,18 @@ private struct CardHeaderView<Badge: View, Actions: View>: View {
                         .padding(.vertical, 2)
                         .background(.ultraThinMaterial)
                         .clipShape(RoundedRectangle(cornerRadius: 4))
+
+                    if task.isDeltaUpdate {
+                        Text(String(localized: "增量包"))
+                            .font(.system(size: 9, weight: .semibold))
+                            .foregroundColor(.orange)
+                            .padding(.horizontal, 5)
+                            .padding(.vertical, 1)
+                            .background(
+                                RoundedRectangle(cornerRadius: 3)
+                                    .fill(Color.orange.opacity(0.12))
+                            )
+                    }
                 }
 
                 HStack(spacing: 3) {
@@ -683,10 +709,11 @@ private struct CompletedInfoView: View {
     let onOpenInFinder: () -> Void
 
     var body: some View {
-        HStack(spacing: 8) {
+        HStack(alignment: .center, spacing: 8) {
             Image(systemName: "checkmark.circle.fill")
                 .font(.system(size: 11))
                 .foregroundColor(.green.opacity(0.85))
+
             Text(task.formattedTotalSize)
                 .font(.system(size: 11, weight: .medium))
                 .foregroundColor(.primary.opacity(0.8))
@@ -697,11 +724,7 @@ private struct CompletedInfoView: View {
                     .font(.system(size: 11))
                     .foregroundColor(.secondary)
             }
-            Text("·")
-                .foregroundColor(.secondary.opacity(0.3))
-            Text(info.timestamp.formatted(date: .omitted, time: .shortened))
-                .font(.system(size: 11))
-                .foregroundColor(.secondary)
+
             Spacer()
             Button(action: onOpenInFinder) {
                 HStack(spacing: 4) {
@@ -713,6 +736,22 @@ private struct CompletedInfoView: View {
             }
             .buttonStyle(GlassButtonStyle(tint: .green))
         }
+    }
+}
+
+private struct CompletedTimeInfoView: View {
+    @ObservedObject var task: NewDownloadTask
+    let info: DownloadStatus.CompletionInfo
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Text(String(format: String(localized: "创建于: %@"), formatTaskDateLocal(task.createAt)))
+            Text("·")
+                .foregroundColor(.secondary.opacity(0.3))
+            Text(String(format: String(localized: "完成于: %@"), formatTaskDateLocal(info.timestamp)))
+        }
+        .font(.system(size: 10, weight: .medium))
+        .foregroundColor(.secondary.opacity(0.75))
     }
 }
 

@@ -80,6 +80,8 @@ class TaskPersistenceManager: @unchecked Sendable {
                             officialFilterReasons: package.officialFilterReasons,
                             isSelected: package.isSelected,
                             isBaselineDownloaded: package.isBaselineDownloaded,
+                            deltaBasePackageVersion: package.deltaBasePackageVersion,
+                            baselinePackageName: package.baselinePackageName,
                             hostValidation: package.hostValidation
                         )
                     }
@@ -222,6 +224,8 @@ class TaskPersistenceManager: @unchecked Sendable {
                     )
                     package.isSelected = package.isRequired || (packageData.isSelected ?? false) || package.isDefaultSelected || packageData.downloaded
                     package.isBaselineDownloaded = packageData.isBaselineDownloaded ?? packageData.downloaded
+                    package.deltaBasePackageVersion = packageData.deltaBasePackageVersion ?? inferredDeltaBasePackageVersion(from: package.fullPackageName)
+                    package.baselinePackageName = packageData.baselinePackageName ?? inferredBaselinePackageName(from: package.fullPackageName)
                     package.hostValidation = packageData.hostValidation
                     let clampedDownloadedSize = package.downloadSize > 0
                         ? min(max(packageData.downloadedSize, 0), package.downloadSize)
@@ -365,6 +369,26 @@ class TaskPersistenceManager: @unchecked Sendable {
             packages[package.fullPackageName] = package
         }
         return packages
+    }
+
+    private func inferredDeltaBasePackageVersion(from fullPackageName: String) -> String {
+        let name = fullPackageName
+            .replacingOccurrences(of: ".zip", with: "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let range = name.range(of: "_delta_", options: [.caseInsensitive, .backwards]) else {
+            return ""
+        }
+        return name[range.upperBound...].replacingOccurrences(of: "_", with: ".")
+    }
+
+    private func inferredBaselinePackageName(from fullPackageName: String) -> String {
+        let name = fullPackageName
+            .replacingOccurrences(of: ".zip", with: "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard let range = name.range(of: "_delta_", options: [.caseInsensitive, .backwards]) else {
+            return ""
+        }
+        return String(name[..<range.lowerBound])
     }
 
     private func restoredPackageArchiveSize(productId: String, package: Package, taskDirectory: URL, sapCode: String, savedAsCompleted: Bool) -> Int64? {
@@ -556,5 +580,7 @@ private struct PackageData: Codable {
     let officialFilterReasons: [String]?
     let isSelected: Bool?
     let isBaselineDownloaded: Bool?
+    let deltaBasePackageVersion: String?
+    let baselinePackageName: String?
     let hostValidation: HDPIMHostValidationSnapshot?
 }

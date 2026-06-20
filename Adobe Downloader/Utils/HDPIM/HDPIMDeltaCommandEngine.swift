@@ -33,6 +33,7 @@ enum DeltaCommandError: Error, LocalizedError {
 
 final class HDPIMDeltaCommandEngine {
 
+    var propertyTable: HDPIMPropertyTable?
     private let patcher = HDBSPatch()
     private let maxConcurrency = 3
 
@@ -352,9 +353,16 @@ final class HDPIMDeltaCommandEngine {
     private func resolveInstallPath(_ rawPath: String, installDir: String) -> String {
         guard !rawPath.isEmpty else { return "" }
 
-        let replaced = rawPath
-            .replacingOccurrences(of: "[INSTALLDIR]", with: installDir)
-            .replacingOccurrences(of: "[InstallDir]", with: installDir)
+        let replaced: String
+        if let propertyTable {
+            propertyTable.setInstallDir(installDir)
+            propertyTable.setProductInstallDir(installDir)
+            replaced = propertyTable.expandPath(rawPath)
+        } else {
+            replaced = rawPath
+                .replacingOccurrences(of: "[INSTALLDIR]", with: installDir)
+                .replacingOccurrences(of: "[InstallDir]", with: installDir)
+        }
 
         if replaced.hasPrefix("/") {
             return URL(fileURLWithPath: replaced).standardizedFileURL.path
