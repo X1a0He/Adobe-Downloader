@@ -631,7 +631,7 @@ private struct DotBadgeRow: View {
 
     private var fallbackText: String {
         if viewModel.latestDependenciesCount > 0 {
-            return "\(viewModel.latestDependenciesCount) 个依赖组件"
+            return String(format: String(localized: "%d 个依赖组件"), viewModel.latestDependenciesCount)
         }
         return String(localized: "最新版本可用")
     }
@@ -640,18 +640,18 @@ private struct DotBadgeRow: View {
         var list: [AnyView] = []
         if viewModel.isInstalled {
             let text = viewModel.installedVersionCount > 1
-                ? "已安装 \(viewModel.installedVersionCount) 版本"
-                : "已安装"
+                ? String(format: String(localized: "已安装 %d 版本"), viewModel.installedVersionCount)
+                : String(localized: "已安装")
             list.append(AnyView(DotBadge(text: text, tint: .green)))
         }
         if viewModel.isAnyVersionDownloaded && list.count < 2 {
-            list.append(AnyView(DotBadge(text: "已下载", tint: .green)))
+            list.append(AnyView(DotBadge(text: String(localized: "已下载"), tint: .green)))
         }
         if !viewModel.isArchitectureCompatible && list.count < 2 {
             list.append(AnyView(DotBadge(text: "需切架构", tint: .orange)))
         }
         if viewModel.uniqueVersionCount > 1 && list.count < 2 {
-            list.append(AnyView(DotBadge(text: "\(viewModel.uniqueVersionCount) 版本", tint: .secondary)))
+            list.append(AnyView(DotBadge(text: String(format: String(localized: "%d 版本"), viewModel.uniqueVersionCount), tint: .secondary)))
         }
         if viewModel.requiresHighOS && list.count < 2 {
             let label = viewModel.minOSDisplayFormatted.isEmpty

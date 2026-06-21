@@ -23,7 +23,7 @@ class NetworkManager: ObservableObject {
 	private let installManager = InstallManager()
     private var hasLoadedSavedTasks = false
 	private var lastInstallationProgress = 0.0
-	private var lastInstallationStatus = "准备安装..."
+	private var lastInstallationStatus = String(localized: "准备安装...")
 	private var lastInstallationPhase: InstallProgressPhase = .preparing
 	private var installationCancelledByUser = false
 	private var installationSessionID = UUID()
@@ -269,11 +269,11 @@ class NetworkManager: ObservableObject {
         await MainActor.run {
             installationSessionID = sessionID
             installationCancelledByUser = false
-            installationState = .installing(progress: 0, status: "准备安装...")
+            installationState = .installing(progress: 0, status: String(localized: "准备安装..."))
             installLogs = []
             installCommand = ""
             lastInstallationPhase = .preparing
-            updateInstallationSnapshot(progress: 0, status: "准备安装...")
+            updateInstallationSnapshot(progress: 0, status: String(localized: "准备安装..."))
         }
 
         do {
@@ -283,7 +283,7 @@ class NetworkManager: ObservableObject {
                     Task { @MainActor in
                         guard self.installationSessionID == sessionID else { return }
                         self.updateInstallationSnapshot(progress: progress, status: status)
-                        if status == "安装完成" {
+                        if status == String(localized: "安装完成") || status == "安装完成" {
 							self.completeInstallation()
                         } else {
                             self.installationState = .installing(progress: progress, status: status)
@@ -300,7 +300,7 @@ class NetworkManager: ObservableObject {
             
             await MainActor.run {
                 guard installationSessionID == sessionID else { return }
-                updateInstallationSnapshot(progress: 1.0, status: "安装完成")
+                updateInstallationSnapshot(progress: 1.0, status: String(localized: "安装完成"))
 				completeInstallation()
             }
         } catch {
@@ -350,7 +350,7 @@ class NetworkManager: ObservableObject {
         installLogs = []
         installCommand = ""
         lastInstallationProgress = 0
-        lastInstallationStatus = "准备安装..."
+        lastInstallationStatus = String(localized: "准备安装...")
         lastInstallationPhase = .preparing
         installationCancelledByUser = false
     }
@@ -360,11 +360,11 @@ class NetworkManager: ObservableObject {
         await MainActor.run {
             installationSessionID = sessionID
             installationCancelledByUser = false
-            installationState = .installing(progress: 0, status: "正在重试安装...")
+            installationState = .installing(progress: 0, status: String(localized: "正在重试安装..."))
             installLogs = []
             installCommand = ""
             lastInstallationPhase = .preparing
-            updateInstallationSnapshot(progress: 0, status: "正在重试安装...")
+            updateInstallationSnapshot(progress: 0, status: String(localized: "正在重试安装..."))
         }
         
         do {
@@ -374,8 +374,8 @@ class NetworkManager: ObservableObject {
                     Task { @MainActor in
                         guard self.installationSessionID == sessionID else { return }
                         self.updateInstallationSnapshot(progress: progress, status: status)
-                        if status == "安装完成" {
-							self.completeInstallation()
+                        if status == String(localized: "安装完成") || status == "安装完成" {
+                            self.completeInstallation()
                         } else {
                             self.installationState = .installing(progress: progress, status: status)
                         }
@@ -391,8 +391,8 @@ class NetworkManager: ObservableObject {
             
             await MainActor.run {
                 guard installationSessionID == sessionID else { return }
-                updateInstallationSnapshot(progress: 1.0, status: "安装完成")
-				completeInstallation()
+                updateInstallationSnapshot(progress: 1.0, status: String(localized: "安装完成"))
+                completeInstallation()
             }
         } catch {
             await MainActor.run {
@@ -422,7 +422,7 @@ class NetworkManager: ObservableObject {
             return InstallProgressViewData(
                 productName: productName,
                 progress: 0,
-                status: "准备安装...",
+                status: String(localized: "准备安装..."),
                 logs: installLogs,
                 installCommand: installCommand,
                 errorDetails: nil,
@@ -444,7 +444,7 @@ class NetworkManager: ObservableObject {
             return InstallProgressViewData(
                 productName: productName,
                 progress: 1.0,
-                status: "安装完成",
+                status: String(localized: "安装完成"),
                 logs: installLogs,
                 installCommand: installCommand,
                 errorDetails: nil,
@@ -768,7 +768,7 @@ class NetworkManager: ObservableObject {
         lastInstallationProgress = progress
         lastInstallationStatus = status
 
-        if status == "安装完成" {
+        if status == String(localized: "安装完成") || status == "安装完成" {
             lastInstallationPhase = .finishing
             return
         }
@@ -781,10 +781,11 @@ class NetworkManager: ObservableObject {
 
     private func normalizedInstallFailureStatus(from error: Error) -> String {
         let message = error.localizedDescription.trimmingCharacters(in: .whitespacesAndNewlines)
-        if message.hasPrefix("安装失败") {
+        let failurePrefix = String(localized: "安装失败")
+        if message.hasPrefix(failurePrefix) || message.hasPrefix("安装失败") {
             return message
         }
-        return "安装失败: \(message)"
+        return String(format: String(localized: "安装失败: %@"), message)
     }
 
     private func appendInstallLog(_ message: String) {

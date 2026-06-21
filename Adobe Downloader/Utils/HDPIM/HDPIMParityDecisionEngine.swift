@@ -1130,7 +1130,7 @@ final class HDPIMParityDecisionEngine {
         if !evaluateCondition(packageDecision.parsedPackage.condition, context: hostContext) {
             return HDPIMHostValidationSnapshot(
                 isInstallable: false,
-                reason: "Condition 不满足当前机器"
+                reason: String(localized: "Condition 不满足当前机器")
             )
         }
 
@@ -1298,7 +1298,7 @@ final class HDPIMParityDecisionEngine {
         ) {
             return HDPIMHostValidationSnapshot(
                 isInstallable: false,
-                reason: "模块配置不适用"
+                reason: String(localized: "模块配置不适用")
             )
         }
 
@@ -1311,7 +1311,7 @@ final class HDPIMParityDecisionEngine {
         if !evaluateCondition(package.parsed.condition, context: context) {
             return HDPIMHostValidationSnapshot(
                 isInstallable: false,
-                reason: "Condition 不满足目标架构"
+                reason: String(localized: "Condition 不满足目标架构")
             )
         }
 
@@ -1565,7 +1565,7 @@ final class HDPIMParityDecisionEngine {
                 var officialFilterReasons: [String] = []
 
                 if !passesModuleSelection {
-                    officialFilterReasons.append("模块配置不匹配")
+                    officialFilterReasons.append(String(localized: "模块配置不匹配"))
                 }
 
                 if !evaluatePackageCompatibility(
@@ -1573,11 +1573,11 @@ final class HDPIMParityDecisionEngine {
                     propertyTable: hostPropertyTable,
                     targetArchitecture: targetArchitecture
                 ) {
-                    officialFilterReasons.append("兼容性校验失败")
+                    officialFilterReasons.append(String(localized: "兼容性校验失败"))
                 }
 
                 if !evaluateCondition(parsedPackage.condition, context: targetContext) {
-                    officialFilterReasons.append("Condition 不满足")
+                    officialFilterReasons.append(String(localized: "Condition 不满足"))
                 }
 
                 let isOfficiallyEligible = officialFilterReasons.isEmpty

@@ -62,11 +62,11 @@ enum VersionPickerFilter: String, CaseIterable, Identifiable {
 
     var title: String {
         switch self {
-        case .all: return "全部"
-        case .latest: return "仅最新"
-        case .downloaded: return "已下载"
-        case .installed: return "已安装"
-        case .hasDependencies: return "有依赖"
+        case .all: return String(localized: "全部")
+        case .latest: return String(localized: "仅最新")
+        case .downloaded: return String(localized: "已下载")
+        case .installed: return String(localized: "已安装")
+        case .hasDependencies: return String(localized: "有依赖")
         }
     }
 
@@ -968,7 +968,7 @@ private struct VersionDetails: View {
                             Image(systemName: "shippingbox.fill")
                                 .font(.system(size: 11))
                                 .foregroundColor(.blue.opacity(0.8))
-                            Text("依赖组件")
+                            Text(String(localized: "依赖组件"))
                                 .font(.system(size: 12, weight: .medium))
                                 .foregroundColor(.secondary)
                             Text("(\(displayedDependencies.count))")
@@ -996,7 +996,7 @@ private struct VersionDetails: View {
                             Image(systemName: "square.stack.3d.up.fill")
                                 .font(.system(size: 11))
                                 .foregroundColor(.purple.opacity(0.8))
-                            Text("可选模块")
+                            Text(String(localized: "可选模块"))
                                 .font(.system(size: 12, weight: .medium))
                                 .foregroundColor(.secondary)
                             Text("(\(info.modules.count))")
@@ -1176,7 +1176,7 @@ private struct VersionSizeEstimateView: View {
                 .foregroundColor(.secondary.opacity(0.75))
             if let estimate = cachedPackageSizes[version], estimate.fullSize > 0 {
                 if let deltaSize = estimate.deltaSize {
-                    Text("全量包 ~\(ByteCountFormatter.string(fromByteCount: estimate.fullSize, countStyle: .file))")
+                    Text(String(format: String(localized: "全量包 ~%@"), ByteCountFormatter.string(fromByteCount: estimate.fullSize, countStyle: .file)))
                         .font(.system(size: 11, weight: .medium))
                         .foregroundColor(.primary.opacity(0.8))
                     Text("·")
@@ -1185,18 +1185,18 @@ private struct VersionSizeEstimateView: View {
                     Image(systemName: "arrow.triangle.2.circlepath")
                         .font(.system(size: 10))
                         .foregroundColor(.green.opacity(0.85))
-                    Text("增量包 ~\(ByteCountFormatter.string(fromByteCount: deltaSize, countStyle: .file))")
+                    Text(String(format: String(localized: "增量包 ~%@"), ByteCountFormatter.string(fromByteCount: deltaSize, countStyle: .file)))
                         .font(.system(size: 11, weight: .semibold))
                         .foregroundColor(.green)
                 } else {
-                    Text("预计下载 ~\(ByteCountFormatter.string(fromByteCount: estimate.fullSize, countStyle: .file))")
+                    Text(String(format: String(localized: "预计下载 ~%@"), ByteCountFormatter.string(fromByteCount: estimate.fullSize, countStyle: .file)))
                         .font(.system(size: 11, weight: .medium))
                         .foregroundColor(.primary.opacity(0.8))
                 }
             } else if sizeLoadingVersions.contains(version) {
                 ProgressView()
                     .controlSize(.mini)
-                Text("计算中…")
+                Text(String(localized: "计算中…"))
                     .font(.system(size: 11))
                     .foregroundColor(.secondary)
             } else {
@@ -1318,7 +1318,7 @@ private struct InstalledProductUninstallSection: View {
 				Image(systemName: "checkmark.seal.fill")
 					.font(.system(size: 12))
 					.foregroundColor(.green)
-				Text("已安装")
+				Text(String(localized: "已安装"))
 					.font(.system(size: 12, weight: .semibold))
 					.foregroundColor(.primary.opacity(0.9))
 				Text(packageCountText)
@@ -1462,7 +1462,7 @@ private struct InstalledProductUninstallSection: View {
 						Image(systemName: "shippingbox")
 							.font(.system(size: 10))
 							.foregroundColor(.secondary)
-						Text("已安装包")
+						Text(String(localized: "已安装包"))
 							.font(.system(size: 12, weight: .medium))
 							.foregroundColor(.primary.opacity(0.85))
 					}
@@ -1607,7 +1607,7 @@ private struct DeltaUpdateButton: View {
             HStack(spacing: 4) {
                 Image(systemName: "arrow.triangle.2.circlepath")
                     .font(.system(size: 12, weight: .medium))
-                Text("增量更新")
+                Text(String(localized: "增量更新"))
                     .font(.system(size: 14, weight: .medium))
             }
             .frame(height: 24)
@@ -1755,7 +1755,7 @@ struct ExistingPathButton: View {
 
     var body: some View {
         if isVisible {
-            Text("已安装")
+            Text(String(localized: "已安装"))
                 .font(.system(size: 10, weight: .medium))
                 .foregroundColor(.green.opacity(0.9))
                 .padding(.horizontal, 6)
@@ -1777,7 +1777,7 @@ struct DownloadedPackageButton: View {
 
     var body: some View {
         if isVisible {
-            Text("已下载")
+            Text(String(localized: "已下载"))
                 .font(.system(size: 10, weight: .medium))
                 .foregroundColor(.blue.opacity(0.9))
                 .padding(.horizontal, 6)

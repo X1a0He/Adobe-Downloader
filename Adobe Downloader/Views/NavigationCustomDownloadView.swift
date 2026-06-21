@@ -714,11 +714,11 @@ private enum CustomPackageFilter: String, CaseIterable, Identifiable {
 
     var title: String {
         switch self {
-        case .required: return "必需"
-        case .optional: return "可选"
-        case .core: return "核心"
-        case .nonCore: return "非核心"
-        case .selectedOnly: return "仅已选"
+        case .required: return String(localized: "必需")
+        case .optional: return String(localized: "可选")
+        case .core: return String(localized: "核心")
+        case .nonCore: return String(localized: "非核心")
+        case .selectedOnly: return String(localized: "仅已选")
         }
     }
 
@@ -775,7 +775,7 @@ private struct CustomDownloadFilterBar: View {
                     .font(.system(size: 13))
                     .foregroundColor(.secondary.opacity(0.7))
 
-                TextField("搜索包名、版本、类型", text: $searchText)
+                TextField(String(localized: "搜索包名、版本、类型"), text: $searchText)
                     .textFieldStyle(PlainTextFieldStyle())
                     .font(.system(size: 13))
 
@@ -810,23 +810,23 @@ private struct CustomDownloadFilterBar: View {
                 Spacer(minLength: 12)
 
                 Button(action: onSelectAllVisible) {
-                    Text("全选当前")
+                    Text(String(localized: "全选当前"))
                         .font(.system(size: 11, weight: .medium))
                         .foregroundColor(.blue)
                 }
                 .buttonStyle(.plain)
-                .help("选中当前筛选下可见的全部包")
+                .help(String(localized: "选中当前筛选下可见的全部包"))
 
                 Text("·")
                     .foregroundColor(.secondary.opacity(0.4))
 
                 Button(action: onClearAllSelection) {
-                    Text("清空选择")
+                    Text(String(localized: "清空选择"))
                         .font(.system(size: 11, weight: .medium))
                         .foregroundColor(.secondary)
                 }
                 .buttonStyle(.plain)
-                .help("仅保留必需包")
+                .help(String(localized: "仅保留必需包"))
             }
         }
         .padding(.horizontal)
@@ -1469,23 +1469,23 @@ private struct DependencySection: View {
 
             HStack(spacing: 4) {
                 Button(action: { onSelectGroup(dependency.sapCode) }) {
-                    Text("全选")
+                    Text(String(localized: "全选"))
                         .font(.system(size: 10, weight: .medium))
                         .foregroundColor(.blue)
                 }
                 .buttonStyle(.plain)
-                .help("选中该依赖下所有包")
+                .help(String(localized: "选中该依赖下所有包"))
 
                 Text("·")
                     .foregroundColor(.secondary.opacity(0.4))
 
                 Button(action: { onClearGroup(dependency.sapCode) }) {
-                    Text("清空")
+                    Text(String(localized: "清空"))
                         .font(.system(size: 10, weight: .medium))
                         .foregroundColor(.secondary)
                 }
                 .buttonStyle(.plain)
-                .help("取消该依赖下非必需包")
+                .help(String(localized: "取消该依赖下非必需包"))
             }
         }
         .padding(.horizontal, 12)
@@ -1657,19 +1657,19 @@ private struct NavigationEnhancedPackageRow: View {
                     packageTypeBadge
 
                     if isDownloaded {
-                        subtleBadge(text: "已下载", color: .green)
+                        subtleBadge(text: String(localized: "已下载"), color: .green)
                     }
 
                     if isRequiredPackage {
-                        subtleBadge(text: "必需", color: .red)
+                        subtleBadge(text: String(localized: "必需"), color: .red)
                     } else if package.isAdobeDownloaderPreselected {
-                        subtleBadge(text: "Adobe Downloader 预选", color: .purple)
+                        subtleBadge(text: String(localized: "Adobe Downloader 预选"), color: .purple)
                     } else if package.isDefaultSelected {
-                        subtleBadge(text: "默认选择", color: .blue)
+                        subtleBadge(text: String(localized: "默认选择"), color: .blue)
                     }
 
                     if !package.isOfficiallyEligible {
-                        subtleBadge(text: "可选", color: .orange)
+                        subtleBadge(text: String(localized: "可选"), color: .orange)
                     }
 
                     Spacer(minLength: 8)
@@ -1693,7 +1693,7 @@ private struct NavigationEnhancedPackageRow: View {
 
                 #if DEBUG
                 if !package.condition.isEmpty {
-                    Text("条件: \(package.condition)")
+                    Text(String(format: String(localized: "条件: %@"), package.condition))
                         .font(.system(size: 10))
                         .foregroundColor(.secondary.opacity(0.8))
                         .textSelection(.enabled)
@@ -1741,12 +1741,12 @@ private struct NavigationEnhancedPackageRow: View {
 
     private var checkboxHelp: String {
         if isDownloaded {
-            return "此包已存在于离线源目录，无法取消选择"
+            return String(localized: "此包已存在于离线源目录，无法取消选择")
         }
         if isRequiredPackage {
-            return "此包为必需包，无法取消选择"
+            return String(localized: "此包为必需包，无法取消选择")
         }
-        return "点击切换选择状态"
+        return String(localized: "点击切换选择状态")
     }
 
     @ViewBuilder

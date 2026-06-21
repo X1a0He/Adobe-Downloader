@@ -714,7 +714,7 @@ struct PermissionSettingsView: View {
                     Button(action: { showAppPermissionGuide = true }) {
                         HStack(spacing: 4) {
                             Image(systemName: "gearshape.fill").font(.system(size: 10))
-                            Text("打开设置").font(.system(size: 12))
+                            Text(String(localized: "打开设置")).font(.system(size: 12))
                         }
                         .foregroundColor(.white)
                     }
@@ -745,7 +745,7 @@ struct PermissionSettingsView: View {
                     Button(action: { showHelperPermissionGuide = true }) {
                         HStack(spacing: 4) {
                             Image(systemName: "gearshape.fill").font(.system(size: 10))
-                            Text("打开设置").font(.system(size: 12))
+                            Text(String(localized: "打开设置")).font(.system(size: 12))
                         }
                         .foregroundColor(.white)
                     }
@@ -761,18 +761,18 @@ struct PermissionSettingsView: View {
         .onAppear {
             viewModel.refreshFullDiskAccessStatus()
         }
-        .alert("设置 Adobe Downloader 全磁盘访问", isPresented: $showAppPermissionGuide) {
-            Button("取消", role: .cancel) { }
-            Button("前往设置") {
+        .alert(String(localized: "设置 Adobe Downloader 全磁盘访问"), isPresented: $showAppPermissionGuide) {
+            Button(String(localized: "取消"), role: .cancel) { }
+            Button(String(localized: "前往设置")) {
                 FullDiskAccessPermission.openSettings()
             }
         } message: {
-            Text("1. 在系统设置中找到「Adobe Downloader」\n2. 勾选以授予全磁盘访问权限\n3. 返回此界面点击刷新按钮验证")
+            Text(String(localized: "1. 在系统设置中找到「Adobe Downloader」\n2. 勾选以授予全磁盘访问权限\n3. 返回此界面点击刷新按钮验证"))
         }
-        .alert("Helper 权限说明", isPresented: $showHelperPermissionGuide) {
-            Button("知道了", role: .cancel) { }
+        .alert(String(localized: "Helper 权限说明"), isPresented: $showHelperPermissionGuide) {
+            Button(String(localized: "知道了"), role: .cancel) { }
         } message: {
-            Text("Helper 的权限状态可通过右侧刷新按钮检测。\n\n如需访问受保护目录，Helper 会在执行操作时自动请求授权。")
+            Text(String(localized: "Helper 的权限状态可通过右侧刷新按钮检测。\n\n如需访问受保护目录，Helper 会在执行操作时自动请求授权。"))
         }
     }
 
@@ -868,7 +868,7 @@ private struct GeneralSettingsAlerts: ViewModifier {
                 Text(viewModel.alertMessage)
             }
             .alert("确认下载", isPresented: $viewModel.showDownloadOnlyConfirmAlert) {
-                Button("取消", role: .cancel) { }
+                Button(String(localized: "取消"), role: .cancel) { }
                 Button("确定") {
                     Task {
                         startDownloadSetup()

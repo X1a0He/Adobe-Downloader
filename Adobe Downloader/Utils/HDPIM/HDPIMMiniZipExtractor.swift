@@ -49,29 +49,29 @@ enum HDPIMMiniZipError: Error, LocalizedError {
     var errorDescription: String? {
         switch self {
         case .openFailed(let path):
-            return "无法打开 ZIP 文件: \(path)"
+            return String(format: String(localized: "无法打开 ZIP 文件: %@"), path)
         case .invalidEntry(let path):
-            return "ZIP 条目无效: \(path)"
+            return String(format: String(localized: "ZIP 条目无效: %@"), path)
         case .invalidEntryPath(let path):
-            return "ZIP 条目路径非法: \(path)"
+            return String(format: String(localized: "ZIP 条目路径非法: %@"), path)
         case .openCurrentFileFailed(let path):
-            return "无法打开 ZIP 条目: \(path)"
+            return String(format: String(localized: "无法打开 ZIP 条目: %@"), path)
         case .readFailed(let path):
-            return "读取 ZIP 条目失败: \(path)"
+            return String(format: String(localized: "读取 ZIP 条目失败: %@"), path)
         case .writeFailed(let path):
-            return "写入解压文件失败: \(path)"
+            return String(format: String(localized: "写入解压文件失败: %@"), path)
         case .closeCurrentFileFailed(let path):
-            return "关闭 ZIP 条目失败: \(path)"
+            return String(format: String(localized: "关闭 ZIP 条目失败: %@"), path)
         case .sizeMismatch(let path, let expected, let actual):
-            return "ZIP 条目大小不匹配: \(path), expected=\(expected), actual=\(actual)"
+            return String(format: String(localized: "ZIP 条目大小不匹配: %@, expected=%llu, actual=%llu"), path, expected, actual)
         case .crcMismatch(let path, let expected, let actual):
-            return String(format: "ZIP 条目 CRC 不匹配: %@, expected=%08x, actual=%08x", path, expected, actual)
+            return String(format: String(localized: "ZIP 条目 CRC 不匹配: %@, expected=%08x, actual=%08x"), path, expected, actual)
         case .invalidSymlinkTarget(let path):
-            return "符号链接目标无效: \(path)"
+            return String(format: String(localized: "符号链接目标无效: %@"), path)
         case .brokenSymlink(let path):
-            return "符号链接目标不存在: \(path)"
+            return String(format: String(localized: "符号链接目标不存在: %@"), path)
         case .cancelled:
-            return "解压已取消"
+            return String(localized: "解压已取消")
         }
     }
 }

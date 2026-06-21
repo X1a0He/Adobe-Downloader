@@ -21,13 +21,13 @@ private enum HelperPlaygroundPreset: String, CaseIterable, Identifiable {
     var title: String {
         switch self {
         case .whoami:
-            return "whoami（检查是否 root）"
+            return String(localized: "whoami（检查是否 root）")
         case .id:
-            return "id（用户/组信息）"
+            return String(localized: "id（用户/组信息）")
         case .swVers:
-            return "sw_vers（系统版本）"
+            return String(localized: "sw_vers（系统版本）")
         case .launchctlPrint:
-            return "launchctl print system/...（服务状态）"
+            return String(localized: "launchctl print system/...（服务状态）")
         case .listAdobeSupport:
             return "ls /Library/Application Support/Adobe"
         }
@@ -434,7 +434,7 @@ struct HelperPlaygroundView: View {
                 ScrollViewReader { proxy in
                     ScrollView {
                         if logStore.entries.isEmpty {
-                            Text(String(localized: "（暂无日志）"))
+                            Text(String(localized: "(No logs available)"))
                                 .font(.system(size: 11))
                                 .foregroundColor(.secondary.opacity(0.75))
                                 .frame(maxWidth: .infinity, minHeight: 80, alignment: .center)
