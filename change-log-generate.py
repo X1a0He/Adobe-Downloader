@@ -56,24 +56,25 @@ def parse_input(text):
 
 
 def main():
-    txt = """1. 全新的下载机制，Adobe Downloader 对下载机制进行了进一步完善，引入了加载项单独下载功能
-2. 全新的产品安装机制，Adobe Downloader 抛弃了原有的 Setup 组件依赖，采用新的安装引擎，支持所有产品的全量安装和增量安装，并引入了加载项单独安装功能
-3. 全新的产品卸载机制，Adobe Downloader 引入了加载项卸载功能，你可以对某个产品的加载项进行单独卸载
-4. 得益于全新的产品安装机制，你可以在 Adobe Creative Cloud 中找到通过 Adobe Downloader 安装的所有产品，包括依赖项也能够被正确识别
-5. 适配 macOS 27，并支持 Liquid Glass 风格，带来更加丰富的 UI 界面
-6. 更多 Adobe Downloader 3.0 新特性，等待你来体验
+    txt = """- fix: 修复了在下载 Adobe 产品的过程中，出现内存占用过大的问题
+- fix: 修复了在部分 Adobe 产品安装过程中，出现错误的问题
+- fix: 修复了在部分 Adobe 产品安装完成后，因权限而无法启动 App 的问题
+- feat: 优化了安装 Sheet 的显示，避免在屏幕太小的时候无法点击到最底部的按钮
+- feat: 为取消安装增加回滚
+- feat: 同步 Adobe Creative Cloud 官方安装行为，在安装后添加卸载快捷方式
+- feat: 引入了增量更新功能，在 3.1.0 版本中可以实现对已有产品的增量更新(必需使用 Adobe Downloader 下载)
+- feat: 优化了部分产品的版本选择页面
 
 ====================
 
-1. Introduced a brand-new download mechanism. Adobe Downloader further improves the download workflow and now supports downloading add-ons
-separately.
-2. Introduced a brand-new product installation mechanism. Adobe Downloader no longer depends on the original Setup component and now uses a new
-installation engine, supporting full and incremental installation for all products, as well as separate add-on installation.
-3. Introduced a brand-new product uninstallation mechanism. Adobe Downloader now supports uninstalling add-ons separately for a specific product.
-4. Thanks to the new installation mechanism, all products installed through Adobe Downloader can now be found in Adobe Creative Cloud, including
-correctly recognized dependencies.
-5. Added support for macOS 27 and Liquid Glass style, with a richer UI experience.
-6. More Adobe Downloader 3.0 features are ready for you to explore."""
+- fix: Fixed excessive memory usage during Adobe product downloads
+- fix: Fixed errors that occurred during installation of some Adobe products
+- fix: Fixed issue where some Adobe products could not launch due to permission problems after installation
+- feat: Optimized the installation Sheet display to prevent bottom buttons from being unreachable on small screens
+- feat: Added rollback support for installation cancellation
+- feat: Synced with Adobe Creative Cloud official installation behavior, adding uninstall shortcuts after installation
+- feat: Introduced incremental update functionality — in version 3.1.0, you can perform incremental updates on already installed products (must be downloaded using Adobe Downloader)
+- feat: Optimized the version selection page for some products"""
 
     changelog_cn, changelog_en, ps_cn, ps_en = parse_input(txt)
     xml_output = generate_xml(changelog_cn, changelog_en, ps_cn, ps_en)

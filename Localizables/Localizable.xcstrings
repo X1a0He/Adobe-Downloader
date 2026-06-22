@@ -1,22 +1,22 @@
 {
   "sourceLanguage" : "en",
   "strings" : {
-    "" :{
+    "" : {
 
     },
-    "—" :{
+    "—" : {
 
     },
-    "·" :{
+    "·" : {
 
     },
-    "· %lld" :{
+    "· %lld" : {
 
     },
-    "(%@)" :{
+    "(%@)" : {
 
     },
-    "(%lld)" :{
+    "(%lld)" : {
 
     },
     "(%lld/%lld)" : {
@@ -61,16 +61,6 @@
         }
       }
     },
-    "（暂无日志）" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "new",
-            "value" : "(No logs available)"
-          }
-        }
-      }
-    },
     "（输出会显示在这里）" : {
       "localizations" : {
         "en" : {
@@ -91,7 +81,357 @@
         }
       }
     },
-    "/" :{
+    "[Acrobat Install] PIMX staging 不匹配: %@, staging=%@, missing=%@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "[Acrobat Install] PIMX staging mismatch: %1$@, staging=%2$@, missing=%3$@"
+          }
+        }
+      }
+    },
+    "[Acrobat Install] PIMX 解析失败: %@, %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "[Acrobat Install] Failed to parse PIMX: %1$@, %2$@"
+          }
+        }
+      }
+    },
+    "[Acrobat Install] 使用 PIMX 自动安装: %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "[Acrobat Install] Installing automatically with PIMX: %1$@"
+          }
+        }
+      }
+    },
+    "[Acrobat Install] 使用 pkg 安装: %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "[Acrobat Install] Installing with pkg: %1$@"
+          }
+        }
+      }
+    },
+    "[Acrobat Install] 打开 app 安装器: %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "[Acrobat Install] Opening app installer: %1$@"
+          }
+        }
+      }
+    },
+    "[Acrobat Install] 挂载 DMG: %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "[Acrobat Install] Mounting DMG: %1$@"
+          }
+        }
+      }
+    },
+    "[Acrobat Install] 跳过非 Acrobat PIMX: %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "[Acrobat Install] Skipping non-Acrobat PIMX: %1$@"
+          }
+        }
+      }
+    },
+    "[HDPIM Install] 临时安装目录准备完成: %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "[HDPIM Install] Temporary install directory is ready: %1$@"
+          }
+        }
+      }
+    },
+    "[HDPIM Install] 安装源位于受保护目录，正在复制到临时安装目录: %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "[HDPIM Install] Install source is in a protected directory, copying to temporary install directory: %1$@"
+          }
+        }
+      }
+    },
+    "[HDPIM Pipeline] driver.xml 解析失败: %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "[HDPIM Pipeline] Failed to parse driver.xml: %1$@"
+          }
+        }
+      }
+    },
+    "[HDPIM Pipeline] driver.xml 解析成功: sapCode=%@, deps=%d" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "[HDPIM Pipeline] driver.xml parsed successfully: sapCode=%1$@, deps=%2$d"
+          }
+        }
+      }
+    },
+    "[HDPIM Pipeline] PIMX 校验通过: %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "[HDPIM Pipeline] PIMX validation passed: %1$@"
+          }
+        }
+      }
+    },
+    "[HDPIM Pipeline] ZIP 大小: %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "[HDPIM Pipeline] ZIP size: %1$@"
+          }
+        }
+      }
+    },
+    "[HDPIM Pipeline] 产品 %@ InstallDir: %@ → %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "[HDPIM Pipeline] Product %1$@ InstallDir: %2$@ -> %3$@"
+          }
+        }
+      }
+    },
+    "[HDPIM Pipeline] 产品 %@ 无 InstallDir，使用默认: %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "[HDPIM Pipeline] Product %1$@ has no InstallDir, using default: %2$@"
+          }
+        }
+      }
+    },
+    "[HDPIM Pipeline] 包 %@ 命中 delta 更新，基线版本: %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "[HDPIM Pipeline] Package %1$@ matched delta update, baseline version: %2$@"
+          }
+        }
+      }
+    },
+    "[HDPIM Pipeline] 包 %@ 已存在相同版本 %@，按官方链路仅补数据库记录" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "[HDPIM Pipeline] Package %1$@ already has the same version %2$@; only updating database records according to the official flow"
+          }
+        }
+      }
+    },
+    "[HDPIM Pipeline] 包 %@ 需要备份 %d 个目录" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "[HDPIM Pipeline] Package %1$@ needs to back up %2$d directories"
+          }
+        }
+      }
+    },
+    "[HDPIM Pipeline] 发现 diff.json: %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "[HDPIM Pipeline] Found diff.json: %1$@"
+          }
+        }
+      }
+    },
+    "[HDPIM Pipeline] 安装包大小校验通过: %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "[HDPIM Pipeline] Install package size verification passed: %1$@"
+          }
+        }
+      }
+    },
+    "[HDPIM Pipeline] 差分包内未找到 diff.json，标记 delta 失败并中止" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "[HDPIM Pipeline] diff.json was not found in the delta package; marking delta as failed and aborting"
+          }
+        }
+      }
+    },
+    "[HDPIM Pipeline] 开始解压 (%d/%d): %@ (%@)" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "[HDPIM Pipeline] Starting extraction (%1$d/%2$d): %3$@ (%4$@)"
+          }
+        }
+      }
+    },
+    "[HDPIM Pipeline] 收集到 %d 个候选包: %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "[HDPIM Pipeline] Collected %1$d candidate packages: %2$@"
+          }
+        }
+      }
+    },
+    "[HDPIM Pipeline] 无法在目标卷创建 .adobeTemp，回退到系统临时目录: %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "[HDPIM Pipeline] Could not create .adobeTemp on target volume, falling back to system temporary directory: %1$@"
+          }
+        }
+      }
+    },
+    "[HDPIM Pipeline] 本次实际需要安装 %d 个包: %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "[HDPIM Pipeline] %1$d packages need to be installed: %2$@"
+          }
+        }
+      }
+    },
+    "[HDPIM Pipeline] 检测到冲突进程: %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "[HDPIM Pipeline] Conflicting processes detected: %1$@"
+          }
+        }
+      }
+    },
+    "[HDPIM Pipeline] 清理备份目录失败: %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "[HDPIM Pipeline] Failed to clean backup directory: %1$@"
+          }
+        }
+      }
+    },
+    "[HDPIM Pipeline] 解压内容 (%d 项): %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "[HDPIM Pipeline] Extracted contents (%1$d items): %2$@"
+          }
+        }
+      }
+    },
+    "[HDPIM Pipeline] 解压后端: minizip-ng + 3 worker" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "[HDPIM Pipeline] Extraction backend: minizip-ng + 3 workers"
+          }
+        }
+      }
+    },
+    "[HDPIM Pipeline] 解压后端: minizip-ng + 7-Zip LZMA2 + 3 worker" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "[HDPIM Pipeline] Extraction backend: minizip-ng + 7-Zip LZMA2 + 3 workers"
+          }
+        }
+      }
+    },
+    "[HDPIM Pipeline] 解压失败 %@: %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "[HDPIM Pipeline] Extraction failed for %1$@: %2$@"
+          }
+        }
+      }
+    },
+    "[HDPIM Pipeline] 解压完成: %@ → %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "[HDPIM Pipeline] Extraction completed: %1$@ -> %2$@"
+          }
+        }
+      }
+    },
+    "[HDPIM Pipeline] 解压恢复统计: symlink=%d, permissions=%d, metadata=%d, retries=%d" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "[HDPIM Pipeline] Extraction restore stats: symlink=%1$d, permissions=%2$d, metadata=%3$d, retries=%4$d"
+          }
+        }
+      }
+    },
+    "[HDPIM Pipeline] 解压重试 %d/%d: %@, reason=%@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "[HDPIM Pipeline] Extraction retry %1$d/%2$d: %3$@, reason=%4$@"
+          }
+        }
+      }
+    },
+    "[HDPIM Pipeline] 解压重试完成: %@, retries=%d" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "[HDPIM Pipeline] Extraction retries completed: %1$@, retries=%2$d"
+          }
+        }
+      }
+    },
+    "/" : {
 
     },
     "%@" : {
@@ -174,7 +514,7 @@
         }
       }
     },
-    "%@ 已取消" :{
+    "%@ 已取消" : {
 
     },
     "%@ 执行失败" : {
@@ -188,6 +528,16 @@
         }
       }
     },
+    "%@ 正在处理: %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@ processing: %2$@"
+          }
+        }
+      }
+    },
     "%@；已尝试重新下载并处理 X1a0He CC" : {
       "extractionState" : "stale",
       "localizations" : {
@@ -195,6 +545,26 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "%@; Attempted to re-download and process X1a0He CC"
+          }
+        }
+      }
+    },
+    "%@: %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@: %2$@"
+          }
+        }
+      }
+    },
+    "%@: 差分包缺少 diff.json" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@: delta package is missing diff.json"
           }
         }
       }
@@ -250,7 +620,7 @@
         }
       }
     },
-    "%lld" :{
+    "%lld" : {
 
     },
     "%lld / %lld" : {
@@ -293,7 +663,7 @@
         }
       }
     },
-    "%lld.x" :{
+    "%lld.x" : {
 
     },
     "%lld/%lld" : {
@@ -326,13 +696,23 @@
         }
       }
     },
-    "Adobe Creative Cloud" :{
+    "Acrobat 自动安装失败: %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Acrobat automatic install failed: %1$@"
+          }
+        }
+      }
+    },
+    "Adobe Creative Cloud" : {
 
     },
-    "Adobe Downloader" :{
+    "Adobe Downloader" : {
 
     },
-    "Adobe Downloader %@" :{
+    "Adobe Downloader %@" : {
 
     },
     "Adobe Downloader 完全开源免费" : {
@@ -507,25 +887,25 @@
         }
       }
     },
-    "Apple Silicon" :{
+    "Apple Silicon" : {
 
     },
-    "Apple Silicon (arm64)" :{
+    "Apple Silicon (arm64)" : {
 
     },
-    "base:" :{
+    "base:" : {
 
     },
-    "buildGuid" :{
+    "buildGuid" : {
 
     },
-    "buildGuid:" :{
+    "buildGuid:" : {
 
     },
-    "By X1a0He." :{
+    "By X1a0He." : {
 
     },
-    "C4D / Red Giant" :{
+    "C4D / Red Giant" : {
 
     },
     "Condition 不满足" : {
@@ -558,7 +938,7 @@
         }
       }
     },
-    "DEBUG" :{
+    "DEBUG" : {
 
     },
     "Debug 模式" : {
@@ -572,7 +952,37 @@
         }
       }
     },
-    "GitHub" :{
+    "DMG 拷贝失败: %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "DMG copy failed: %1$@"
+          }
+        }
+      }
+    },
+    "DMG 挂载失败: %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "DMG mount failed: %1$@"
+          }
+        }
+      }
+    },
+    "driver.xml 不存在: %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "driver.xml does not exist: %1$@"
+          }
+        }
+      }
+    },
+    "GitHub" : {
 
     },
     "GNU 通用公共许可证 GPL v3." : {
@@ -612,6 +1022,26 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "HDPIM Engine (Built-in uninstall engine)"
+          }
+        }
+      }
+    },
+    "HDPIM Engine (内置安装引擎，无需外部命令)" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "HDPIM Engine (built-in install engine, no external command required)"
+          }
+        }
+      }
+    },
+    "HDPIM 命令错误 (%d): %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "HDPIM command error (%1$d): %2$@"
           }
         }
       }
@@ -1013,10 +1443,10 @@
         }
       }
     },
-    "Intel" :{
+    "Intel" : {
 
     },
-    "Intel (x86_64)" :{
+    "Intel (x86_64)" : {
 
     },
     "launchctl print system/...（服务状态）" : {
@@ -1029,8 +1459,28 @@
         }
       }
     },
-    "macOS %@" :{
+    "macOS %@" : {
 
+    },
+    "PIMX 文件不存在: %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "PIMX file does not exist: %1$@"
+          }
+        }
+      }
+    },
+    "PIMX 无效/损坏" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "PIMX is invalid or damaged"
+          }
+        }
+      }
     },
     "sapCode 包含" : {
       "localizations" : {
@@ -1096,7 +1546,7 @@
         }
       }
     },
-    "v%@" :{
+    "v%@" : {
 
     },
     "whoami（检查是否 root）" : {
@@ -1109,7 +1559,7 @@
         }
       }
     },
-    "X1a0He CC" :{
+    "X1a0He CC" : {
 
     },
     "X1a0He CC 下载并处理成功" : {
@@ -1165,12 +1615,62 @@
         }
       }
     },
+    "XML 哈希校验失败" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "XML hash verification failed"
+          }
+        }
+      }
+    },
     "XPC 通道运行正常，可执行特权命令" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "The XPC channel is running normally. Privileged commands can be executed."
+          }
+        }
+      }
+    },
+    "ZIP 条目 CRC 不匹配: %@, expected=%08x, actual=%08x" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ZIP entry CRC mismatch: %1$@, expected=%2$08x, actual=%3$08x"
+          }
+        }
+      }
+    },
+    "ZIP 条目大小不匹配: %@, expected=%llu, actual=%llu" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ZIP entry size mismatch: %1$@, expected=%2$llu, actual=%3$llu"
+          }
+        }
+      }
+    },
+    "ZIP 条目无效: %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Invalid ZIP entry: %1$@"
+          }
+        }
+      }
+    },
+    "ZIP 条目路径非法: %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Illegal ZIP entry path: %1$@"
           }
         }
       }
@@ -1866,6 +2366,16 @@
         }
       }
     },
+    "关闭 ZIP 条目失败: %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Failed to close ZIP entry: %1$@"
+          }
+        }
+      }
+    },
     "关闭后重新下载将直接覆盖现有文件" : {
       "localizations" : {
         "en" : {
@@ -1977,6 +2487,26 @@
         }
       }
     },
+    "写入解压文件失败: %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Failed to write extracted file: %1$@"
+          }
+        }
+      }
+    },
+    "冲突进程运行中" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Conflicting process is running"
+          }
+        }
+      }
+    },
     "准备" : {
       "localizations" : {
         "en" : {
@@ -2051,7 +2581,6 @@
       }
     },
     "准备安装..." : {
-      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -2107,6 +2636,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Create installer"
+          }
+        }
+      }
+    },
+    "创建目录失败" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Failed to create directory"
           }
         }
       }
@@ -2340,6 +2879,26 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Loading failed"
+          }
+        }
+      }
+    },
+    "包 %@ 解压后未找到 .pimx" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No .pimx found after extracting package %1$@"
+          }
+        }
+      }
+    },
+    "包名不匹配: 期望 %@, 实际 %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Package name mismatch: expected %1$@, actual %2$@"
           }
         }
       }
@@ -2758,6 +3317,16 @@
         }
       }
     },
+    "回滚失败: %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Rollback failed: %1$@"
+          }
+        }
+      }
+    },
     "在 Finder 中显示" : {
       "localizations" : {
         "en" : {
@@ -2841,7 +3410,6 @@
       }
     },
     "备份失败" : {
-      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -2923,7 +3491,7 @@
         }
       }
     },
-    "复制全部错误日志" :{
+    "复制全部错误日志" : {
 
     },
     "复制包信息" : {
@@ -3154,12 +3722,32 @@
         }
       }
     },
+    "安装包校验失败: %@ 大小不一致，期望 %@，实际 %@。请重新下载该包后再安装" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Install package verification failed: %1$@ size mismatch, expected %2$@, actual %3$@. Please download the package again before installing."
+          }
+        }
+      }
+    },
     "安装命令" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "Installation command"
+          }
+        }
+      }
+    },
+    "安装命令 '%@' 执行失败: %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Install command '%1$@' failed: %2$@"
           }
         }
       }
@@ -3175,12 +3763,21 @@
       }
     },
     "安装失败: %@" : {
-      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "Install failed: %@"
+          }
+        }
+      }
+    },
+    "安装失败: %@，正在回滚..." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Install failed: %1$@, rolling back..."
           }
         }
       }
@@ -3231,6 +3828,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Install logs copied to clipboard"
+          }
+        }
+      }
+    },
+    "安装源复制失败: %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Failed to copy install source: %1$@"
           }
         }
       }
@@ -3669,6 +4276,16 @@
         }
       }
     },
+    "已打开 Acrobat 安装器，请按提示完成安装" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Acrobat installer has been opened. Follow the prompts to complete installation."
+          }
+        }
+      }
+    },
     "已授权" : {
       "localizations" : {
         "en" : {
@@ -3907,6 +4524,16 @@
         }
       }
     },
+    "当前状态已满足安装要求" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Current state already satisfies install requirements"
+          }
+        }
+      }
+    },
     "当前筛选下隐藏了 %lld 个包" : {
       "localizations" : {
         "en" : {
@@ -3954,6 +4581,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Total size: %@"
+          }
+        }
+      }
+    },
+    "成功" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Success"
           }
         }
       }
@@ -4092,6 +4729,16 @@
         }
       }
     },
+    "执行失败：%@\n执行结果：%@\n执行命令：%@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "执行失败：%1$@\n执行结果：%2$@\n执行命令：%3$@"
+          }
+        }
+      }
+    },
     "执行成功" : {
       "localizations" : {
         "en" : {
@@ -4129,6 +4776,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Execution timed out"
+          }
+        }
+      }
+    },
+    "找不到 driver.xml 文件" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Could not find driver.xml file"
           }
         }
       }
@@ -4252,6 +4909,26 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Control default language, save directory, architecture, concurrency, and other download behavior"
+          }
+        }
+      }
+    },
+    "提取失败: %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Extraction failed: %1$@"
+          }
+        }
+      }
+    },
+    "提取已取消" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Extraction cancelled"
           }
         }
       }
@@ -4437,6 +5114,16 @@
         }
       }
     },
+    "数据库错误: %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Database error: %1$@"
+          }
+        }
+      }
+    },
     "数据无效: %@" : {
       "comment" : "Invalid data",
       "localizations" : {
@@ -4481,6 +5168,16 @@
         }
       }
     },
+    "文件未找到" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "File not found"
+          }
+        }
+      }
+    },
     "文件系统错误: %@" : {
       "comment" : "File system error",
       "localizations" : {
@@ -4499,6 +5196,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "File system error (%1$@): %2$@"
+          }
+        }
+      }
+    },
+    "文件被进程锁定" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "File is locked by a process"
           }
         }
       }
@@ -4547,6 +5254,16 @@
         }
       }
     },
+    "无法创建符号链接" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Unable to create symlink"
+          }
+        }
+      }
+    },
     "无法创建连接" : {
       "extractionState" : "stale",
       "localizations" : {
@@ -4554,6 +5271,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Unable to create connection"
+          }
+        }
+      }
+    },
+    "无法复制文件" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Unable to copy file"
           }
         }
       }
@@ -4568,12 +5295,42 @@
         }
       }
     },
+    "无法打开 ZIP 文件: %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Unable to open ZIP file: %1$@"
+          }
+        }
+      }
+    },
+    "无法打开 ZIP 条目: %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Unable to open ZIP entry: %1$@"
+          }
+        }
+      }
+    },
     "无法检测" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "Unable to check"
+          }
+        }
+      }
+    },
+    "无法移动文件" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Unable to move file"
           }
         }
       }
@@ -4596,6 +5353,56 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Unable to get Helper proxy"
+          }
+        }
+      }
+    },
+    "无法获取所有者" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Unable to get owner"
+          }
+        }
+      }
+    },
+    "无法获取权限" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Unable to get permissions"
+          }
+        }
+      }
+    },
+    "无法设置所有者" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Unable to set owner"
+          }
+        }
+      }
+    },
+    "无法设置显示属性" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Unable to set display attributes"
+          }
+        }
+      }
+    },
+    "无法设置权限" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Unable to set permissions"
           }
         }
       }
@@ -4983,7 +5790,7 @@
         }
       }
     },
-    "未授权时，Containers、Group Containers、Documents 等用户受保护目录可能清理失败。请将 Adobe Downloader 与 Helper 加入全磁盘访问，授权后重新启动 Adobe Downloader 或重新启用 Helper。" :{
+    "未授权时，Containers、Group Containers、Documents 等用户受保护目录可能清理失败。请将 Adobe Downloader 与 Helper 加入全磁盘访问，授权后重新启动 Adobe Downloader 或重新启用 Helper。" : {
 
     },
     "未检测到 Adobe CC 组件" : {
@@ -5203,6 +6010,16 @@
         }
       }
     },
+    "检测到冲突进程正在运行: %@，请关闭后重试" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Conflicting processes are running: %1$@. Quit them and try again."
+          }
+        }
+      }
+    },
     "检测到新版本后自动下载" : {
       "localizations" : {
         "en" : {
@@ -5309,6 +6126,16 @@
         }
       }
     },
+    "正在修正文件权限..." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Fixing file permissions..."
+          }
+        }
+      }
+    },
     "正在停止 Adobe 相关进程..." : {
       "localizations" : {
         "en" : {
@@ -5360,6 +6187,16 @@
         }
       }
     },
+    "正在准备安装源..." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Preparing install source..."
+          }
+        }
+      }
+    },
     "正在准备自定义下载..." : {
       "localizations" : {
         "en" : {
@@ -5376,6 +6213,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Analyzing HDPIM uninstall status"
+          }
+        }
+      }
+    },
+    "正在分析安装状态..." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Analyzing install state..."
           }
         }
       }
@@ -5441,6 +6288,16 @@
         }
       }
     },
+    "正在增量更新 %@... %d%%" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Applying delta update for %1$@... %2$d%%"
+          }
+        }
+      }
+    },
     "正在处理 %@ 的包信息..." : {
       "extractionState" : "stale",
       "localizations" : {
@@ -5452,12 +6309,62 @@
         }
       }
     },
+    "正在备份 %@ 的现有文件... %d%%" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Backing up existing files for %1$@... %2$d%%"
+          }
+        }
+      }
+    },
+    "正在复用 %@ 的已安装包信息..." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Reusing installed package information for %1$@..."
+          }
+        }
+      }
+    },
     "正在安装 %@" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "Installing %@"
+          }
+        }
+      }
+    },
+    "正在安装 %@..." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Installing %1$@..."
+          }
+        }
+      }
+    },
+    "正在安装 %@... %d%%" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Installing %1$@... %2$d%%"
+          }
+        }
+      }
+    },
+    "正在安装 Acrobat 安装包..." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Installing Acrobat package..."
           }
         }
       }
@@ -5503,6 +6410,16 @@
         }
       }
     },
+    "正在执行 Acrobat 自动安装脚本..." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Running Acrobat automatic install script..."
+          }
+        }
+      }
+    },
     "正在执行 HDPIM 卸载流程" : {
       "localizations" : {
         "en" : {
@@ -5534,12 +6451,62 @@
         }
       }
     },
+    "正在挂载 Acrobat 安装镜像..." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Mounting Acrobat install image..."
+          }
+        }
+      }
+    },
+    "正在收集包信息..." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Collecting package information..."
+          }
+        }
+      }
+    },
+    "正在校验安装包完整性..." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Verifying install package integrity..."
+          }
+        }
+      }
+    },
+    "正在检查冲突进程..." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Checking conflicting processes..."
+          }
+        }
+      }
+    },
     "正在检测权限..." : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "Checking permissions..."
+          }
+        }
+      }
+    },
+    "正在注册卸载条目..." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Registering uninstall entries..."
           }
         }
       }
@@ -5580,6 +6547,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Cleaning up hosts file..."
+          }
+        }
+      }
+    },
+    "正在清理临时文件..." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Cleaning temporary files..."
           }
         }
       }
@@ -5695,6 +6672,16 @@
         }
       }
     },
+    "正在自动安装 Acrobat... %d%%" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Installing Acrobat automatically... %1$d%%"
+          }
+        }
+      }
+    },
     "正在获取包信息" : {
       "localizations" : {
         "en" : {
@@ -5712,6 +6699,36 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Getting package information..."
+          }
+        }
+      }
+    },
+    "正在解压 %@ (%d/%d)..." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Extracting %1$@ (%2$d/%3$d)..."
+          }
+        }
+      }
+    },
+    "正在解压 %@ (%d/%d)... %d%%" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Extracting %1$@ (%2$d/%3$d)... %4$d%%"
+          }
+        }
+      }
+    },
+    "正在解析 driver.xml..." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Parsing driver.xml..."
           }
         }
       }
@@ -5742,6 +6759,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Retrying %1$lld/%2$lld"
+          }
+        }
+      }
+    },
+    "正在重试安装..." : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Retrying install..."
           }
         }
       }
@@ -5827,6 +6854,16 @@
         }
       }
     },
+    "没有需要安装的包" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "No packages need to be installed"
+          }
+        }
+      }
+    },
     "注册后台服务失败: %@" : {
       "extractionState" : "stale",
       "localizations" : {
@@ -5834,6 +6871,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Failed to register background service: %@"
+          }
+        }
+      }
+    },
+    "注册应用失败" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Failed to register application"
           }
         }
       }
@@ -6163,6 +7210,16 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Duration %1$@"
+          }
+        }
+      }
+    },
+    "目标路径冲突" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Target path conflict"
           }
         }
       }
@@ -6536,6 +7593,16 @@
         }
       }
     },
+    "程序运行失败" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Program execution failed"
+          }
+        }
+      }
+    },
     "程序退出" : {
       "localizations" : {
         "en" : {
@@ -6563,6 +7630,26 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Set later"
+          }
+        }
+      }
+    },
+    "符号链接目标不存在: %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Symlink target does not exist: %1$@"
+          }
+        }
+      }
+    },
+    "符号链接目标无效: %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Invalid symlink target: %1$@"
           }
         }
       }
@@ -6690,7 +7777,7 @@
         }
       }
     },
-    "继续清理" :{
+    "继续清理" : {
 
     },
     "网络中断" : {
@@ -6854,12 +7941,42 @@
         }
       }
     },
+    "补丁应用失败" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Failed to apply patch"
+          }
+        }
+      }
+    },
     "解压" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "Extracting"
+          }
+        }
+      }
+    },
+    "解压失败: %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Extraction failed: %1$@"
+          }
+        }
+      }
+    },
+    "解压已取消" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Extraction cancelled"
           }
         }
       }
@@ -7008,7 +8125,17 @@
         }
       }
     },
-    "调试模式已开启" :{
+    "读取 ZIP 条目失败: %@" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Failed to read ZIP entry: %1$@"
+          }
+        }
+      }
+    },
+    "调试模式已开启" : {
 
     },
     "路径包含" : {
@@ -7632,7 +8759,7 @@
         }
       }
     },
-    "需要全磁盘访问权限" :{
+    "需要全磁盘访问权限" : {
 
     },
     "需要在系统设置中允许 Helper" : {
@@ -7668,7 +8795,7 @@
         }
       }
     },
-    "需要重启 Adobe Downloader 后生效。" :{
+    "需要重启 Adobe Downloader 后生效。" : {
 
     },
     "非核心" : {
@@ -7728,1136 +8855,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Default selection"
-          }
-        }
-      }
-    },
-    "正在重试安装..." : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Retrying install..."
-          }
-        }
-      }
-    },
-    "找不到 driver.xml 文件" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Could not find driver.xml file"
-          }
-        }
-      }
-    },
-    "HDPIM Engine (内置安装引擎，无需外部命令)" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "HDPIM Engine (built-in install engine, no external command required)"
-          }
-        }
-      }
-    },
-    "%@: %@" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "%1$@: %2$@"
-          }
-        }
-      }
-    },
-    "正在准备安装源..." : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Preparing install source..."
-          }
-        }
-      }
-    },
-    "[HDPIM Install] 安装源位于受保护目录，正在复制到临时安装目录: %@" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "[HDPIM Install] Install source is in a protected directory, copying to temporary install directory: %1$@"
-          }
-        }
-      }
-    },
-    "安装源复制失败: %@" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Failed to copy install source: %1$@"
-          }
-        }
-      }
-    },
-    "[HDPIM Install] 临时安装目录准备完成: %@" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "[HDPIM Install] Temporary install directory is ready: %1$@"
-          }
-        }
-      }
-    },
-    "正在挂载 Acrobat 安装镜像..." : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Mounting Acrobat install image..."
-          }
-        }
-      }
-    },
-    "[Acrobat Install] 挂载 DMG: %@" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "[Acrobat Install] Mounting DMG: %1$@"
-          }
-        }
-      }
-    },
-    "正在安装 Acrobat 安装包..." : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Installing Acrobat package..."
-          }
-        }
-      }
-    },
-    "[Acrobat Install] 使用 pkg 安装: %@" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "[Acrobat Install] Installing with pkg: %1$@"
-          }
-        }
-      }
-    },
-    "已打开 Acrobat 安装器，请按提示完成安装" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Acrobat installer has been opened. Follow the prompts to complete installation."
-          }
-        }
-      }
-    },
-    "[Acrobat Install] 打开 app 安装器: %@" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "[Acrobat Install] Opening app installer: %1$@"
-          }
-        }
-      }
-    },
-    "正在执行 Acrobat 自动安装脚本..." : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Running Acrobat automatic install script..."
-          }
-        }
-      }
-    },
-    "[Acrobat Install] 使用 PIMX 自动安装: %@" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "[Acrobat Install] Installing automatically with PIMX: %1$@"
-          }
-        }
-      }
-    },
-    "正在自动安装 Acrobat... %d%%" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Installing Acrobat automatically... %1$d%%"
-          }
-        }
-      }
-    },
-    "Acrobat 自动安装失败: %@" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Acrobat automatic install failed: %1$@"
-          }
-        }
-      }
-    },
-    "[Acrobat Install] 跳过非 Acrobat PIMX: %@" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "[Acrobat Install] Skipping non-Acrobat PIMX: %1$@"
-          }
-        }
-      }
-    },
-    "[Acrobat Install] PIMX staging 不匹配: %@, staging=%@, missing=%@" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "[Acrobat Install] PIMX staging mismatch: %1$@, staging=%2$@, missing=%3$@"
-          }
-        }
-      }
-    },
-    "[Acrobat Install] PIMX 解析失败: %@, %@" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "[Acrobat Install] Failed to parse PIMX: %1$@, %2$@"
-          }
-        }
-      }
-    },
-    "正在解析 driver.xml..." : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Parsing driver.xml..."
-          }
-        }
-      }
-    },
-    "[HDPIM Pipeline] driver.xml 解析成功: sapCode=%@, deps=%d" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "[HDPIM Pipeline] driver.xml parsed successfully: sapCode=%1$@, deps=%2$d"
-          }
-        }
-      }
-    },
-    "[HDPIM Pipeline] driver.xml 解析失败: %@" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "[HDPIM Pipeline] Failed to parse driver.xml: %1$@"
-          }
-        }
-      }
-    },
-    "正在收集包信息..." : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Collecting package information..."
-          }
-        }
-      }
-    },
-    "没有需要安装的包" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "No packages need to be installed"
-          }
-        }
-      }
-    },
-    "[HDPIM Pipeline] 收集到 %d 个候选包: %@" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "[HDPIM Pipeline] Collected %1$d candidate packages: %2$@"
-          }
-        }
-      }
-    },
-    "当前状态已满足安装要求" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Current state already satisfies install requirements"
-          }
-        }
-      }
-    },
-    "[HDPIM Pipeline] 本次实际需要安装 %d 个包: %@" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "[HDPIM Pipeline] %1$d packages need to be installed: %2$@"
-          }
-        }
-      }
-    },
-    "正在校验安装包完整性..." : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Verifying install package integrity..."
-          }
-        }
-      }
-    },
-    "正在检查冲突进程..." : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Checking conflicting processes..."
-          }
-        }
-      }
-    },
-    "正在分析安装状态..." : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Analyzing install state..."
-          }
-        }
-      }
-    },
-    "[HDPIM Pipeline] 包 %@ 已存在相同版本 %@，按官方链路仅补数据库记录" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "[HDPIM Pipeline] Package %1$@ already has the same version %2$@; only updating database records according to the official flow"
-          }
-        }
-      }
-    },
-    "正在复用 %@ 的已安装包信息..." : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Reusing installed package information for %1$@..."
-          }
-        }
-      }
-    },
-    "[HDPIM Pipeline] 开始解压 (%d/%d): %@ (%@)" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "[HDPIM Pipeline] Starting extraction (%1$d/%2$d): %3$@ (%4$@)"
-          }
-        }
-      }
-    },
-    "[HDPIM Pipeline] ZIP 大小: %@" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "[HDPIM Pipeline] ZIP size: %1$@"
-          }
-        }
-      }
-    },
-    "[HDPIM Pipeline] 解压后端: minizip-ng + 7-Zip LZMA2 + 3 worker" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "[HDPIM Pipeline] Extraction backend: minizip-ng + 7-Zip LZMA2 + 3 workers"
-          }
-        }
-      }
-    },
-    "[HDPIM Pipeline] 解压后端: minizip-ng + 3 worker" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "[HDPIM Pipeline] Extraction backend: minizip-ng + 3 workers"
-          }
-        }
-      }
-    },
-    "正在解压 %@ (%d/%d)..." : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Extracting %1$@ (%2$d/%3$d)..."
-          }
-        }
-      }
-    },
-    "正在解压 %@ (%d/%d)... %d%%" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Extracting %1$@ (%2$d/%3$d)... %4$d%%"
-          }
-        }
-      }
-    },
-    "[HDPIM Pipeline] 解压完成: %@ → %@" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "[HDPIM Pipeline] Extraction completed: %1$@ -> %2$@"
-          }
-        }
-      }
-    },
-    "[HDPIM Pipeline] PIMX 校验通过: %@" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "[HDPIM Pipeline] PIMX validation passed: %1$@"
-          }
-        }
-      }
-    },
-    "[HDPIM Pipeline] 解压恢复统计: symlink=%d, permissions=%d, metadata=%d, retries=%d" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "[HDPIM Pipeline] Extraction restore stats: symlink=%1$d, permissions=%2$d, metadata=%3$d, retries=%4$d"
-          }
-        }
-      }
-    },
-    "[HDPIM Pipeline] 发现 diff.json: %@" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "[HDPIM Pipeline] Found diff.json: %1$@"
-          }
-        }
-      }
-    },
-    "[HDPIM Pipeline] 解压内容 (%d 项): %@" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "[HDPIM Pipeline] Extracted contents (%1$d items): %2$@"
-          }
-        }
-      }
-    },
-    "[HDPIM Pipeline] 解压失败 %@: %@" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "[HDPIM Pipeline] Extraction failed for %1$@: %2$@"
-          }
-        }
-      }
-    },
-    "正在安装 %@..." : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Installing %1$@..."
-          }
-        }
-      }
-    },
-    "正在安装 %@... %d%%" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Installing %1$@... %2$d%%"
-          }
-        }
-      }
-    },
-    "[HDPIM Pipeline] 包 %@ 命中 delta 更新，基线版本: %@" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "[HDPIM Pipeline] Package %1$@ matched delta update, baseline version: %2$@"
-          }
-        }
-      }
-    },
-    "[HDPIM Pipeline] 差分包内未找到 diff.json，标记 delta 失败并中止" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "[HDPIM Pipeline] diff.json was not found in the delta package; marking delta as failed and aborting"
-          }
-        }
-      }
-    },
-    "%@: 差分包缺少 diff.json" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "%1$@: delta package is missing diff.json"
-          }
-        }
-      }
-    },
-    "正在增量更新 %@... %d%%" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Applying delta update for %1$@... %2$d%%"
-          }
-        }
-      }
-    },
-    "正在注册卸载条目..." : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Registering uninstall entries..."
-          }
-        }
-      }
-    },
-    "正在清理临时文件..." : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Cleaning temporary files..."
-          }
-        }
-      }
-    },
-    "[HDPIM Pipeline] 清理备份目录失败: %@" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "[HDPIM Pipeline] Failed to clean backup directory: %1$@"
-          }
-        }
-      }
-    },
-    "正在修正文件权限..." : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Fixing file permissions..."
-          }
-        }
-      }
-    },
-    "安装失败: %@，正在回滚..." : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Install failed: %1$@, rolling back..."
-          }
-        }
-      }
-    },
-    "driver.xml 不存在: %@" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "driver.xml does not exist: %1$@"
-          }
-        }
-      }
-    },
-    "[HDPIM Pipeline] 产品 %@ InstallDir: %@ → %@" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "[HDPIM Pipeline] Product %1$@ InstallDir: %2$@ -> %3$@"
-          }
-        }
-      }
-    },
-    "[HDPIM Pipeline] 产品 %@ 无 InstallDir，使用默认: %@" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "[HDPIM Pipeline] Product %1$@ has no InstallDir, using default: %2$@"
-          }
-        }
-      }
-    },
-    "安装包校验失败: %@ 大小不一致，期望 %@，实际 %@。请重新下载该包后再安装" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Install package verification failed: %1$@ size mismatch, expected %2$@, actual %3$@. Please download the package again before installing."
-          }
-        }
-      }
-    },
-    "[HDPIM Pipeline] 安装包大小校验通过: %@" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "[HDPIM Pipeline] Install package size verification passed: %1$@"
-          }
-        }
-      }
-    },
-    "包 %@ 解压后未找到 .pimx" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "No .pimx found after extracting package %1$@"
-          }
-        }
-      }
-    },
-    "[HDPIM Pipeline] 解压重试 %d/%d: %@, reason=%@" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "[HDPIM Pipeline] Extraction retry %1$d/%2$d: %3$@, reason=%4$@"
-          }
-        }
-      }
-    },
-    "[HDPIM Pipeline] 解压重试完成: %@, retries=%d" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "[HDPIM Pipeline] Extraction retries completed: %1$@, retries=%2$d"
-          }
-        }
-      }
-    },
-    "[HDPIM Pipeline] 无法在目标卷创建 .adobeTemp，回退到系统临时目录: %@" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "[HDPIM Pipeline] Could not create .adobeTemp on target volume, falling back to system temporary directory: %1$@"
-          }
-        }
-      }
-    },
-    "[HDPIM Pipeline] 检测到冲突进程: %@" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "[HDPIM Pipeline] Conflicting processes detected: %1$@"
-          }
-        }
-      }
-    },
-    "[HDPIM Pipeline] 包 %@ 需要备份 %d 个目录" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "[HDPIM Pipeline] Package %1$@ needs to back up %2$d directories"
-          }
-        }
-      }
-    },
-    "正在备份 %@ 的现有文件... %d%%" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Backing up existing files for %1$@... %2$d%%"
-          }
-        }
-      }
-    },
-    "无法打开 ZIP 文件: %@" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Unable to open ZIP file: %1$@"
-          }
-        }
-      }
-    },
-    "ZIP 条目无效: %@" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Invalid ZIP entry: %1$@"
-          }
-        }
-      }
-    },
-    "ZIP 条目路径非法: %@" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Illegal ZIP entry path: %1$@"
-          }
-        }
-      }
-    },
-    "无法打开 ZIP 条目: %@" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Unable to open ZIP entry: %1$@"
-          }
-        }
-      }
-    },
-    "读取 ZIP 条目失败: %@" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Failed to read ZIP entry: %1$@"
-          }
-        }
-      }
-    },
-    "写入解压文件失败: %@" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Failed to write extracted file: %1$@"
-          }
-        }
-      }
-    },
-    "关闭 ZIP 条目失败: %@" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Failed to close ZIP entry: %1$@"
-          }
-        }
-      }
-    },
-    "ZIP 条目大小不匹配: %@, expected=%llu, actual=%llu" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "ZIP entry size mismatch: %1$@, expected=%2$llu, actual=%3$llu"
-          }
-        }
-      }
-    },
-    "ZIP 条目 CRC 不匹配: %@, expected=%08x, actual=%08x" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "ZIP entry CRC mismatch: %1$@, expected=%2$08x, actual=%3$08x"
-          }
-        }
-      }
-    },
-    "符号链接目标无效: %@" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Invalid symlink target: %1$@"
-          }
-        }
-      }
-    },
-    "符号链接目标不存在: %@" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Symlink target does not exist: %1$@"
-          }
-        }
-      }
-    },
-    "解压已取消" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Extraction cancelled"
-          }
-        }
-      }
-    },
-    "提取已取消" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Extraction cancelled"
-          }
-        }
-      }
-    },
-    "DMG 挂载失败: %@" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "DMG mount failed: %1$@"
-          }
-        }
-      }
-    },
-    "DMG 拷贝失败: %@" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "DMG copy failed: %1$@"
-          }
-        }
-      }
-    },
-    "提取失败: %@" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Extraction failed: %1$@"
-          }
-        }
-      }
-    },
-    "HDPIM 命令错误 (%d): %@" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "HDPIM command error (%1$d): %2$@"
-          }
-        }
-      }
-    },
-    "成功" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Success"
-          }
-        }
-      }
-    },
-    "PIMX 无效/损坏" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "PIMX is invalid or damaged"
-          }
-        }
-      }
-    },
-    "文件未找到" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "File not found"
-          }
-        }
-      }
-    },
-    "目标路径冲突" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Target path conflict"
-          }
-        }
-      }
-    },
-    "无法移动文件" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Unable to move file"
-          }
-        }
-      }
-    },
-    "无法复制文件" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Unable to copy file"
-          }
-        }
-      }
-    },
-    "创建目录失败" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Failed to create directory"
-          }
-        }
-      }
-    },
-    "无法获取权限" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Unable to get permissions"
-          }
-        }
-      }
-    },
-    "无法设置权限" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Unable to set permissions"
-          }
-        }
-      }
-    },
-    "无法获取所有者" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Unable to get owner"
-          }
-        }
-      }
-    },
-    "无法设置所有者" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Unable to set owner"
-          }
-        }
-      }
-    },
-    "无法创建符号链接" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Unable to create symlink"
-          }
-        }
-      }
-    },
-    "无法设置显示属性" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Unable to set display attributes"
-          }
-        }
-      }
-    },
-    "程序运行失败" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Program execution failed"
-          }
-        }
-      }
-    },
-    "文件被进程锁定" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "File is locked by a process"
-          }
-        }
-      }
-    },
-    "注册应用失败" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Failed to register application"
-          }
-        }
-      }
-    },
-    "补丁应用失败" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Failed to apply patch"
-          }
-        }
-      }
-    },
-    "冲突进程运行中" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Conflicting process is running"
-          }
-        }
-      }
-    },
-    "XML 哈希校验失败" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "XML hash verification failed"
-          }
-        }
-      }
-    },
-    "%@ 正在处理: %@" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "%1$@ processing: %2$@"
-          }
-        }
-      }
-    },
-    "安装命令 '%@' 执行失败: %@" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Install command '%1$@' failed: %2$@"
-          }
-        }
-      }
-    },
-    "解压失败: %@" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Extraction failed: %1$@"
-          }
-        }
-      }
-    },
-    "PIMX 文件不存在: %@" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "PIMX file does not exist: %1$@"
-          }
-        }
-      }
-    },
-    "包名不匹配: 期望 %@, 实际 %@" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Package name mismatch: expected %1$@, actual %2$@"
-          }
-        }
-      }
-    },
-    "回滚失败: %@" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Rollback failed: %1$@"
-          }
-        }
-      }
-    },
-    "数据库错误: %@" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Database error: %1$@"
-          }
-        }
-      }
-    },
-    "检测到冲突进程正在运行: %@，请关闭后重试" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Conflicting processes are running: %1$@. Quit them and try again."
           }
         }
       }

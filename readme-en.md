@@ -18,41 +18,21 @@
 
 **⚠️ Only supports macOS 13.0+**
 
-> **If you like Adobe Downloader, or if it helps you, please Star the repository 🌟. Your support is what keeps me updating it.**
+> **If you like Adobe Downloader, or if it helps you, please Star the repository 🌟. Your support is what keeps me
+updating it.**
 
 ## 📔 Latest Log
 
-### 2026-06-13 v3.0.0 Update Log
+### 2026-06-22 v3.1.0 Update Log
 
-#### Added
-
-- Brand-new download mechanism
-  Adobe Downloader further improves its download mechanism and now supports downloading add-ons separately, allowing users to download the main product or specific add-ons more flexibly.
-
-- Brand-new product installation mechanism
-  This version removes the dependency on the original Setup component and switches to a new installation engine. It supports full installation and incremental installation for all products, and adds the ability to install add-ons separately.
-
-- Brand-new product uninstallation mechanism
-  Add-on uninstallation is now supported. You can uninstall specific add-ons of a product without affecting the complete product itself.
-
-- Adobe Creative Cloud recognition support
-  Thanks to the new product installation mechanism, all products installed through Adobe Downloader can now be displayed correctly in Adobe Creative Cloud, including related dependencies.
-
-#### Improvements
-
-- macOS 27 support
-  Adobe Downloader has been adapted for macOS 27, improving compatibility and the overall experience on the new system.
-
-- Liquid Glass style support
-  The UI has been further upgraded with richer visual presentation, bringing a more modern and refined interaction experience.
-
-#### Others
-
-- This version also includes more new features and experience improvements for Adobe Downloader 3.0, waiting for you to explore.
-
-#### More
-
-- For more app update logs, please check [Update Log](update-log.md)
+- fix: Fixed excessive memory usage during Adobe product downloads
+- fix: Fixed errors that occurred during installation of some Adobe products
+- fix: Fixed issue where some Adobe products could not launch due to permission problems after installation
+- feat: Optimized the installation Sheet display to prevent bottom buttons from being unreachable on small screens
+- feat: Added rollback support for installation cancellation
+- feat: Synced with Adobe Creative Cloud official installation behavior, adding uninstall shortcuts after installation
+- feat: Introduced incremental update functionality — in version 3.1.0, you can perform incremental updates on already installed products (must be downloaded using Adobe Downloader)
+- feat: Optimized the version selection page for some products
 
 ### Language Support
 
@@ -61,7 +41,8 @@
 
 ## ⚠️ Warning
 
-**If you have any optimization suggestions or questions about Adobe Downloader, please open an issue or contact [@X1a0He](https://t.me/X1a0He_bot) via Telegram.**
+**If you have any optimization suggestions or questions about Adobe Downloader, please open an issue or
+contact [@X1a0He](https://t.me/X1a0He_bot) via Telegram.**
 
 ## ✨ Features
 

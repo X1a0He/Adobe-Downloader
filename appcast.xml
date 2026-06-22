@@ -3,6 +3,44 @@
     <channel>
         <title>Adobe Downloader</title>
         <item>
+            <title>3.1.0</title>
+            <pubDate>Mon, 22 Jun 2026 09:58:11 +0800</pubDate>
+            <sparkle:version>310</sparkle:version>
+            <sparkle:shortVersionString>3.1.0</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
+            <enclosure url="https://github.com/X1a0He/Adobe-Downloader/releases/download/3.1.0/Adobe.Downloader.dmg"
+                       length="7289344" type="application/octet-stream"
+                       sparkle:edSignature="ZwryLYY4q8IfTudyJHiR/HDXaD4droXYyie2wBdbxck1FzTMtuQuHSJbU1dpIWfzVOt7LVINl0B+rTRLcYsYDQ=="/>
+            <description>
+                <![CDATA[
+                    <style>ul{margin-top: 0;margin-bottom: 7;padding-left: 18;}</style>
+                    <h4>Adobe Downloader 更新日志: </h4>
+                    <ul>
+                        <li>- fix: 修复了在下载 Adobe 产品的过程中，出现内存占用过大的问题</li>
+                        <li>- fix: 修复了在部分 Adobe 产品安装过程中，出现错误的问题</li>
+                        <li>- fix: 修复了在部分 Adobe 产品安装完成后，因权限而无法启动 App 的问题</li>
+                        <li>- feat: 优化了安装 Sheet 的显示，避免在屏幕太小的时候无法点击到最底部的按钮</li>
+                        <li>- feat: 为取消安装增加回滚</li>
+                        <li>- feat: 同步 Adobe Creative Cloud 官方安装行为，在安装后添加卸载快捷方式</li>
+                        <li>- feat: 引入了增量更新功能，在 3.1.0 版本中可以实现对已有产品的增量更新(必需使用 Adobe Downloader 下载)</li>
+                        <li>- feat: 优化了部分产品的版本选择页面</li>
+                    </ul>
+                    <hr>
+                    <h4>Adobe Downloader Changes: </h4>
+                    <ul>
+                        <li>- fix: Fixed excessive memory usage during Adobe product downloads</li>
+                        <li>- fix: Fixed errors that occurred during installation of some Adobe products</li>
+                        <li>- fix: Fixed issue where some Adobe products could not launch due to permission problems after installation</li>
+                        <li>- feat: Optimized the installation Sheet display to prevent bottom buttons from being unreachable on small screens</li>
+                        <li>- feat: Added rollback support for installation cancellation</li>
+                        <li>- feat: Synced with Adobe Creative Cloud official installation behavior, adding uninstall shortcuts after installation</li>
+                        <li>- feat: Introduced incremental update functionality — in version 3.1.0, you can perform incremental updates on already installed products (must be downloaded using Adobe Downloader)</li>
+                        <li>- feat: Optimized the version selection page for some products</li>
+                    </ul>
+                ]]>
+            </description>
+        </item>
+        <item>
             <title>3.0.0</title>
             <pubDate>Sat, 13 Jun 2026 15:21:21 +0800</pubDate>
             <sparkle:version>300</sparkle:version>
