@@ -427,62 +427,49 @@ private struct CustomDownloadHeaderView: View {
     var body: some View {
         HStack(spacing: 12) {
             productIconView
-                .frame(width: 32, height: 32)
+                .frame(width: 36, height: 36)
 
-            VStack(alignment: .leading, spacing: 2) {
-                if let product = findProduct(id: productId) {
-                    Text(product.displayName)
-                        .font(.system(size: 15, weight: .semibold))
-                        .foregroundColor(.primary.opacity(0.92))
-                        .lineLimit(1)
-                } else {
-                    Text(productId)
-                        .font(.system(size: 15, weight: .semibold))
-                        .lineLimit(1)
-                }
-                HStack(spacing: 6) {
+            VStack(alignment: .leading, spacing: 5) {
+                Text(findProduct(id: productId)?.displayName ?? productId)
+                    .font(.system(size: 17, weight: .semibold))
+                    .foregroundColor(.primary)
+                    .lineLimit(1)
+
+                HStack(spacing: 8) {
                     Text("v\(version)")
-                        .font(.system(size: 11))
-                        .foregroundColor(.secondary)
+                        .monospacedDigit()
                     Text("·")
-                        .font(.system(size: 11))
-                        .foregroundColor(.secondary.opacity(0.6))
+                        .foregroundColor(.secondary.opacity(0.5))
                     architectureChip
                 }
+                .font(.system(size: 11))
+                .foregroundColor(.secondary)
             }
 
-            Spacer()
+            Spacer(minLength: 12)
 
-            if let onCopyAll = onCopyAll {
+            if let onCopyAll {
                 Button(action: onCopyAll) {
-                    HStack(spacing: 4) {
-                        Image(systemName: "doc.on.doc")
-                            .font(.system(size: 12))
-                        Text("复制全部")
-                            .font(.system(size: 12))
-                    }
-                    .foregroundColor(.white)
+                    Label("复制清单", systemImage: "doc.on.doc")
+                        .font(.system(size: 12))
                 }
-                .buttonStyle(BeautifulButtonStyle(baseColor: Color.blue))
+                .buttonStyle(.bordered)
+                .controlSize(.regular)
                 .help("复制所有包信息")
             }
 
-            if let onCancel = onCancel {
-                Button("取消") {
-                    onCancel()
-                }
-                .buttonStyle(BeautifulButtonStyle(baseColor: Color.gray.opacity(0.2)))
+            if let onCancel {
+                Button("取消", action: onCancel)
+                    .buttonStyle(.bordered)
+                    .controlSize(.regular)
             }
         }
-        .padding(.horizontal)
-        .padding(.vertical, 12)
+        .padding(.horizontal, 20)
+        .padding(.vertical, 16)
         .background(Color(NSColor.windowBackgroundColor))
-        .overlay(
-            Rectangle()
-                .frame(height: 0.5)
-                .foregroundColor(Color.secondary.opacity(0.2)),
-            alignment: .bottom
-        )
+        .overlay(alignment: .bottom) {
+            Divider().opacity(0.6)
+        }
     }
 
     @ViewBuilder
@@ -516,20 +503,10 @@ private struct CustomDownloadHeaderView: View {
 
     private var architectureChip: some View {
         let isAppleSilicon = architecture.map { $0 == .appleSilicon } ?? downloadAppleSilicon
-        return HStack(spacing: 3) {
-            Image(systemName: isAppleSilicon ? "m.square" : "x.square")
-                .font(.system(size: 10))
-            Text(isAppleSilicon ? "Apple Silicon" : "Intel")
-                .font(.system(size: 10, weight: .medium))
-        }
-        .foregroundColor(.blue.opacity(0.85))
-        .padding(.horizontal, 5)
-        .padding(.vertical, 1)
-        .background(
-            RoundedRectangle(cornerRadius: 4)
-                .fill(Color.blue.opacity(0.1))
-        )
+        return Text(isAppleSilicon ? "Apple Silicon" : "Intel")
+            .font(.system(size: 11, weight: .medium))
     }
+
 }
 
 private struct NavigationCustomDownloadLoadingView: View {
@@ -723,121 +700,167 @@ private enum CustomPackageFilter: String, CaseIterable, Identifiable {
         switch self {
         case .required: return String(localized: "必需")
         case .optional: return String(localized: "可选")
-        case .core: return String(localized: "核心")
-        case .nonCore: return String(localized: "非核心")
+        case .core: return String(localized: "核心包")
+        case .nonCore: return String(localized: "非核心包")
         case .selectedOnly: return String(localized: "仅已选")
         }
     }
 
     var icon: String {
         switch self {
-        case .required: return "exclamationmark.lock.fill"
+        case .required: return "lock.fill"
         case .optional: return "slider.horizontal.3"
         case .core: return "cube.fill"
         case .nonCore: return "cube.transparent"
         case .selectedOnly: return "checkmark.circle.fill"
         }
     }
+
+    var categoryColor: Color? {
+        switch self {
+        case .required: return .orange
+        case .optional: return .blue
+        case .core: return .purple
+        case .nonCore: return .teal
+        case .selectedOnly: return nil
+        }
+    }
 }
 
 private struct CustomFilterChip: View {
-    let filter: CustomPackageFilter
+    let title: String
+    let icon: String
+    var categoryColor: Color? = nil
     let isActive: Bool
     let onTap: () -> Void
 
+    private var tint: Color {
+        categoryColor ?? .accentColor
+    }
+
     var body: some View {
         Button(action: onTap) {
-            HStack(spacing: 4) {
-                Image(systemName: filter.icon)
-                    .font(.system(size: 10, weight: .medium))
-                Text(filter.title)
-                    .font(.system(size: 12, weight: isActive ? .semibold : .regular))
-            }
-            .foregroundColor(isActive ? .blue : .secondary)
-            .padding(.horizontal, 10)
-            .padding(.vertical, 5)
-            .background(
-                RoundedRectangle(cornerRadius: 6)
-                    .fill(isActive ? Color.blue.opacity(0.12) : Color(NSColor.controlBackgroundColor).opacity(0.5))
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 6)
-                    .stroke(isActive ? Color.blue.opacity(0.3) : Color.secondary.opacity(0.12), lineWidth: 0.5)
-            )
+            Label(title, systemImage: icon)
+                .font(.system(size: 11, weight: isActive || categoryColor != nil ? .semibold : .regular))
+                .foregroundColor(categoryColor ?? (isActive ? .accentColor : .secondary))
+                .padding(.horizontal, 9)
+                .padding(.vertical, 6)
+                .background(
+                    RoundedRectangle(cornerRadius: 6)
+                        .fill(tint.opacity(isActive ? 0.16 : (categoryColor == nil ? 0 : 0.06)))
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 6)
+                        .stroke(tint.opacity(isActive ? 0.45 : (categoryColor == nil ? 0 : 0.25)), lineWidth: 1)
+                )
+                .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .accessibilityAddTraits(isActive ? .isSelected : [])
     }
 }
 
 private struct CustomDownloadFilterBar: View {
     @Binding var searchText: String
     @Binding var activeFilters: Set<CustomPackageFilter>
+    let visibleCount: Int
+    let totalCount: Int
     let onSelectAllVisible: () -> Void
     let onClearAllSelection: () -> Void
 
+    private var hasFilters: Bool {
+        !searchText.isEmpty || !activeFilters.isEmpty
+    }
+
     var body: some View {
-        VStack(spacing: 8) {
+        VStack(spacing: 10) {
             HStack(spacing: 8) {
                 Image(systemName: "magnifyingglass")
                     .font(.system(size: 13))
-                    .foregroundColor(.secondary.opacity(0.7))
+                    .foregroundColor(.secondary)
 
                 TextField(String(localized: "搜索包名、版本、类型"), text: $searchText)
-                    .textFieldStyle(PlainTextFieldStyle())
+                    .textFieldStyle(.plain)
                     .font(.system(size: 13))
 
                 if !searchText.isEmpty {
                     Button(action: { searchText = "" }) {
                         Image(systemName: "xmark.circle.fill")
-                            .font(.system(size: 13))
-                            .foregroundColor(.secondary.opacity(0.7))
+                            .foregroundColor(.secondary)
                     }
                     .buttonStyle(.plain)
-                    .transition(.opacity)
+                    .accessibilityLabel(String(localized: "清除搜索"))
                 }
             }
-            .padding(8)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 9)
             .background(
                 RoundedRectangle(cornerRadius: 8)
-                    .fill(Color(NSColor.controlBackgroundColor).opacity(0.5))
+                    .fill(Color(NSColor.controlBackgroundColor))
                     .overlay(
                         RoundedRectangle(cornerRadius: 8)
-                            .stroke(Color.secondary.opacity(0.1), lineWidth: 1)
+                            .stroke(Color.primary.opacity(0.06), lineWidth: 1)
                     )
             )
 
-            HStack(spacing: 6) {
+            HStack(spacing: 4) {
+                CustomFilterChip(
+                    title: String(localized: "全部"),
+                    icon: "square.grid.2x2",
+                    isActive: activeFilters.isEmpty,
+                    onTap: {
+                        withAnimation(.easeInOut(duration: 0.15)) {
+                            activeFilters.removeAll()
+                        }
+                    }
+                )
+
                 ForEach(CustomPackageFilter.allCases) { filter in
                     CustomFilterChip(
-                        filter: filter,
+                        title: filter.title,
+                        icon: filter.icon,
+                        categoryColor: filter.categoryColor,
                         isActive: activeFilters.contains(filter),
                         onTap: { toggle(filter) }
                     )
                 }
+
+                Spacer(minLength: 8)
+
+                if hasFilters {
+                    Button(String(localized: "清除筛选")) {
+                        withAnimation(.easeInOut(duration: 0.15)) {
+                            searchText = ""
+                            activeFilters.removeAll()
+                        }
+                    }
+                    .buttonStyle(.borderless)
+                    .font(.system(size: 11))
+                }
+            }
+
+            HStack(spacing: 12) {
+                Text("显示 \(visibleCount) / \(totalCount) 个包")
+                    .foregroundColor(.secondary)
+                    .monospacedDigit()
+
                 Spacer(minLength: 12)
 
-                Button(action: onSelectAllVisible) {
-                    Text(String(localized: "全选当前"))
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundColor(.blue)
-                }
-                .buttonStyle(.plain)
-                .help(String(localized: "选中当前筛选下可见的全部包"))
+                Button(String(localized: "全选当前"), action: onSelectAllVisible)
+                    .buttonStyle(.borderless)
+                    .disabled(visibleCount == 0)
+                    .help(String(localized: "选中当前筛选下可见的全部包"))
 
-                Text("·")
-                    .foregroundColor(.secondary.opacity(0.4))
-
-                Button(action: onClearAllSelection) {
-                    Text(String(localized: "清空选择"))
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundColor(.secondary)
-                }
-                .buttonStyle(.plain)
-                .help(String(localized: "仅保留必需包"))
+                Button(String(localized: "取消可选"), action: onClearAllSelection)
+                    .buttonStyle(.borderless)
+                    .foregroundColor(.secondary)
+                    .help(String(localized: "保留必需包和已下载包"))
             }
+            .font(.system(size: 11))
         }
-        .padding(.horizontal)
-        .padding(.vertical, 10)
+        .padding(.horizontal, 20)
+        .padding(.top, 12)
+        .padding(.bottom, 10)
         .background(Color(NSColor.windowBackgroundColor))
     }
 
@@ -889,25 +912,26 @@ private struct NavigationCustomPackageSelectorView: View {
     let onInstalledProduct: () -> Void
 
     var body: some View {
+        let grouped = filteredDependencies
+        let selectedStats = selectedStatsByDependency
+
         VStack(spacing: 0) {
             CustomDownloadHeaderView(
                 productId: productId,
                 version: version,
                 productIcon: productIcon,
                 architecture: dependenciesToDownload.compactMap(\.catalogSnapshot).first?.context.architecture,
-                onCopyAll: copyAllInfo,
-                onCancel: onCancel
+                onCopyAll: copyAllInfo
             )
 
             CustomDownloadFilterBar(
                 searchText: $searchText,
                 activeFilters: $activeFilters,
+                visibleCount: grouped.reduce(0) { $0 + $1.packages.count },
+                totalCount: packages.count,
                 onSelectAllVisible: selectAllVisiblePackages,
                 onClearAllSelection: clearAllSelection
             )
-
-            let grouped = filteredDependencies
-            let selectedStats = selectedStatsByDependency
 
             if grouped.isEmpty {
                 CustomPackageEmptyView(
@@ -946,18 +970,22 @@ private struct NavigationCustomPackageSelectorView: View {
                                 },
                                 onSelectGroup: selectAllInDependency,
                                 onClearGroup: clearAllInDependency,
-                                onCopyBuildGuid: copyToClipboard
+                                onCopyInfo: copyToClipboard
                             )
                         }
                     }
-                    .padding()
+                    .padding(.horizontal, 20)
+                    .padding(.top, 8)
+                    .padding(.bottom, 16)
                 }
                 .background(Color.clear)
             }
 
             CustomDownloadActionBar(
-                selectedCount: selectedDownloadPackageCount,
+                selectedCount: selectedPackages.count,
                 totalCount: packages.count,
+                downloadCount: selectedDownloadPackageCount,
+                downloadedCount: selectedPackages.intersection(downloadedPackages).count,
                 totalSizeText: formattedTotalSize,
                 isDownloading: isDownloading,
                 canDownload: !selectedPackages.isEmpty,
@@ -1061,13 +1089,15 @@ private struct NavigationCustomPackageSelectorView: View {
 
     private var selectedStatsByDependency: [String: (count: Int, size: Int64)] {
         var result: [String: (count: Int, size: Int64)] = [:]
-        let selectedIds = selectedDownloadPackageIds
+        let selectedIds = selectedPackages
         for dependency in dependenciesToDownload {
             var count = 0
             var size: Int64 = 0
             for package in dependency.packages where selectedIds.contains(package.id) {
                 count += 1
-                size += package.downloadSize
+                if !downloadedPackages.contains(package.id) {
+                    size += package.downloadSize
+                }
             }
             result[dependency.sapCode] = (count, size)
         }
@@ -1341,7 +1371,7 @@ private struct DependencySection: View {
     let onToggleCollapse: (String) -> Void
     let onSelectGroup: (String) -> Void
     let onClearGroup: (String) -> Void
-    let onCopyBuildGuid: (String) -> Void
+    let onCopyInfo: (String) -> Void
 
     private var effectiveCollapsed: Bool {
         isForceExpanded ? false : isCollapsed
@@ -1355,12 +1385,51 @@ private struct DependencySection: View {
         ByteCountFormatter.string(fromByteCount: selectedSize, countStyle: .file)
     }
 
+    private var platformTitle: String {
+        switch dependency.platform.lowercased() {
+        case "macarm64": return String(localized: "Apple Silicon")
+        case "macuniversal": return String(localized: "通用")
+        case "osx10", "osx10-64": return String(localized: "Intel")
+        default: return dependency.platform
+        }
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             header
+
             if !effectiveCollapsed {
-                Divider()
-                    .padding(.horizontal, 4)
+                VStack(alignment: .leading, spacing: 10) {
+                    if !isManifestInstallerProduct(dependency.sapCode), !dependency.buildGuid.isEmpty {
+                        buildGuidButton
+                    }
+
+                    HStack(spacing: 12) {
+                        Text("包清单")
+                            .foregroundColor(.secondary)
+
+                        Spacer(minLength: 8)
+
+                        Button(String(localized: "全选此组")) {
+                            onSelectGroup(dependency.sapCode)
+                        }
+                        .buttonStyle(.borderless)
+                        .help(String(localized: "选中该依赖下所有包"))
+
+                        Button(String(localized: "取消可选")) {
+                            onClearGroup(dependency.sapCode)
+                        }
+                        .buttonStyle(.borderless)
+                        .foregroundColor(.secondary)
+                        .help(String(localized: "保留此组的必需包和已下载包"))
+                    }
+                    .font(.system(size: 11))
+                }
+                .padding(.horizontal, 14)
+                .padding(.bottom, 10)
+
+                Divider().opacity(0.6)
+
                 VStack(spacing: 0) {
                     ForEach(visiblePackages) { package in
                         NavigationEnhancedPackageRow(
@@ -1380,142 +1449,129 @@ private struct DependencySection: View {
                                 copyPackageInfoInline(package)
                             }
                         )
+
+                        if package.id != visiblePackages.last?.id {
+                            Divider()
+                                .opacity(0.3)
+                                .padding(.leading, 44)
+                        }
                     }
                 }
-                .padding(.vertical, 2)
             }
         }
-        .background(
-            RoundedRectangle(cornerRadius: 8)
-                .fill(Color(NSColor.controlBackgroundColor).opacity(effectiveCollapsed ? 0.25 : 0.45))
-        )
+        .background(Color(NSColor.controlBackgroundColor))
+        .clipShape(RoundedRectangle(cornerRadius: 10))
         .overlay(
-            RoundedRectangle(cornerRadius: 8)
+            RoundedRectangle(cornerRadius: 10)
                 .stroke(
-                    isMainProduct ? Color.blue.opacity(0.25) : Color.secondary.opacity(0.1),
-                    lineWidth: isMainProduct ? 1 : 0.5
+                    isMainProduct ? Color.accentColor.opacity(0.22) : Color.primary.opacity(0.07),
+                    lineWidth: 1
                 )
         )
     }
 
     private var header: some View {
-        HStack(alignment: .center, spacing: 10) {
-            Button(action: { onToggleCollapse(dependency.sapCode) }) {
+        Button(action: { onToggleCollapse(dependency.sapCode) }) {
+            HStack(spacing: 12) {
                 Image(systemName: "chevron.right")
                     .font(.system(size: 10, weight: .semibold))
                     .rotationEffect(.degrees(effectiveCollapsed ? 0 : 90))
                     .foregroundColor(.secondary)
-                    .frame(width: 14)
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .disabled(isForceExpanded)
-            .help(isForceExpanded ? "筛选激活时无法折叠" : (effectiveCollapsed ? "展开" : "折叠"))
+                    .frame(width: 12)
 
-            HStack(spacing: 6) {
-                Image(systemName: isMainProduct ? "app.badge.fill" : "shippingbox.fill")
-                    .font(.system(size: 12))
-                    .foregroundColor(isMainProduct ? .blue : .blue.opacity(0.7))
-
-                Text(dependency.sapCode)
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundColor(.primary.opacity(0.9))
-                    .textSelection(.enabled)
-
-                Text(dependency.version)
-                    .font(.system(size: 11))
-                    .padding(.horizontal, 5)
-                    .padding(.vertical, 1)
-                    .background(
-                        RoundedRectangle(cornerRadius: 3)
-                            .fill(Color.blue.opacity(0.1))
-                    )
-                    .foregroundColor(.blue.opacity(0.8))
-
-                if isMainProduct {
-                    Text("主产品")
-                        .font(.system(size: 9, weight: .semibold))
-                        .foregroundColor(.blue)
-                        .padding(.horizontal, 5)
-                        .padding(.vertical, 1)
-                        .background(
-                            RoundedRectangle(cornerRadius: 3)
-                                .fill(Color.blue.opacity(0.12))
-                        )
-                }
-
-                if !isManifestInstallerProduct(dependency.sapCode), !dependency.buildGuid.isEmpty {
-                    Button(action: { onCopyBuildGuid(dependency.buildGuid) }) {
-                        HStack(spacing: 3) {
-                            Image(systemName: "doc.on.doc")
-                                .font(.system(size: 9))
-                            Text("buildGuid")
-                                .font(.system(size: 10))
-                        }
-                        .foregroundColor(.secondary)
+                VStack(alignment: .leading, spacing: 6) {
+                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                        Text(dependency.sapCode)
+                            .font(.system(size: 14, weight: .semibold))
+                            .foregroundColor(.primary)
+                        Text(dependency.version)
+                            .font(.system(size: 12))
+                            .foregroundColor(.secondary)
+                            .monospacedDigit()
                     }
-                    .buttonStyle(.plain)
-                    .help("复制 buildGuid: \(dependency.buildGuid)")
+
+                    HStack(spacing: 8) {
+                        Text(isMainProduct ? String(localized: "主产品") : String(localized: "依赖组件"))
+                            .foregroundColor(isMainProduct ? .accentColor : .secondary)
+
+                        if !platformTitle.isEmpty {
+                            Text("·")
+                                .foregroundColor(.secondary.opacity(0.5))
+                            Text(platformTitle)
+                                .foregroundColor(.secondary)
+                                .help(dependency.platform)
+                        }
+                    }
+                    .font(.system(size: 10, weight: .medium))
                 }
-            }
 
-            Spacer(minLength: 8)
+                Spacer(minLength: 12)
 
-            Text("\(selectedCount) / \(dependency.packages.count)")
-                .font(.system(size: 11, weight: .medium))
-                .foregroundColor(.secondary.opacity(0.85))
-                .monospacedDigit()
-
-            Text("·")
-                .foregroundColor(.secondary.opacity(0.4))
-
-            Text(groupSizeText)
-                .font(.system(size: 11, weight: .medium))
-                .foregroundColor(.secondary.opacity(0.85))
-                .monospacedDigit()
-
-            HStack(spacing: 4) {
-                Button(action: { onSelectGroup(dependency.sapCode) }) {
-                    Text(String(localized: "全选"))
-                        .font(.system(size: 10, weight: .medium))
-                        .foregroundColor(.blue)
-                }
-                .buttonStyle(.plain)
-                .help(String(localized: "选中该依赖下所有包"))
-
-                Text("·")
-                    .foregroundColor(.secondary.opacity(0.4))
-
-                Button(action: { onClearGroup(dependency.sapCode) }) {
-                    Text(String(localized: "清空"))
-                        .font(.system(size: 10, weight: .medium))
+                VStack(alignment: .trailing, spacing: 6) {
+                    Text("已选 \(selectedCount) / \(dependency.packages.count) 个包")
+                        .font(.system(size: 11))
                         .foregroundColor(.secondary)
+
+                    HStack(alignment: .firstTextBaseline, spacing: 6) {
+                        Text("需下载")
+                            .font(.system(size: 10))
+                            .foregroundColor(.secondary)
+                        Text(groupSizeText)
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundColor(.primary)
+                    }
                 }
-                .buttonStyle(.plain)
-                .help(String(localized: "取消该依赖下非必需包"))
+                .monospacedDigit()
+                .fixedSize(horizontal: true, vertical: false)
             }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 13)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(Rectangle())
         }
-        .padding(.horizontal, 12)
-        .padding(.vertical, 8)
-        .contentShape(Rectangle())
-        .onTapGesture {
-            if !isForceExpanded {
-                onToggleCollapse(dependency.sapCode)
+        .buttonStyle(.plain)
+        .disabled(isForceExpanded)
+        .help(isForceExpanded ? "筛选激活时无法折叠" : (effectiveCollapsed ? "展开" : "折叠"))
+        .accessibilityValue(effectiveCollapsed ? String(localized: "已收起") : String(localized: "已展开"))
+    }
+
+    private var buildGuidButton: some View {
+        Button(action: { onCopyInfo(dependency.buildGuid) }) {
+            HStack(spacing: 8) {
+                Text("BuildGuid")
+                    .foregroundColor(.secondary)
+                    .frame(width: 64, alignment: .leading)
+                Text(dependency.buildGuid)
+                    .font(.system(size: 10, design: .monospaced))
+                    .foregroundColor(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                Image(systemName: "doc.on.doc")
+                    .foregroundColor(.secondary)
+                    .frame(width: 16)
             }
+            .font(.system(size: 10))
+            .padding(.vertical, 6)
+            .contentShape(Rectangle())
         }
+        .buttonStyle(.plain)
+        .help(String(format: String(localized: "复制 buildGuid: %@"), dependency.buildGuid))
+        .accessibilityLabel(String(localized: "复制 buildGuid"))
+        .accessibilityValue(dependency.buildGuid)
     }
 
     private func copyPackageInfoInline(_ package: Package) {
         let packageInfo = "\(package.fullPackageName) (\(package.packageVersion)) - \(package.type)"
-        let pasteboard = NSPasteboard.general
-        pasteboard.clearContents()
-        pasteboard.setString(packageInfo, forType: .string)
+        onCopyInfo(packageInfo)
     }
 }
 
 private struct CustomDownloadActionBar: View {
     let selectedCount: Int
     let totalCount: Int
+    let downloadCount: Int
+    let downloadedCount: Int
     let totalSizeText: String
     let isDownloading: Bool
     let canDownload: Bool
@@ -1523,64 +1579,58 @@ private struct CustomDownloadActionBar: View {
     let onStartDownload: () -> Void
 
     var body: some View {
-        HStack(spacing: 12) {
-            HStack(spacing: 6) {
-                Image(systemName: "checklist")
-                    .font(.system(size: 12))
-                    .foregroundColor(.secondary.opacity(0.85))
-                Text("已选 \(selectedCount) / \(totalCount) 个包")
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundColor(.primary.opacity(0.85))
-                    .monospacedDigit()
-                Text("·")
-                    .foregroundColor(.secondary.opacity(0.4))
-                Image(systemName: "arrow.down.doc")
-                    .font(.system(size: 11))
-                    .foregroundColor(.secondary.opacity(0.8))
-                Text(totalSizeText)
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundColor(.primary.opacity(0.85))
-                    .monospacedDigit()
-            }
+        HStack(spacing: 16) {
+            VStack(alignment: .leading, spacing: 5) {
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Text(totalSizeText)
+                        .font(.system(size: 20, weight: .semibold))
+                        .foregroundColor(.primary)
+                    Text("需下载 \(downloadCount) 个包")
+                        .font(.system(size: 11))
+                        .foregroundColor(.secondary)
+                }
 
-            Spacer()
-
-            Button(action: onCancel) {
-                Text("取消")
-                    .font(.system(size: 13))
+                HStack(spacing: 8) {
+                    Text("已选 \(selectedCount) / \(totalCount) 个包")
+                    if downloadedCount > 0 {
+                        Text("·")
+                        Text("已下载 \(downloadedCount) 个包")
+                    }
+                }
+                .font(.system(size: 11))
+                .foregroundColor(.secondary)
             }
-            .buttonStyle(BeautifulButtonStyle(baseColor: Color.gray.opacity(0.2)))
+            .monospacedDigit()
+
+            Spacer(minLength: 12)
+
+            Button("取消", action: onCancel)
+                .buttonStyle(.bordered)
+                .controlSize(.large)
 
             Button(action: onStartDownload) {
                 HStack(spacing: 6) {
                     if isDownloading {
                         ProgressView()
-                            .progressViewStyle(CircularProgressViewStyle(tint: .white))
                             .controlSize(.small)
                     } else {
-                        Image(systemName: "arrow.down.circle.fill")
-                            .font(.system(size: 13))
+                        Image(systemName: "arrow.down")
                     }
                     Text(isDownloading ? "正在下载..." : "开始下载")
-                        .font(.system(size: 13, weight: .semibold))
                 }
-                .foregroundColor(.white)
-                .padding(.horizontal, 4)
+                .font(.system(size: 12, weight: .semibold))
+                .frame(minWidth: 100)
             }
-            .buttonStyle(BeautifulButtonStyle(baseColor: canDownload && !isDownloading ? Color.blue : Color.gray))
+            .buttonStyle(.borderedProminent)
+            .controlSize(.large)
             .disabled(!canDownload || isDownloading)
         }
-        .padding(.horizontal)
-        .padding(.vertical, 12)
-        .background(
-            Color(NSColor.windowBackgroundColor)
-                .overlay(
-                    Rectangle()
-                        .frame(height: 0.5)
-                        .foregroundColor(Color.secondary.opacity(0.2)),
-                    alignment: .top
-                )
-        )
+        .padding(.horizontal, 20)
+        .padding(.vertical, 14)
+        .background(Color(NSColor.windowBackgroundColor))
+        .overlay(alignment: .top) {
+            Divider().opacity(0.6)
+        }
     }
 }
 
@@ -1647,56 +1697,36 @@ private struct NavigationEnhancedPackageRow: View {
                 Image(systemName: isSelected ? "checkmark.square.fill" : "square")
                     .font(.system(size: 14))
                     .foregroundColor(checkboxColor)
+                    .frame(width: 20, height: 20)
+                    .contentShape(Rectangle())
             }
-            .buttonStyle(PlainButtonStyle())
+            .buttonStyle(.plain)
             .disabled(isLocked)
             .help(checkboxHelp)
+            .accessibilityLabel(package.fullPackageName)
+            .accessibilityValue(isSelected ? String(localized: "已选择") : String(localized: "未选择"))
 
-            VStack(alignment: .leading, spacing: 3) {
-                HStack(spacing: 6) {
-                    Text("\(package.fullPackageName) (\(package.packageVersion))")
+            VStack(alignment: .leading, spacing: 4) {
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Text(package.fullPackageName)
                         .font(.system(size: 12, weight: .medium))
-                        .foregroundColor(.primary.opacity(0.85))
+                        .foregroundColor(.primary)
                         .textSelection(.enabled)
                         .lineLimit(1)
                         .truncationMode(.middle)
+                        .help(package.fullPackageName)
 
-                    packageTypeBadge
-
-                    if isDownloaded {
-                        subtleBadge(text: String(localized: "已下载"), color: .green)
-                    }
-
-                    if isRequiredPackage {
-                        subtleBadge(text: String(localized: "必需"), color: .red)
-                    } else if package.isAdobeDownloaderPreselected {
-                        subtleBadge(text: String(localized: "Adobe Downloader 预选"), color: .purple)
-                    } else if package.isDefaultSelected {
-                        subtleBadge(text: String(localized: "默认选择"), color: .blue)
-                    }
-
-                    if !package.isOfficiallyEligible {
-                        subtleBadge(text: String(localized: "可选"), color: .orange)
-                    }
-
-                    Spacer(minLength: 8)
+                    Spacer(minLength: 12)
 
                     Text(package.formattedSize)
-                        .font(.system(size: 11))
-                        .foregroundColor(.secondary.opacity(0.85))
+                        .font(.system(size: 12))
+                        .foregroundColor(.secondary)
                         .monospacedDigit()
-
-                    if isHovered {
-                        Button(action: onCopyPackageInfo) {
-                            Image(systemName: "doc.on.doc")
-                                .font(.system(size: 10))
-                                .foregroundColor(.secondary.opacity(0.9))
-                        }
-                        .buttonStyle(.plain)
-                        .help("复制包信息")
-                        .transition(.opacity)
-                    }
+                        .frame(width: 76, alignment: .trailing)
                 }
+                .frame(minHeight: 20)
+
+                packageMetadata
 
                 #if DEBUG
                 if !package.condition.isEmpty {
@@ -1718,22 +1748,104 @@ private struct NavigationEnhancedPackageRow: View {
                 }
                 #endif
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
+
+            Button(action: onCopyPackageInfo) {
+                Image(systemName: "doc.on.doc")
+                    .font(.system(size: 11))
+                    .foregroundColor(isHovered ? .primary : .secondary)
+                    .frame(width: 20, height: 20)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help("复制包信息")
+            .accessibilityLabel(String(localized: "复制包信息"))
         }
-        .padding(.horizontal, 12)
+        .padding(.horizontal, 14)
         .padding(.vertical, 6)
-        .background(isSelected ? Color.blue.opacity(0.07) : Color.clear)
+        .background(
+            isSelected ? Color.accentColor.opacity(0.05)
+                : (isHovered ? Color.primary.opacity(0.025) : Color.clear)
+        )
         .contentShape(Rectangle())
-        .onHover { hovering in
-            withAnimation(.easeInOut(duration: 0.15)) {
-                isHovered = hovering
+        .onHover { isHovered = $0 }
+    }
+
+    private var requirementBadge: some View {
+        packageBadge(for: isRequiredPackage ? .required : .optional)
+            .help(requirementHelp)
+    }
+
+    private var requirementHelp: String {
+        if isLocked {
+            return checkboxHelp
+        }
+        if !package.isOfficiallyEligible, !package.officialFilterReasonText.isEmpty {
+            return package.officialFilterReasonText
+        }
+        return checkboxHelp
+    }
+
+    private var packageTypeBadge: some View {
+        packageBadge(for: package.type.lowercased() == "core" ? .core : .nonCore)
+            .help(package.type)
+    }
+
+    private func packageBadge(for category: CustomPackageFilter) -> some View {
+        let tint = category.categoryColor ?? .secondary
+
+        return HStack(spacing: 4) {
+            Image(systemName: category.icon)
+                .frame(width: 12, height: 12)
+                .accessibilityHidden(true)
+            Text(category.title)
+                .lineLimit(1)
+        }
+        .font(.system(size: 10, weight: .semibold))
+        .foregroundColor(tint)
+        .padding(.horizontal, 6)
+        .frame(height: 18)
+        .background(
+            RoundedRectangle(cornerRadius: 4)
+                .fill(tint.opacity(0.16))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 4)
+                .stroke(tint.opacity(0.4), lineWidth: 0.5)
+        )
+        .fixedSize(horizontal: true, vertical: false)
+        .accessibilityElement(children: .combine)
+    }
+
+    private var packageMetadata: some View {
+        HStack(spacing: 8) {
+            if !package.type.isEmpty {
+                packageTypeBadge
+            }
+
+            requirementBadge
+
+            if !package.packageVersion.isEmpty {
+                Text(package.packageVersion)
+                    .monospacedDigit()
+                    .textSelection(.enabled)
+            }
+
+            if isDownloaded {
+                Label(String(localized: "已下载"), systemImage: "checkmark.circle")
+                    .foregroundColor(.green)
+            }
+
+            if !isRequiredPackage {
+                if package.isAdobeDownloaderPreselected {
+                    Text(String(localized: "Adobe Downloader 预选"))
+                } else if package.isDefaultSelected {
+                    Text(String(localized: "默认选择"))
+                }
             }
         }
-        .overlay(
-            Rectangle()
-                .stroke(Color.secondary.opacity(0.15), lineWidth: 0.5)
-                .opacity(0.5),
-            alignment: .bottom
-        )
+        .font(.system(size: 10))
+        .foregroundColor(.secondary)
     }
 
     private var checkboxColor: Color {
@@ -1743,7 +1855,7 @@ private struct NavigationEnhancedPackageRow: View {
         if isRequiredPackage {
             return .secondary.opacity(0.6)
         }
-        return isSelected ? .blue : .secondary
+        return isSelected ? .accentColor : .secondary
     }
 
     private var checkboxHelp: String {
@@ -1754,39 +1866,5 @@ private struct NavigationEnhancedPackageRow: View {
             return String(localized: "此包为必需包，无法取消选择")
         }
         return String(localized: "点击切换选择状态")
-    }
-
-    @ViewBuilder
-    private var packageTypeBadge: some View {
-        let isCore = package.type.lowercased() == "core"
-        Text(package.type)
-            .font(.system(size: 10, weight: .medium))
-            .padding(.horizontal, 5)
-            .padding(.vertical, 1)
-            .background(
-                RoundedRectangle(cornerRadius: 3)
-                    .fill((isCore ? Color.blue : Color.purple).opacity(0.1))
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 3)
-                    .stroke((isCore ? Color.blue : Color.purple).opacity(0.25), lineWidth: 0.5)
-            )
-            .foregroundColor(isCore ? .blue.opacity(0.85) : .purple.opacity(0.85))
-    }
-
-    private func subtleBadge(text: String, color: Color) -> some View {
-        Text(text)
-            .font(.system(size: 10, weight: .semibold))
-            .padding(.horizontal, 5)
-            .padding(.vertical, 1)
-            .background(
-                RoundedRectangle(cornerRadius: 3)
-                    .fill(color.opacity(0.12))
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 3)
-                    .stroke(color.opacity(0.3), lineWidth: 0.5)
-            )
-            .foregroundColor(color.opacity(0.9))
     }
 }

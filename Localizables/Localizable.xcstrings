@@ -623,16 +623,6 @@
     "%lld" : {
 
     },
-    "%lld / %lld" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "new",
-            "value" : "%1$lld / %2$lld"
-          }
-        }
-      }
-    },
     "%lld 个下载任务进行中" : {
       "localizations" : {
         "en" : {
@@ -898,9 +888,6 @@
 
     },
     "BaseVersion" : {
-
-    },
-    "buildGuid" : {
 
     },
     "BuildGuid" : {
@@ -2048,6 +2035,7 @@
       }
     },
     "仅保留必需包" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -2169,6 +2157,9 @@
         }
       }
     },
+    "保留必需包和已下载包" : {
+
+    },
     "保留文件" : {
       "localizations" : {
         "en" : {
@@ -2178,6 +2169,9 @@
           }
         }
       }
+    },
+    "保留此组的必需包和已下载包" : {
+
     },
     "修复 Helper" : {
       "extractionState" : "stale",
@@ -2273,6 +2267,9 @@
           }
         }
       }
+    },
+    "全选此组" : {
+
     },
     "全部" : {
       "localizations" : {
@@ -2924,6 +2921,9 @@
         }
       }
     },
+    "包清单" : {
+
+    },
     "包详情" : {
       "localizations" : {
         "en" : {
@@ -3126,6 +3126,9 @@
         }
       }
     },
+    "取消可选" : {
+
+    },
     "取消清理" : {
       "localizations" : {
         "en" : {
@@ -3137,6 +3140,7 @@
       }
     },
     "取消该依赖下非必需包" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -3506,6 +3510,7 @@
       }
     },
     "复制全部" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -3578,6 +3583,9 @@
           }
         }
       }
+    },
+    "复制清单" : {
+
     },
     "复制输出" : {
       "extractionState" : "stale",
@@ -4130,6 +4138,9 @@
         }
       }
     },
+    "已下载 %lld 个包" : {
+
+    },
     "已取消" : {
       "localizations" : {
         "en" : {
@@ -4405,6 +4416,9 @@
           }
         }
       }
+    },
+    "已选择" : {
+
     },
     "已选择 %d 个模块" : {
       "localizations" : {
@@ -5534,6 +5548,16 @@
         }
       }
     },
+    "显示 %lld / %lld 个包" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "显示 %1$lld / %2$lld 个包"
+          }
+        }
+      }
+    },
     "显示 %lld / %lld 个版本" : {
       "localizations" : {
         "en" : {
@@ -5907,6 +5931,9 @@
         }
       }
     },
+    "未选择" : {
+
+    },
     "未选择模块" : {
       "localizations" : {
         "en" : {
@@ -6009,6 +6036,7 @@
       }
     },
     "核心" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -6017,6 +6045,9 @@
           }
         }
       }
+    },
+    "核心包" : {
+
     },
     "检查中" : {
       "extractionState" : "stale",
@@ -7127,6 +7158,7 @@
       }
     },
     "清空选择" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -7155,6 +7187,9 @@
           }
         }
       }
+    },
+    "清除搜索" : {
+
     },
     "清除筛选" : {
 
@@ -8790,6 +8825,12 @@
         }
       }
     },
+    "需下载" : {
+
+    },
+    "需下载 %lld 个包" : {
+
+    },
     "需先启用\"自动检查更新版本\"" : {
       "localizations" : {
         "en" : {
@@ -8872,6 +8913,7 @@
 
     },
     "非核心" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -8880,6 +8922,9 @@
           }
         }
       }
+    },
+    "非核心包" : {
+
     },
     "预置命令" : {
       "localizations" : {
