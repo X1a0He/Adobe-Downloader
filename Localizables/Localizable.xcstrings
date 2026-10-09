@@ -19,16 +19,6 @@
     "(%lld)" : {
 
     },
-    "(%lld/%lld)" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "new",
-            "value" : "(%1$lld/%2$lld)"
-          }
-        }
-      }
-    },
     "(No logs available)" : {
       "localizations" : {
         "zh-Hans" : {
@@ -431,9 +421,6 @@
         }
       }
     },
-    "/" : {
-
-    },
     "%@" : {
       "localizations" : {
         "zh-Hans" : {
@@ -444,32 +431,12 @@
         }
       }
     },
-    "%@ (%@)" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "new",
-            "value" : "%1$@ (%2$@)"
-          }
-        }
-      }
-    },
     "%@ / %@" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "new",
             "value" : "%1$@ / %2$@"
-          }
-        }
-      }
-    },
-    "%@ %@%@" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "new",
-            "value" : "%1$@ %2$@%3$@"
           }
         }
       }
@@ -622,6 +589,16 @@
     },
     "%lld" : {
 
+    },
+    "%lld / %lld" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "%1$lld / %2$lld"
+          }
+        }
+      }
     },
     "%lld 个下载任务进行中" : {
       "localizations" : {
@@ -1865,6 +1842,9 @@
         }
       }
     },
+    "下载进度" : {
+
+    },
     "下载错误" : {
       "localizations" : {
         "en" : {
@@ -2314,6 +2294,9 @@
         }
       }
     },
+    "全部语言" : {
+
+    },
     "全量包" : {
 
     },
@@ -2531,6 +2514,9 @@
           }
         }
       }
+    },
+    "准备中" : {
+
     },
     "准备中 · %@" : {
       "localizations" : {
@@ -4317,6 +4303,16 @@
         }
       }
     },
+    "已完成 %lld / %lld" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "已完成 %1$lld / %2$lld"
+          }
+        }
+      }
+    },
     "已展开" : {
 
     },
@@ -5037,6 +5033,7 @@
       }
     },
     "搜索包名" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -7126,6 +7123,9 @@
         }
       }
     },
+    "清空搜索" : {
+
+    },
     "清空日志" : {
       "localizations" : {
         "en" : {
@@ -8743,6 +8743,9 @@
         }
       }
     },
+    "重置筛选" : {
+
+    },
     "重置进阶过滤" : {
       "localizations" : {
         "en" : {
@@ -8949,6 +8952,9 @@
           }
         }
       }
+    },
+    "预计剩余时间" : {
+
     },
     "高系统需求" : {
       "localizations" : {

@@ -40,6 +40,7 @@ struct TaskCard: View {
             CardHeaderView(
                 task: task,
                 iconImage: iconLoader.image,
+                onOpenInFinder: openInFinder,
                 statusBadgeContent: { statusBadge },
                 actionButtons: { actionButtons }
             )
@@ -49,12 +50,12 @@ struct TaskCard: View {
 
             switch task.status {
             case .downloading, .preparing, .waiting:
-                CardProgressView(task: task, tint: task.status.progressBarColor, isIndeterminate: false)
+                CardProgressView(task: task, tint: task.status.progressBarColor)
                     .padding(.horizontal, 24)
                     .padding(.bottom, 16)
 
             case .paused(let info):
-                CardProgressView(task: task, tint: .orange, isIndeterminate: false)
+                CardProgressView(task: task, tint: .orange)
                     .padding(.horizontal, 24)
                     .padding(.bottom, 12)
                 PausedInfoView(info: info)
@@ -170,28 +171,29 @@ struct TaskCard: View {
         .onAppear { iconLoader.load(productId: task.productId) }
     }
 
-    private var statusBadge: some View {
-        HStack(spacing: 4) {
-            Image(systemName: task.status.statusIcon)
-                .font(.system(size: 9))
-            Text(task.status.description)
-                .font(.system(size: 10, weight: .medium))
-                .lineLimit(1)
-                .truncationMode(.middle)
+    private var statusTitle: String {
+        switch task.status {
+        case .preparing: return String(localized: "准备中")
+        case .paused: return String(localized: "已暂停")
+        case .retrying: return String(localized: "重试中")
+        default: return task.status.compactDescription
         }
+    }
+
+    private var statusBadge: some View {
+        HStack(spacing: 5) {
+            Image(systemName: task.status.statusIcon)
+                .accessibilityHidden(true)
+            Text(statusTitle)
+        }
+        .font(.system(size: 11, weight: .medium))
         .foregroundColor(task.status.badgeColor)
-        .padding(.vertical, 4)
         .padding(.horizontal, 8)
-        .background(.ultraThinMaterial)
-        .overlay(
-            RoundedRectangle(cornerRadius: 6)
-                .fill(task.status.badgeColor.opacity(0.1))
-        )
-        .overlay(
-            RoundedRectangle(cornerRadius: 6)
-                .strokeBorder(task.status.badgeColor.opacity(0.3), lineWidth: 0.5)
-        )
+        .frame(height: 24)
+        .background(task.status.badgeColor.opacity(0.1))
         .clipShape(RoundedRectangle(cornerRadius: 6))
+        .fixedSize()
+        .help(task.status.description)
     }
 
     @ViewBuilder
@@ -293,21 +295,26 @@ struct TaskCard: View {
                 isExpanded.toggle()
             }
         }) {
-            HStack(spacing: 4) {
-                Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
-                    .font(.system(size: 9))
+            HStack(spacing: 6) {
+                Image(systemName: "shippingbox")
                     .foregroundColor(.secondary)
                 Text(String(localized: "包详情"))
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundColor(.secondary)
-                Text("(\(task.completedPackages)/\(task.totalPackages))")
-                    .font(.system(size: 11))
-                    .foregroundColor(.secondary.opacity(0.7))
+                    .fontWeight(.medium)
                 Spacer()
+                Text(String(localized: "已完成 \(task.completedPackages) / \(task.totalPackages)"))
+                    .foregroundColor(.secondary)
+                    .monospacedDigit()
+                Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundColor(.secondary)
+                    .frame(width: 12)
             }
+            .font(.system(size: 11))
+            .frame(minHeight: 20)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .accessibilityValue(isExpanded ? String(localized: "已展开") : String(localized: "已收起"))
     }
 
     @ViewBuilder
@@ -408,67 +415,97 @@ struct TaskCard: View {
 private struct CardHeaderView<Badge: View, Actions: View>: View {
     @ObservedObject var task: NewDownloadTask
     let iconImage: NSImage?
+    let onOpenInFinder: () -> Void
     @ViewBuilder let statusBadgeContent: () -> Badge
     @ViewBuilder let actionButtons: () -> Actions
 
+    private var architectureName: String {
+        switch HDPIMParityTargetArchitecture(rawValue: task.targetArchitecture) {
+        case .appleSilicon: return "Apple Silicon"
+        case .intel: return "Intel"
+        case nil:
+            switch task.platform {
+            case "macarm64": return "Apple Silicon"
+            case "macuniversal": return String(localized: "通用")
+            case "osx10", "osx10-64": return "Intel"
+            default: return task.platform
+            }
+        }
+    }
+
+    private var languageName: String {
+        if task.language == "ALL" { return String(localized: "全部语言") }
+        return AppStatics.supportedLanguages.first { $0.code == task.language }?.name ?? task.language
+    }
+
     var body: some View {
-        HStack(spacing: 12) {
-            iconView
-                .frame(width: 40, height: 40)
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 12) {
+                iconView
+                    .frame(width: 40, height: 40)
 
-            VStack(alignment: .leading, spacing: 3) {
-                HStack(spacing: 6) {
-                    Text(task.displayName)
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundColor(.primary)
-                        .lineLimit(1)
-
-                    Text(task.productVersion)
-                        .font(.system(size: 11))
-                        .foregroundColor(.secondary)
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 2)
-                        .background(.ultraThinMaterial)
-                        .clipShape(RoundedRectangle(cornerRadius: 4))
-
-                    if task.isDeltaUpdate {
-                        Text(String(localized: "增量包"))
-                            .font(.system(size: 9, weight: .semibold))
-                            .foregroundColor(.orange)
-                            .padding(.horizontal, 5)
-                            .padding(.vertical, 1)
-                            .background(
-                                RoundedRectangle(cornerRadius: 3)
-                                    .fill(Color.orange.opacity(0.12))
-                            )
+                VStack(alignment: .leading, spacing: 5) {
+                    HStack(alignment: .firstTextBaseline, spacing: 8) {
+                        Text(task.displayName)
+                            .font(.system(size: 15, weight: .semibold))
+                            .lineLimit(1)
+                            .help(task.displayName)
+                        Text(task.productVersion)
+                            .font(.system(size: 12))
+                            .foregroundColor(.secondary)
+                            .monospacedDigit()
+                            .fixedSize()
                     }
-                }
 
-                HStack(spacing: 3) {
-                    Image(systemName: "folder")
-                        .font(.system(size: 9))
-                        .foregroundColor(.blue.opacity(0.6))
-                    Text(DownloadFormatters.shortenedPath(task.directory.path))
-                        .font(.system(size: 10))
-                        .foregroundColor(.primary.opacity(0.5))
-                        .lineLimit(1)
-                        .truncationMode(.middle)
+                    HStack(spacing: 6) {
+                        if !architectureName.isEmpty {
+                            Text(architectureName)
+                                .help(task.platform)
+                        }
+                        if !languageName.isEmpty {
+                            if !architectureName.isEmpty {
+                                Text("·")
+                            }
+                            Text(languageName)
+                                .help(task.language)
+                        }
+                        if task.isDeltaUpdate {
+                            Text(String(localized: "增量包"))
+                                .fontWeight(.medium)
+                                .foregroundColor(.orange)
+                                .padding(.horizontal, 5)
+                                .padding(.vertical, 1)
+                                .background(Color.orange.opacity(0.1))
+                                .clipShape(RoundedRectangle(cornerRadius: 3))
+                        }
+                    }
+                    .font(.system(size: 10))
+                    .foregroundColor(.secondary)
+                    .lineLimit(1)
                 }
-                .onTapGesture {
-                    let url = URL(fileURLWithPath: task.directory.path)
-                    NSWorkspace.shared.selectFile(
-                        url.path,
-                        inFileViewerRootedAtPath: url.deletingLastPathComponent().path
-                    )
-                }
-                .help(task.directory.path)
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+                statusBadgeContent()
+                actionButtons()
+                    .fixedSize()
             }
 
-            Spacer()
-
-            statusBadgeContent()
-
-            actionButtons()
+            Button(action: onOpenInFinder) {
+                HStack(spacing: 6) {
+                    Image(systemName: "folder")
+                        .foregroundColor(.blue.opacity(0.8))
+                    Text(DownloadFormatters.shortenedPath(task.directory.path))
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                    Spacer(minLength: 0)
+                }
+                .font(.system(size: 10))
+                .foregroundColor(.secondary)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help(task.directory.path)
+            .accessibilityLabel(String(localized: "在 Finder 中显示"))
         }
     }
 
@@ -499,7 +536,6 @@ private struct CardHeaderView<Badge: View, Actions: View>: View {
 private struct CardProgressView: View {
     @ObservedObject var task: NewDownloadTask
     let tint: Color
-    let isIndeterminate: Bool
 
     private var clampedProgress: Double {
         min(max(task.totalProgress, 0), 1)
@@ -515,107 +551,75 @@ private struct CardProgressView: View {
         return nil
     }
 
-    private var stageText: String? {
-        if case .preparing(let info) = task.status {
-            return info.stage.title
-        }
-        return nil
-    }
-
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            GeometryReader { geometry in
-                ZStack(alignment: .leading) {
-                    Capsule()
-                        .fill(.primary.opacity(0.06))
-                        .frame(height: 8)
-
-                    Capsule()
-                        .fill(
-                            LinearGradient(
-                                colors: [tint.opacity(0.6), tint],
-                                startPoint: .leading,
-                                endPoint: .trailing
-                            )
-                        )
-                        .frame(width: CGFloat(clampedProgress) * geometry.size.width, height: 8)
-                        .shadow(color: tint.opacity(0.4), radius: 4, x: 0, y: 0)
-                        .animation(.linear(duration: 0.3), value: clampedProgress)
-                }
-            }
-            .frame(height: 8)
-
-            HStack(spacing: 6) {
-                HStack(spacing: 4) {
-                    Text(task.formattedDownloadedSize)
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundColor(.primary.opacity(0.8))
-                    Text("/")
-                        .font(.system(size: 11))
-                        .foregroundColor(.secondary.opacity(0.4))
-                    Text(task.formattedTotalSize)
+        VStack(alignment: .leading, spacing: 9) {
+            HStack(alignment: .firstTextBaseline, spacing: 12) {
+                Text("\(Int(clampedProgress * 100))%")
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundColor(tint)
+                    .frame(minWidth: 42, alignment: .leading)
+                Text("\(task.formattedDownloadedSize) / \(task.formattedTotalSize)")
+                    .font(.system(size: 11))
+                    .foregroundColor(.secondary)
+                Spacer(minLength: 8)
+                if case .downloading = task.status, task.totalSpeed > 0 {
+                    Label(DownloadFormatters.speed(task.totalSpeed), systemImage: "arrow.down")
                         .font(.system(size: 11))
                         .foregroundColor(.secondary)
-                }
-
-                if let stageText = stageText {
-                    Text("·")
-                        .foregroundColor(.secondary.opacity(0.3))
-                    HStack(spacing: 3) {
-                        Image(systemName: "gear.circle")
-                            .font(.system(size: 9))
-                        Text(stageText)
-                            .font(.system(size: 11))
-                    }
-                    .foregroundColor(.purple.opacity(0.85))
-                }
-
-                Spacer()
-
-                Text("\(Int(clampedProgress * 100))%")
-                    .font(.system(size: 11, weight: .bold))
-                    .foregroundColor(tint)
-
-                if task.totalSpeed > 0 {
-                    Text("·")
-                        .foregroundColor(.secondary.opacity(0.3))
-                    HStack(spacing: 2) {
-                        Image(systemName: "arrow.down").font(.system(size: 8))
-                        Text(DownloadFormatters.speed(task.totalSpeed)).font(.system(size: 11))
-                    }
-                    .foregroundColor(.secondary)
+                        .frame(minWidth: 78, alignment: .trailing)
 
                     let remaining = DownloadFormatters.remainingTime(
                         total: task.totalSize,
                         downloaded: task.totalDownloadedSize,
                         speed: task.totalSpeed
                     )
-                    if !remaining.isEmpty {
-                        Text("·").foregroundColor(.secondary.opacity(0.3))
-                        HStack(spacing: 2) {
-                            Image(systemName: "clock").font(.system(size: 8))
-                            Text(remaining).font(.system(size: 11))
-                        }
-                        .foregroundColor(.secondary)
+                    if !remaining.isEmpty, task.totalDownloadedSize < task.totalSize {
+                        Label(remaining, systemImage: "clock")
+                            .font(.system(size: 11))
+                            .foregroundColor(.secondary)
+                            .frame(minWidth: 62, alignment: .trailing)
+                            .help(String(localized: "预计剩余时间"))
                     }
                 }
             }
+            .monospacedDigit()
+            .lineLimit(1)
 
-            if let info = currentFileInfo {
-                HStack(spacing: 4) {
-                    Image(systemName: "arrow.down.to.line")
-                        .font(.system(size: 9))
-                        .foregroundColor(.blue.opacity(0.7))
+            GeometryReader { geometry in
+                ZStack(alignment: .leading) {
+                    Capsule()
+                        .fill(Color.primary.opacity(0.08))
+                    Capsule()
+                        .fill(tint)
+                        .frame(width: CGFloat(clampedProgress) * geometry.size.width)
+                        .animation(.linear(duration: 0.3), value: clampedProgress)
+                }
+            }
+            .frame(height: 6)
+            .accessibilityLabel(String(localized: "下载进度"))
+            .accessibilityValue("\(Int(clampedProgress * 100))%")
+
+            if case .preparing(let info) = task.status {
+                Label(info.stage.title, systemImage: "gear.circle")
+                    .font(.system(size: 11))
+                    .foregroundColor(.secondary)
+                    .help(info.message)
+            } else if let info = currentFileInfo {
+                HStack(spacing: 6) {
+                    Image(systemName: "doc.zipper")
+                        .foregroundColor(.secondary)
                     Text(info.name)
-                        .font(.system(size: 11))
-                        .foregroundColor(.primary.opacity(0.75))
                         .lineLimit(1)
                         .truncationMode(.middle)
-                    Text("(\(info.index)/\(info.total))")
-                        .font(.system(size: 10))
-                        .foregroundColor(.secondary.opacity(0.8))
+                        .help(info.name)
+                    Spacer(minLength: 8)
+                    Text("\(info.index) / \(info.total)")
+                        .foregroundColor(.secondary)
                         .monospacedDigit()
+                        .fixedSize()
                 }
+                .font(.system(size: 11))
+                .foregroundColor(.primary.opacity(0.8))
             }
         }
     }
