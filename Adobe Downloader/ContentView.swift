@@ -2,11 +2,9 @@ import SwiftUI
 
 struct ContentView: View {
     @StateObject private var networkManager = globalNetworkManager
-    @State private var isRefreshing = false
-    @State private var errorMessage: String?
     @State private var showDownloadManager = false
     @State private var searchText = ""
-    @State private var currentApiVersion = StorageData.shared.apiVersion
+    @StorageValue(\.apiVersion) private var currentApiVersion
     @Binding var showSettingsView: Bool
 
     private var filteredProducts: [UniqueProduct] {
@@ -22,11 +20,8 @@ struct ContentView: View {
     }
 
     private func refreshData() {
-        isRefreshing = true
-        errorMessage = nil
         Task {
             await networkManager.fetchProducts()
-            await MainActor.run { isRefreshing = false }
         }
     }
 
@@ -52,7 +47,7 @@ struct ContentView: View {
             ToolbarView(
                 currentApiVersion: $currentApiVersion,
                 showDownloadManager: $showDownloadManager,
-                isRefreshing: isRefreshing,
+                isRefreshing: networkManager.isFetchingProducts,
                 downloadTasksCount: networkManager.downloadTasks.count,
                 onRefresh: refreshData,
                 openSettings: openSettings
@@ -60,13 +55,10 @@ struct ContentView: View {
         }
         .searchable(text: $searchText, placement: .toolbar, prompt: "搜索应用或产品 ID")
         .onChange(of: currentApiVersion) { newValue in
-            StorageData.shared.apiVersion = newValue
             refreshData()
         }
-        .onAppear { 
-            if globalCcmResult.products.isEmpty { 
-                refreshData() 
-            } 
+        .task {
+            await networkManager.fetchProducts(forceRefresh: false)
         }
     }
 }

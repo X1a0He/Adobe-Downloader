@@ -1181,7 +1181,7 @@ struct ArchitectureSettingRow: View {
                     text: String(format: String(localized: "本机: %@"), AppStatics.cpuArchitecture),
                     tint: .secondary
                 )
-                if networkManager.loadingState == .loading {
+                if networkManager.isFetchingProducts {
                     ProgressView()
                         .scaleEffect(0.6)
                         .frame(width: 16, height: 16)
@@ -1190,7 +1190,7 @@ struct ArchitectureSettingRow: View {
                     .toggleStyle(SwitchToggleStyle(tint: .green))
                     .controlSize(.small)
                     .labelsHidden()
-                    .disabled(networkManager.loadingState == .loading)
+                    .disabled(networkManager.isFetchingProducts)
             }
         }
         .onChange(of: viewModel.downloadAppleSilicon) { _ in

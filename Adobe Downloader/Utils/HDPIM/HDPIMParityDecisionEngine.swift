@@ -9,7 +9,7 @@ enum HDPIMParityWorkflow {
     case install
 }
 
-enum HDPIMParityTargetArchitecture: String {
+enum HDPIMParityTargetArchitecture: String, Sendable {
     case appleSilicon
     case intel
 
@@ -133,6 +133,7 @@ struct HDPIMResolvedDependencyDecision {
     let hostValidation: HDPIMHostValidationSnapshot
     let applicationInfo: ApplicationInfo
     let packages: [HDPIMResolvedPackageDecision]
+    var catalogCDN: String? = nil
 }
 
 struct HDPIMResolvedProductDecision {
@@ -144,6 +145,8 @@ struct HDPIMResolvedProductDecision {
     let buildVersion: String
     let platform: String
     let dependencies: [HDPIMResolvedDependencyDecision]
+    var catalogSnapshot: CatalogSnapshot? = nil
+    var requestedLanguage: String? = nil
 
     var mainDependency: HDPIMResolvedDependencyDecision? {
         dependencies.first { $0.sapCode == productId }
@@ -175,6 +178,7 @@ private struct HDPIMDependencySeed {
     let isPlatformMatched: Bool
     let selectedReason: String
     let isSoftDependency: Bool
+    var catalogCDN: String? = nil
 }
 
 private struct HDPIMParityConditionContext {
@@ -210,40 +214,51 @@ private struct HDPIMDecisionCacheKey: Hashable {
     let version: String
     let requestedLanguage: String
     let targetArchitecture: HDPIMParityTargetArchitecture
+    let generation: UUID
 }
 
 private actor HDPIMDecisionCacheStore {
+    private var generation: UUID?
+    private var epoch = UUID()
     private var resolvedDecisions: [HDPIMDecisionCacheKey: HDPIMResolvedProductDecision] = [:]
-    private var inflightTasks: [HDPIMDecisionCacheKey: Task<HDPIMResolvedProductDecision, Error>] = [:]
+    private var inflightTasks: [HDPIMDecisionCacheKey: (id: UUID, task: Task<HDPIMResolvedProductDecision, Error>)] = [:]
 
-    func resolvedDecision(for key: HDPIMDecisionCacheKey) -> HDPIMResolvedProductDecision? {
-        resolvedDecisions[key]
-    }
-
-    func inflightTask(for key: HDPIMDecisionCacheKey) -> Task<HDPIMResolvedProductDecision, Error>? {
-        inflightTasks[key]
-    }
-
-    func setInflightTask(
-        _ task: Task<HDPIMResolvedProductDecision, Error>,
-        for key: HDPIMDecisionCacheKey
-    ) {
-        inflightTasks[key] = task
-    }
-
-    func storeResolvedDecision(
-        _ decision: HDPIMResolvedProductDecision,
-        for key: HDPIMDecisionCacheKey
-    ) {
-        resolvedDecisions[key] = decision
-        inflightTasks.removeValue(forKey: key)
-    }
-
-    func removeInflightTask(for key: HDPIMDecisionCacheKey) {
-        inflightTasks.removeValue(forKey: key)
+    func decision(
+        for key: HDPIMDecisionCacheKey,
+        create: @escaping () async throws -> HDPIMResolvedProductDecision
+    ) async throws -> HDPIMResolvedProductDecision {
+        if generation != key.generation {
+            if CatalogStore.shared.snapshot?.generation == key.generation {
+                clear()
+                generation = key.generation
+            } else {
+                return try await create()
+            }
+        }
+        if let resolved = resolvedDecisions[key] { return resolved }
+        if let existing = inflightTasks[key] { return try await existing.task.value }
+        let id = UUID(), startedEpoch = epoch
+        let task = Task { try await create() }
+        inflightTasks[key] = (id, task)
+        do {
+            let decision = try await task.value
+            if epoch == startedEpoch, inflightTasks[key]?.id == id {
+                inflightTasks.removeValue(forKey: key)
+                if CatalogStore.shared.snapshot?.generation == key.generation {
+                    resolvedDecisions[key] = decision
+                }
+            }
+            return decision
+        } catch {
+            if epoch == startedEpoch, inflightTasks[key]?.id == id {
+                inflightTasks.removeValue(forKey: key)
+            }
+            throw error
+        }
     }
 
     func clear() {
+        epoch = UUID()
         resolvedDecisions.removeAll()
         inflightTasks.removeAll()
     }
@@ -315,53 +330,22 @@ final class HDPIMParityDecisionEngine {
 
     func visibleVersions(
         productId: String,
-        targetArchitecture: HDPIMParityTargetArchitecture = .currentSelection
+        targetArchitecture: HDPIMParityTargetArchitecture? = nil,
+        requestedLanguage: String? = nil
     ) -> [(key: String, value: Product.Platform)] {
-        let products = globalCcmResult.products.filter { $0.id == productId }
-        guard !products.isEmpty else {
-            return findProducts(id: productId)
-                .compactMap { product in
-                    if isManifestInstallerProduct(productId),
-                       let match = installerPlatformMatch(
-                        product: product,
-                        selectedVersion: product.version,
-                        targetArchitecture: targetArchitecture
-                       ) {
-                        return (key: product.version, value: match.platform)
-                    }
-
-                    guard let platform = preferredPlatform(for: product, targetArchitecture: targetArchitecture) else {
-                        return nil
-                    }
-                    return (key: product.version, value: platform)
-                }
-                .sorted { pair1, pair2 in
-                    AppStatics.compareVersions(pair1.key, pair2.key) > 0
-                }
+        guard let snapshot = CatalogStore.shared.snapshot else { return [] }
+        let architecture = targetArchitecture ?? snapshot.context.architecture
+        return snapshot.ccm.products.filter { $0.id == productId }.compactMap { product in
+            let match = (try? CatalogSelection.productCandidate(product, architecture: architecture, locale: requestedLanguage))
+                ?? (try? CatalogSelection.productCandidate(product, architecture: architecture, locale: nil))
+            guard let match else { return nil }
+            var platform = match.platform
+            platform.languageSet = [match.languageSet] + platform.languageSet.filter { $0 != match.languageSet }
+            return (key: product.version, value: platform)
+        }.sorted {
+            let order = AppStatics.compareVersions($0.key, $1.key)
+            return order == 0 ? $0.key < $1.key : order > 0
         }
-
-        var versionPlatformMap: [String: Product.Platform] = [:]
-        for product in products {
-            if isManifestInstallerProduct(productId),
-               let match = installerPlatformMatch(
-                product: product,
-                selectedVersion: product.version,
-                targetArchitecture: targetArchitecture
-               ) {
-                versionPlatformMap[product.version] = match.platform
-                continue
-            }
-
-            guard let platform = preferredPlatform(for: product, targetArchitecture: targetArchitecture) else {
-                continue
-            }
-            versionPlatformMap[product.version] = platform
-        }
-
-        return versionPlatformMap.map { (key: $0.key, value: $0.value) }
-            .sorted { pair1, pair2 in
-                AppStatics.compareVersions(pair1.key, pair2.key) > 0
-            }
     }
 
     func makeDependencyPreview(from decision: HDPIMResolvedProductDecision) -> [Product.Platform.LanguageSet.Dependency] {
@@ -398,42 +382,19 @@ final class HDPIMParityDecisionEngine {
     func resolveDependencyPreview(
         rawDependency: Product.Platform.LanguageSet.Dependency,
         targetArchitecture: HDPIMParityTargetArchitecture = .currentSelection,
-        softDependencySet: Set<String> = []
+        softDependencySet: Set<String> = [],
+        productsBySapCode: [String: [Product]]? = nil
     ) -> Product.Platform.LanguageSet.Dependency {
-        guard let seed = resolveDependencySeed(
-            rawDependency: rawDependency,
-            targetArchitecture: targetArchitecture,
-            softDependencySet: softDependencySet
-        ) else {
-            return Product.Platform.LanguageSet.Dependency(
-                sapCode: rawDependency.sapCode,
-                baseVersion: rawDependency.baseVersion,
-                productVersion: rawDependency.productVersion,
-                buildGuid: rawDependency.buildGuid,
-                isMatchPlatform: false,
-                targetPlatform: firstNonEmptyString([
-                    rawDependency.selectedPlatform,
-                    targetArchitecture.defaultRequestedPlatform
-                ]),
-                selectedPlatform: "",
-                selectedReason: "未找到可用依赖平台",
-                isSoftDependency: softDependencySet.contains(rawDependency.sapCode),
-                hostValidation: nil
-            )
+        let index = productsBySapCode.map { CatalogIndex(products: $0.values.flatMap { $0 }) }
+            ?? CatalogStore.shared.snapshot?.index
+        guard let index else {
+            var unresolved = rawDependency
+            unresolved.selectedReason = "产品目录尚未加载"
+            unresolved.isMatchPlatform = false
+            return unresolved
         }
-
-        return Product.Platform.LanguageSet.Dependency(
-            sapCode: seed.sapCode,
-            baseVersion: seed.baseVersion,
-            productVersion: seed.version,
-            buildGuid: seed.buildGuid,
-            isMatchPlatform: seed.isPlatformMatched,
-            targetPlatform: seed.targetPlatform,
-            selectedPlatform: seed.platform,
-            selectedReason: seed.selectedReason,
-            isSoftDependency: seed.isSoftDependency,
-            hostValidation: nil
-        )
+        // 目录预览保留所有声明，不提前套用 Application.json 的软依赖规则。
+        return index.preview(rawDependency, architecture: targetArchitecture)
     }
 
     func resolveTargetDownloadDecision(
@@ -441,9 +402,10 @@ final class HDPIMParityDecisionEngine {
         version: String,
         requestedLanguage: String,
         targetArchitecture: HDPIMParityTargetArchitecture = .currentSelection,
+        catalogSnapshot: CatalogSnapshot,
         progressHandler: ((String) -> Void)? = nil
     ) async throws -> HDPIMResolvedProductDecision {
-        guard let product = findProduct(id: productId, version: version) else {
+        guard let product = catalogSnapshot.product(id: productId, version: version) else {
             throw NetworkError.invalidData("找不到产品信息: \(productId) \(version)")
         }
 
@@ -455,13 +417,9 @@ final class HDPIMParityDecisionEngine {
             }
         }
 
-        guard let mainMatch = selectPreferredPlatform(
-            for: product,
-            targetArchitecture: targetArchitecture,
-            allowFallback: false
-        ) else {
-            throw NetworkError.unsupportedPlatform("产品 \(productId) 没有可用平台")
-        }
+        let mainMatch = try CatalogSelection.productCandidate(
+            product, architecture: targetArchitecture, locale: requestedLanguage
+        )
 
         log(
             "主产品 \(productId) \(version) 命中平台 \(mainMatch.platform.id)，targetArchitecture=\(targetArchitecture.rawValue)，原始依赖数=\(mainMatch.languageSet.dependencies.count)，依赖=\(mainMatch.languageSet.dependencies.map(\.sapCode))"
@@ -472,7 +430,8 @@ final class HDPIMParityDecisionEngine {
             buildGuid: mainMatch.languageSet.buildGuid,
             sapCode: product.id,
             version: product.version,
-            platform: mainMatch.platform.id
+            platform: mainMatch.platform.id,
+            catalogContext: catalogSnapshot.context
         )
         let mainAppInfo = try ApplicationJSONParser.parse(jsonString: mainJsonString)
 
@@ -487,7 +446,8 @@ final class HDPIMParityDecisionEngine {
                 targetPlatform: mainMatch.platform.id,
                 isPlatformMatched: true,
                 selectedReason: "成功匹配目标平台",
-                isSoftDependency: false
+                isSoftDependency: false,
+                catalogCDN: product.channelCDN
             )
         ]
 
@@ -495,14 +455,13 @@ final class HDPIMParityDecisionEngine {
             log(
                 "开始解析依赖 \(dependency.sapCode)，baseVersion=\(dependency.baseVersion)，productVersion=\(dependency.productVersion)，selectedPlatform=\(dependency.selectedPlatform)"
             )
-            guard let resolved = resolveDependencySeed(
+            let resolved = try resolveDependencySeed(
                 rawDependency: dependency,
                 targetArchitecture: targetArchitecture,
-                softDependencySet: softDependencySet
-            ) else {
-                log("依赖 \(dependency.sapCode) 解析失败：未找到可用依赖产品")
-                continue
-            }
+                softDependencySet: softDependencySet,
+                catalogIndex: catalogSnapshot.index,
+                requestedLanguage: requestedLanguage
+            )
             log(
                 "依赖 \(dependency.sapCode) 解析成功：targetPlatform=\(resolved.targetPlatform)，selectedPlatform=\(resolved.platform)，reason=\(resolved.selectedReason)"
             )
@@ -521,7 +480,8 @@ final class HDPIMParityDecisionEngine {
                     buildGuid: dependencySeed.buildGuid,
                     sapCode: dependencySeed.sapCode,
                     version: dependencySeed.version,
-                    platform: dependencySeed.platform
+                    platform: dependencySeed.platform,
+                    catalogContext: catalogSnapshot.context
                 )
             }
 
@@ -531,7 +491,6 @@ final class HDPIMParityDecisionEngine {
             )
             let resolvedVersion = firstNonEmptyString([
                 applicationInfo.codexVersion,
-                applicationInfo.productVersion,
                 dependencySeed.version
             ])
             let resolvedBaseVersion = firstNonEmptyString([
@@ -601,7 +560,8 @@ final class HDPIMParityDecisionEngine {
                         reason: skipReason ?? ""
                     ),
                     applicationInfo: applicationInfo,
-                    packages: enrichedPackages
+                    packages: enrichedPackages,
+                    catalogCDN: dependencySeed.catalogCDN
                 )
             )
         }
@@ -619,7 +579,9 @@ final class HDPIMParityDecisionEngine {
             buildGuid: mainResolved.buildGuid,
             buildVersion: mainResolved.buildVersion,
             platform: mainResolved.platform,
-            dependencies: resolvedDependencies
+            dependencies: resolvedDependencies,
+            catalogSnapshot: catalogSnapshot,
+            requestedLanguage: requestedLanguage
         )
     }
 
@@ -627,45 +589,23 @@ final class HDPIMParityDecisionEngine {
         productId: String,
         version: String,
         requestedLanguage: String,
-        targetArchitecture: HDPIMParityTargetArchitecture = .currentSelection,
+        targetArchitecture: HDPIMParityTargetArchitecture? = nil,
+        catalogSnapshot: CatalogSnapshot? = nil,
         progressHandler: ((String) -> Void)? = nil
     ) async throws -> HDPIMResolvedProductDecision {
-        let cacheKey = HDPIMDecisionCacheKey(
-            productId: productId,
-            version: version,
-            requestedLanguage: requestedLanguage,
-            targetArchitecture: targetArchitecture
+        guard let snapshot = catalogSnapshot ?? CatalogStore.shared.snapshot else {
+            throw NetworkError.invalidData("产品目录尚未加载")
+        }
+        let architecture = targetArchitecture ?? snapshot.context.architecture
+        let key = HDPIMDecisionCacheKey(
+            productId: productId, version: version, requestedLanguage: requestedLanguage,
+            targetArchitecture: architecture, generation: snapshot.generation
         )
-
-        if let cachedDecision = await decisionCacheStore.resolvedDecision(for: cacheKey) {
-            progressHandler?("正在复用已缓存的决策信息...")
-            return cachedDecision
-        }
-
-        if let inflightTask = await decisionCacheStore.inflightTask(for: cacheKey) {
-            progressHandler?("正在复用进行中的决策请求...")
-            return try await inflightTask.value
-        }
-
-        let task = Task { [self] in
+        return try await decisionCacheStore.decision(for: key) { [self] in
             try await resolveTargetDownloadDecision(
-                productId: productId,
-                version: version,
-                requestedLanguage: requestedLanguage,
-                targetArchitecture: targetArchitecture,
-                progressHandler: progressHandler
+                productId: productId, version: version, requestedLanguage: requestedLanguage,
+                targetArchitecture: architecture, catalogSnapshot: snapshot, progressHandler: progressHandler
             )
-        }
-
-        await decisionCacheStore.setInflightTask(task, for: cacheKey)
-
-        do {
-            let decision = try await task.value
-            await decisionCacheStore.storeResolvedDecision(decision, for: cacheKey)
-            return decision
-        } catch {
-            await decisionCacheStore.removeInflightTask(for: cacheKey)
-            throw error
         }
     }
 
@@ -695,6 +635,10 @@ final class HDPIMParityDecisionEngine {
                 hostValidation: nil
             )
 
+            dependencyModel.catalogSnapshot = decision.catalogSnapshot
+            dependencyModel.catalogLanguage = decision.requestedLanguage
+            dependencyModel.catalogCDN = dependency.catalogCDN ?? decision.catalogSnapshot?.cdn
+
             dependencyModel.packages = dependency.packages.compactMap { packageDecision in
                 let parsed = packageDecision.parsedPackage
                 guard (!parsed.path.isEmpty || !parsed.manifestURL.isEmpty),
@@ -716,8 +660,8 @@ final class HDPIMParityDecisionEngine {
                     type: parsed.type,
                     fullPackageName: delta.map { self.deltaFullPackageName($0) } ?? parsed.fullPackageName,
                     downloadSize: delta?.downloadSize ?? parsed.downloadSize,
-                    downloadURL: delta?.path ?? parsed.path,
-                    manifestURL: delta != nil ? "" : parsed.manifestURL,
+                    downloadURL: normalizedInstallerURL(delta?.path ?? parsed.path, cdn: dependencyModel.catalogCDN ?? ""),
+                    manifestURL: delta != nil ? "" : normalizedInstallerURL(parsed.manifestURL, cdn: dependencyModel.catalogCDN ?? ""),
                     packageVersion: packageDecision.packageVersion,
                     condition: parsed.condition,
                     isRequired: packageDecision.isRequired,
@@ -774,7 +718,8 @@ final class HDPIMParityDecisionEngine {
                         reason: dependency.skipReason ?? "已满足本机依赖"
                     ),
                     applicationInfo: dependency.applicationInfo,
-                    packages: dependency.packages
+                    packages: dependency.packages,
+                    catalogCDN: dependency.catalogCDN
                 )
             }
 
@@ -843,7 +788,8 @@ final class HDPIMParityDecisionEngine {
                 skipReason: dependency.skipReason,
                 hostValidation: dependencyValidation,
                 applicationInfo: dependency.applicationInfo,
-                packages: validatedPackages
+                packages: validatedPackages,
+                catalogCDN: dependency.catalogCDN
             )
         }
 
@@ -855,7 +801,9 @@ final class HDPIMParityDecisionEngine {
             buildGuid: decision.buildGuid,
             buildVersion: decision.buildVersion,
             platform: decision.platform,
-            dependencies: dependencies
+            dependencies: dependencies,
+            catalogSnapshot: decision.catalogSnapshot,
+            requestedLanguage: decision.requestedLanguage
         )
     }
 
@@ -1321,111 +1269,21 @@ final class HDPIMParityDecisionEngine {
     private func resolveDependencySeed(
         rawDependency: Product.Platform.LanguageSet.Dependency,
         targetArchitecture: HDPIMParityTargetArchitecture,
-        softDependencySet: Set<String>
-    ) -> HDPIMDependencySeed? {
-        let dependencyProduct = selectPreferredDependencyProduct(
-            sapCode: rawDependency.sapCode,
-            baseVersion: rawDependency.baseVersion,
-            preferredPlatform: rawDependency.selectedPlatform,
-            targetArchitecture: targetArchitecture
-        )
-
-        guard let dependencyProduct else {
-            log(
-                "依赖 \(rawDependency.sapCode) 未命中产品：baseVersion=\(rawDependency.baseVersion)，preferredPlatform=\(rawDependency.selectedPlatform)，targetArchitecture=\(targetArchitecture.rawValue)"
-            )
-            return nil
-        }
-
-        let targetPlatform = firstNonEmptyString([
-            rawDependency.selectedPlatform,
-            targetArchitecture.defaultRequestedPlatform
-        ])
-        let selectionDiagnostics = makePlatformSelectionDiagnostics(
-            targetPlatform: targetPlatform,
-            selectedPlatform: dependencyProduct.platform.id
-        )
-
+        softDependencySet: Set<String>,
+        catalogIndex: CatalogIndex,
+        requestedLanguage: String? = nil
+    ) throws -> HDPIMDependencySeed {
+        let match = try catalogIndex.dependency(rawDependency, architecture: targetArchitecture, locale: requestedLanguage)
+        let target = rawDependency.declaredPlatform ?? rawDependency.selectedPlatform
+        let targetPlatform = target.isEmpty ? targetArchitecture.defaultRequestedPlatform : target
+        let diagnostics = makePlatformSelectionDiagnostics(targetPlatform: targetPlatform, selectedPlatform: match.platform.id)
         return HDPIMDependencySeed(
-            sapCode: rawDependency.sapCode,
-            version: firstNonEmptyString([
-                rawDependency.productVersion,
-                dependencyProduct.languageSet.productVersion,
-                dependencyProduct.product.version
-            ]),
-            baseVersion: firstNonEmptyString([
-                rawDependency.baseVersion,
-                dependencyProduct.languageSet.baseVersion,
-                dependencyProduct.product.version
-            ]),
-            buildGuid: firstNonEmptyString([
-                rawDependency.buildGuid,
-                dependencyProduct.languageSet.buildGuid
-            ]),
-            platform: dependencyProduct.platform.id,
-            targetPlatform: targetPlatform,
-            isPlatformMatched: selectionDiagnostics.isMatch,
-            selectedReason: selectionDiagnostics.reason,
-            isSoftDependency: softDependencySet.contains(rawDependency.sapCode)
+            sapCode: rawDependency.sapCode, version: match.product.version,
+            baseVersion: match.languageSet.baseVersion, buildGuid: match.languageSet.buildGuid,
+            platform: match.platform.id, targetPlatform: targetPlatform,
+            isPlatformMatched: diagnostics.isMatch, selectedReason: diagnostics.reason,
+            isSoftDependency: softDependencySet.contains(rawDependency.sapCode), catalogCDN: match.cdn
         )
-    }
-
-    private func selectPreferredDependencyProduct(
-        sapCode: String,
-        baseVersion: String,
-        preferredPlatform: String,
-        targetArchitecture: HDPIMParityTargetArchitecture
-    ) -> HDPIMResolvedPlatformMatch? {
-        let matchingProducts = getAllProducts().filter { $0.id == sapCode }
-        guard !matchingProducts.isEmpty else {
-            log("依赖 \(sapCode) 在当前产品池中不存在")
-            return nil
-        }
-
-        let exactBaseMatches = matchingProducts.filter { product in
-            product.version == baseVersion || product.platforms.contains { platform in
-                platform.languageSet.contains { $0.baseVersion == baseVersion }
-            }
-        }
-
-        let candidates = (exactBaseMatches.isEmpty ? matchingProducts : exactBaseMatches)
-            .sorted { AppStatics.compareVersions($0.version, $1.version) > 0 }
-
-        for product in candidates {
-            if !preferredPlatform.isEmpty,
-               let preferred = selectPlatform(
-                    for: product,
-                    preferredPlatformIds: dependencyPlatformPreference(
-                        for: preferredPlatform,
-                        targetArchitecture: targetArchitecture
-                    ),
-                    allowFallback: true
-               ) {
-                log(
-                    "依赖 \(sapCode) 命中首选平台：productVersion=\(product.version)，preferredPlatform=\(preferredPlatform)，selectedPlatform=\(preferred.platform.id)"
-                )
-                return preferred
-            }
-
-            if let selected = selectPlatform(
-                for: product,
-                preferredPlatformIds: dependencyPlatformPreference(
-                    for: "",
-                    targetArchitecture: targetArchitecture
-                ),
-                allowFallback: true
-            ) {
-                log(
-                    "依赖 \(sapCode) 命中兜底平台：productVersion=\(product.version)，preferredPlatform=\(preferredPlatform)，selectedPlatform=\(selected.platform.id)"
-                )
-                return selected
-            }
-        }
-
-        log(
-            "依赖 \(sapCode) 所有候选产品均未命中：baseVersion=\(baseVersion)，preferredPlatform=\(preferredPlatform)，candidateCount=\(candidates.count)"
-        )
-        return nil
     }
 
     private func dependencyPlatformPreference(
@@ -2081,8 +1939,12 @@ final class HDPIMParityDecisionEngine {
     ) -> HDPIMResolvedPlatformMatch? {
         for platformId in preferredPlatformIds {
             if let platform = product.platforms.first(where: { $0.id == platformId }),
-               let languageSet = platform.languageSet.first {
-                return HDPIMResolvedPlatformMatch(product: product, platform: platform, languageSet: languageSet)
+               let languageSet = try? CatalogSelection.languageSet(
+                   platform.languageSet, locale: nil, installer: isManifestInstallerProduct(product.id)
+               ) {
+                var projection = platform
+                projection.languageSet = [languageSet] + platform.languageSet.filter { $0 != languageSet }
+                return HDPIMResolvedPlatformMatch(product: product, platform: projection, languageSet: languageSet)
             }
         }
 

@@ -78,6 +78,7 @@ struct TipsSheetView: View {
                             }
                         }
                     ))
+                    .disabled(networkManager.isFetchingProducts)
                     .padding(.leading, 5)
                     Spacer()
                     Text("当前架构: \(AppStatics.cpuArchitecture)")

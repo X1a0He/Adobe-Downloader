@@ -5,71 +5,21 @@
 //  Created by X1a0He on 2/26/25.
 //
 
-// 下面是所有全局变量的私有存储
-private var _globalStiResult: NewParseResult?
-private var _globalCcmResult: NewParseResult?
-private var _globalRawProducts: [Product]?
-private var _globalProducts: [Product]?
-private var _globalUniqueProducts: [UniqueProduct]?
-private var _globalCdn: String = ""
+// 目录状态通过一个不可变快照同步读取。
 private var _globalNetworkService: NewNetworkService?
 private var _globalNetworkManager: NetworkManager?
 private var _globalNewDownloadUtils: NewDownloadUtils?
 private var _globalCancelTracker: CancelTracker?
 
-struct DependencyCacheKey: Hashable {
-    let sapCode: String
-    let targetPlatform: String
-    let baseVersion: String
-}
-
-private var _globalDependencyCache: [DependencyCacheKey: Product.Platform.LanguageSet.Dependency]?
-
-var globalDependencyCache: [DependencyCacheKey: Product.Platform.LanguageSet.Dependency] {
-    get {
-        if _globalDependencyCache == nil {
-            _globalDependencyCache = [:]
-        }
-        return _globalDependencyCache!
-    }
-    set {
-        _globalDependencyCache = newValue
-    }
-}
-
-// 计算属性，确保总是返回有效实例
 var globalStiResult: NewParseResult {
-    get {
-        if _globalStiResult == nil {
-            _globalStiResult = NewParseResult(products: [], cdn: "")
-        }
-        return _globalStiResult!
-    }
-    set {
-        _globalStiResult = newValue
-    }
+    CatalogStore.shared.snapshot?.sti ?? NewParseResult(products: [], cdn: "")
 }
 
 var globalCcmResult: NewParseResult {
-    get {
-        if _globalCcmResult == nil {
-            _globalCcmResult = NewParseResult(products: [], cdn: "")
-        }
-        return _globalCcmResult!
-    }
-    set {
-        _globalCcmResult = newValue
-    }
+    CatalogStore.shared.snapshot?.ccm ?? NewParseResult(products: [], cdn: "")
 }
 
-var globalCdn: String {
-    get {
-        return _globalCdn
-    }
-    set {
-        _globalCdn = newValue
-    }
-}
+var globalCdn: String { CatalogStore.shared.snapshot?.cdn ?? "" }
 
 var globalNetworkService: NewNetworkService {
     get {
@@ -119,53 +69,17 @@ var globalCancelTracker: CancelTracker {
     }
 }
 
-var globalProducts: [Product] {
-    get {
-        if _globalProducts == nil {
-            _globalProducts = []
-        }
-        return _globalProducts!
-    }
-    set {
-        _globalProducts = newValue
-    }
-}
-
-var globalRawProducts: [Product] {
-    get {
-        if _globalRawProducts == nil {
-            _globalRawProducts = []
-        }
-        return _globalRawProducts!
-    }
-    set {
-        _globalRawProducts = newValue
-    }
-}
-
-var globalUniqueProducts: [UniqueProduct] {
-    get {
-        if _globalUniqueProducts == nil {
-            _globalUniqueProducts = []
-        }
-        return _globalUniqueProducts!
-    }
-    set {
-        _globalUniqueProducts = newValue
-    }
-}
+var globalProducts: [Product] { CatalogStore.shared.snapshot?.visibleProducts ?? [] }
+var globalRawProducts: [Product] { CatalogStore.shared.snapshot?.ccm.products ?? [] }
+var globalUniqueProducts: [UniqueProduct] { CatalogStore.shared.snapshot?.uniqueProducts ?? [] }
 
 func getAllProducts() -> [Product] {
-    var allProducts = [Product]()
-    let stiProducts = globalStiResult.products
-    if !stiProducts.isEmpty {
-        allProducts.append(contentsOf: stiProducts)
-    }
-    let ccmProducts = globalCcmResult.products
-    if !ccmProducts.isEmpty {
-        allProducts.append(contentsOf: ccmProducts)
-    }
-    return allProducts
+    guard let snapshot = CatalogStore.shared.snapshot else { return [] }
+    return snapshot.sti.products + snapshot.ccm.products
+}
+
+func getDependencyProducts() -> [Product] {
+    CatalogStore.shared.snapshot?.allProducts ?? []
 }
 
 enum ProductQueryScope {
@@ -334,31 +248,33 @@ func installerProductVersion(product: Product, languageSet: Product.Platform.Lan
 func installerPlatformMatch(
     product: Product,
     selectedVersion: String,
-    targetArchitecture: HDPIMParityTargetArchitecture = .currentSelection
+    targetArchitecture: HDPIMParityTargetArchitecture = .currentSelection,
+    requestedLanguage: String? = nil
 ) -> (platform: Product.Platform, languageSet: Product.Platform.LanguageSet)? {
-    let availablePlatforms = product.platforms.filter {
-        guard let languageSet = $0.languageSet.first else { return false }
-        return !languageSet.manifestURL.isEmpty || !languageSet.lbsURL.isEmpty
-    }
+    try? catalogInstallerMatch(product: product, targetArchitecture: targetArchitecture, requestedLanguage: requestedLanguage)
+}
 
-    if product.id == "KCCC",
-       let platform = availablePlatforms.first(where: { $0.id == "osx10" }),
-       let languageSet = platform.languageSet.first {
-        return (platform, languageSet)
+func catalogInstallerMatch(
+    product: Product,
+    targetArchitecture: HDPIMParityTargetArchitecture,
+    requestedLanguage: String?
+) throws -> (platform: Product.Platform, languageSet: Product.Platform.LanguageSet) {
+    let preferred = (product.id == "KCCC" ? ["osx10"] : []) + targetArchitecture.platformPreference
+    let platforms = product.platforms.sorted {
+        let left = preferred.firstIndex(of: $0.id) ?? Int.max
+        let right = preferred.firstIndex(of: $1.id) ?? Int.max
+        return left == right ? $0.id < $1.id : left < right
     }
-
-    for platformId in targetArchitecture.platformPreference {
-        if let platform = availablePlatforms.first(where: { $0.id == platformId }),
-           let languageSet = platform.languageSet.first {
-            return (platform, languageSet)
-        }
+    var languageError: Error?
+    for platform in platforms {
+        let materials = platform.languageSet.filter { !$0.manifestURL.isEmpty || !$0.lbsURL.isEmpty }
+        guard !materials.isEmpty else { continue }
+        do {
+            let language = try CatalogSelection.languageSet(materials, locale: requestedLanguage, installer: true)
+            return (platform, language)
+        } catch { languageError = error }
     }
-
-    guard let platform = availablePlatforms.first,
-          let languageSet = platform.languageSet.first else {
-        return nil
-    }
-    return (platform, languageSet)
+    throw languageError ?? NetworkError.unsupportedPlatform("\(product.id) 没有可用安装器")
 }
 
 func normalizedInstallerURL(_ value: String, cdn: String = globalCdn) -> String {

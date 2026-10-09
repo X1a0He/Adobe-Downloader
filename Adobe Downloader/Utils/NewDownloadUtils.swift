@@ -298,7 +298,7 @@ class NewDownloadUtils {
     }
 
     private func cloneDependencyMetadata(from dependency: DependenciesToDownload) -> DependenciesToDownload {
-        DependenciesToDownload(
+        let clone = DependenciesToDownload(
             sapCode: dependency.sapCode,
             version: dependency.version,
             buildGuid: dependency.buildGuid,
@@ -310,6 +310,10 @@ class NewDownloadUtils {
             selectedReason: dependency.selectedReason,
             hostValidation: dependency.hostValidation
         )
+        clone.catalogSnapshot = dependency.catalogSnapshot
+        clone.catalogCDN = dependency.catalogCDN
+        clone.catalogLanguage = dependency.catalogLanguage
+        return clone
     }
 
     private func mergedPackages(
@@ -626,7 +630,7 @@ class NewDownloadUtils {
 
     private func prepareDownloadEnvironment(task: NewDownloadTask) async {
         let driverPath = task.directory.appendingPathComponent("driver.xml")
-        if let productInfo = globalCcmResult.products.first(where: { $0.id == task.productId && $0.version == task.productVersion }) {
+        if let productInfo = task.catalogSnapshot?.product(id: task.productId, version: task.productVersion) {
             let selectedModules = selectedDriverModules(for: task)
 
             let driverXml = generateDriverXML(
@@ -985,7 +989,15 @@ class NewDownloadUtils {
             return .completed
         }
 
-        let cleanCdn = globalCdn.hasSuffix("/") ? String(globalCdn.dropLast()) : globalCdn
+        let snapshot = product.catalogSnapshot ?? task.catalogSnapshot
+        let source = snapshot?.index.candidatesBySAP[product.sapCode]?.first {
+            $0.platform.id == product.platform && (
+                !product.buildGuid.isEmpty ? $0.languageSet.buildGuid == product.buildGuid
+                    : $0.product.version == product.version && $0.languageSet.baseVersion == product.baseVersion
+            )
+        }
+        let cdn = product.catalogCDN ?? source?.cdn ?? snapshot?.cdn ?? ""
+        let cleanCdn = cdn.hasSuffix("/") ? String(cdn.dropLast()) : cdn
         let destinationURL = packageDestinationURL(task: task, dependency: product, package: package)
         let packageId = generatePackageIdentifier(package: package, task: task, dependency: product)
         let validationServiceBaseURL = pdmValidationServiceBaseURL(for: product)
@@ -1475,6 +1487,23 @@ class NewDownloadUtils {
             return 
         }
 
+        do {
+            try await MainActor.run {
+                try globalNetworkManager.validateDownloadDestination(task.directory, excluding: task.id)
+                task.totalStatus = .preparing(DownloadStatus.PrepareInfo(
+                    message: "正在恢复下载...", timestamp: Date(), stage: .initializing
+                ))
+                if task.catalogSnapshot == nil { task.catalogSnapshot = CatalogStore.shared.snapshot }
+            }
+        } catch {
+            await MainActor.run {
+                task.totalStatus = .failed(DownloadStatus.FailureInfo(
+                    message: error.localizedDescription, error: error, timestamp: Date(), recoverable: true
+                ))
+            }
+            await globalNetworkManager.saveTask(task)
+            return
+        }
         await globalCancelTracker.resume(taskId)
         await rebuildTaskPackages(task: task, inactiveStatus: .waiting)
 
@@ -1518,7 +1547,7 @@ class NewDownloadUtils {
 
         if isManifestInstallerProduct(task.productId) {
             do {
-                guard let productInfo = findProduct(id: task.productId, version: task.productVersion) ?? findProduct(id: task.productId) else {
+                guard let productInfo = task.catalogSnapshot?.product(id: task.productId, version: task.productVersion) else {
                     throw NetworkError.invalidData("找不到 \(task.productId) 产品信息")
                 }
                 try await downloadAPRO(task: task, productInfo: productInfo)
@@ -1643,12 +1672,7 @@ class NewDownloadUtils {
             return ""
         }
 
-        let fallbackPlatform = globalProducts
-            .first(where: { $0.id == productInfo.id && $0.version == version })?
-            .platforms
-            .first?
-            .id
-            ?? "unknown"
+        let fallbackPlatform = productInfo.platforms.first?.id ?? "unknown"
 
         let platform = mainDependency.platform.isEmpty ? fallbackPlatform : mainDependency.platform
         let buildGuid = mainDependency.buildGuid
@@ -1714,9 +1738,11 @@ class NewDownloadUtils {
     }
 
     func downloadAPRO(task: NewDownloadTask, productInfo: Product) async throws {
-        guard let match = installerPlatformMatch(product: productInfo, selectedVersion: task.productVersion) else {
-            throw NetworkError.unsupportedPlatform("\(task.productId) 没有可用平台")
-        }
+        let architecture = HDPIMParityTargetArchitecture(rawValue: task.targetArchitecture)
+            ?? task.catalogSnapshot?.context.architecture ?? .intel
+        let match = try catalogInstallerMatch(
+            product: productInfo, targetArchitecture: architecture, requestedLanguage: task.language
+        )
 
         let selectedPlatform = match.platform
         let selectedLanguageSet = match.languageSet
@@ -1726,7 +1752,8 @@ class NewDownloadUtils {
             throw NetworkError.invalidData("\(task.productId) 下载地址为空")
         }
 
-        let cleanCdn = globalCdn.hasSuffix("/") ? String(globalCdn.dropLast()) : globalCdn
+        let cdn = productInfo.channelCDN ?? task.catalogSnapshot?.cdn ?? ""
+        let cleanCdn = cdn.hasSuffix("/") ? String(cdn.dropLast()) : cdn
         let manifestURL = normalizedPackageURL(productManifestURL, cdn: cleanCdn)
         let productVersion = installerProductVersion(
             product: productInfo,
@@ -1765,6 +1792,9 @@ class NewDownloadUtils {
             buildGuid: selectedLanguageSet.buildGuid,
             platform: selectedPlatform.id
         )
+        product.catalogSnapshot = task.catalogSnapshot
+        product.catalogCDN = cdn
+        product.catalogLanguage = task.language
         product.packages = [aproPackage]
         if let restoredBytes = restoredDownloadedSize(task: task, dependency: product, package: aproPackage, destinationURL: outputURL) {
             aproPackage.downloadedSize = min(max(restoredBytes, 0), max(aproPackage.downloadSize, 0))

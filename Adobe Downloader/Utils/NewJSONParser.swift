@@ -6,6 +6,7 @@
 //
 
 import Foundation
+import CoreFoundation
 
 /**
     v6: https://prod-rel-ffc-ccm.oobesaas.adobe.com/adobe-ffc-external/core/v6/products/all?channel=ccm&channel=sti&platform=macarm64,macuniversal,osx10-64,osx10&_type=json&productType=Desktop
@@ -14,641 +15,239 @@ import Foundation
 */
 
 class NewJSONParser {
-    static func parse(jsonString: String) throws {
-        let results = try parseResults(jsonString: jsonString)
-        globalStiResult = results.sti
-        globalCcmResult = results.ccm
-        
-        if !globalCcmResult.cdn.isEmpty {
-            globalCdn = globalCcmResult.cdn
-        } else if !globalStiResult.cdn.isEmpty {
-            globalCdn = globalStiResult.cdn
-        }
-    }
-
-    static func parseResults(jsonString: String) throws -> (sti: NewParseResult, ccm: NewParseResult) {
-        if isXMLResponse(jsonString) {
-            return try parseXMLResults(xmlString: jsonString)
-        }
-
-        guard let jsonData = jsonString.data(using: .utf8),
-              let jsonObject = try JSONSerialization.jsonObject(with: jsonData) as? [String: Any] else {
-            throw ParserError.invalidJSON
-        }
-        let apiVersion = Int(StorageData.shared.apiVersion) ?? 6
-        let previousStiResult = globalStiResult
-        let previousDependencyCache = globalDependencyCache
-
-        let stiResult = try parseStiResolved(jsonObject: jsonObject, apiVersion: apiVersion)
-
-        globalStiResult = stiResult
-        globalDependencyCache = [:]
-
-        let ccmResult = try parseCcm(jsonObject: jsonObject, apiVersion: apiVersion)
-
-        globalStiResult = previousStiResult
-        globalDependencyCache = previousDependencyCache
-
-        return (sti: stiResult, ccm: ccmResult)
-    }
-
-    static func parseStiProducts(jsonString: String) throws {
-        if isXMLResponse(jsonString) {
-            let result = try parseXMLResults(xmlString: jsonString).sti
-            globalStiResult = result
-            globalCdn = result.cdn
-            return
-        }
-
-        guard let jsonData = jsonString.data(using: .utf8),
-              let jsonObject = try JSONSerialization.jsonObject(with: jsonData) as? [String: Any] else {
-            throw ParserError.invalidJSON
-        }
-        let apiVersion = Int(StorageData.shared.apiVersion) ?? 6
-        let result = try parseStiResolved(jsonObject: jsonObject, apiVersion: apiVersion)
-        globalStiResult = result
-        
-        // 更新全局 CDN
-        globalCdn = result.cdn
-    }
-
-    static func parseCcmProducts(jsonString: String) throws {
-        if isXMLResponse(jsonString) {
-            let result = try parseXMLResults(xmlString: jsonString).ccm
-            globalCcmResult = result
-            globalCdn = result.cdn
-            return
-        }
-
-        guard let jsonData = jsonString.data(using: .utf8),
-              let jsonObject = try JSONSerialization.jsonObject(with: jsonData) as? [String: Any] else {
-            throw ParserError.invalidJSON
-        }
-        let apiVersion = Int(StorageData.shared.apiVersion) ?? 6
-        let result = try parseCcm(jsonObject: jsonObject, apiVersion: apiVersion)
-        globalCcmResult = result
-        
-        // 更新全局 CDN
-        globalCdn = result.cdn
-    }
-
-    private static func isXMLResponse(_ response: String) -> Bool {
-        response.trimmingCharacters(in: .whitespacesAndNewlines).hasPrefix("<")
-    }
-
-    private static func parseSti(jsonObject: [String: Any], apiVersion: Int) throws -> NewParseResult {
-        let cdnPath: [String]
-        if apiVersion == 6 {
-            cdnPath = ["channels", "channel"]
+    /// 每个响应只解码一次；XML/JSON 共用字段适配及产品构造。
+    static func parse(data: Data, context: CatalogRequestContext) throws -> ParsedCatalog {
+        try Task.checkCancellation()
+        let root: CatalogNode
+        let first = data.drop(while: { [9, 10, 13, 32].contains($0) }).first
+        if first == 60 || data.starts(with: [0xEF, 0xBB, 0xBF]) {
+            let document = try XMLDocument(data: data, options: [])
+            guard let element = document.rootElement() else { throw ParserError.missingRequired }
+            root = CatalogNode(xml: element)
         } else {
-            cdnPath = ["channel"]
-        }
-
-        func getValue(from dict: [String: Any], path: [String]) -> Any? {
-            var current: Any = dict
-            for key in path {
-                guard let dict = current as? [String: Any],
-                      let value = dict[key] else {
-                    return nil
-                }
-                current = value
+            guard let object = try JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+                throw ParserError.invalidJSON
             }
-            return current
+            root = CatalogNode(json: object)
         }
-
-        var channelArray: [[String: Any]] = []
-        if let channels = getValue(from: jsonObject, path: cdnPath) {
-            if let array = channels as? [[String: Any]] {
-                channelArray = array
-            } else if let dict = channels as? [String: Any],
-                      let array = dict["channel"] as? [[String: Any]] {
-                channelArray = array
-            }
-        }
-
-        guard let firstChannel = channelArray.first,
-              let cdn = (firstChannel["cdn"] as? [String: Any])?["secure"] as? String else {
-            throw ParserError.missingCDN
-        }
-
-        var products = [Product]()
-
-        for channel in channelArray {
-            let channelName = channel["name"] as? String ?? ""
-            if(channelName != "sti") { continue }
-
-            guard let productsContainer = channel["products"] as? [String: Any],
-                  let productArray = productsContainer["product"] as? [[String: Any]] else {
-                continue
-            }
-
-            for product in productArray {
-
-                guard let productId = product["id"] as? String,
-                      let productDisplayName = product["displayName"] as? String,
-                      let productVersion = product["version"] as? String else {
-                    continue
-                }
-
-                /**
-                 sti 的 referencedProducts 就是空的，不需要
-                 同时也不需要 icon，因为是隐藏的，所以这个不要也罢
-                 */
-                var productObject = Product(
-                    type: product["type"] as? String ?? "",
-                    displayName: productDisplayName,
-                    family: product["family"] as? String ?? "",
-                    appLineage: product["appLineage"] as? String ?? "",
-                    familyName: product["familyName"] as? String ?? "",
-                    productIcons: [],
-                    platforms: [],
-                    referencedProducts: [],
-                    version: productVersion,
-                    id: productId,
-                    hidden: true
-                )
-
-                if let platforms = product["platforms"] as? [String: Any],
-                   let platformArray = platforms["platform"] as? [[String: Any]] {
-                    for platform in platformArray {
-                        guard let platformId = platform["id"] as? String,
-                              let languageSets = platform["languageSet"] as? [[String: Any]],
-                              let languageSet = languageSets.first else {
-                            continue
-                        }
-
-                        // sti 的 dependencies 就是空的
-                        let newLanguageSet = Product.Platform.LanguageSet(
-                            manifestURL: (languageSet["urls"] as? [String: Any])?["manifestURL"] as? String ?? "",
-                            lbsURL: (languageSet["urls"] as? [String: Any])?["lbsURL"] as? String ?? "",
-                            dependencies: [],
-                            productCode: languageSet["productCode"] as? String ?? "",
-                            name: languageSet["name"] as? String ?? "",
-                            installSize: languageSet["installSize"] as? Int ?? 0,
-                            buildGuid: languageSet["buildGuid"] as? String ?? "", // 将 buildGuid 赋值给 LanguageSet
-                            baseVersion: languageSet["baseVersion"] as? String ?? "",
-                            productVersion: languageSet["productVersion"] as? String ?? ""
-                        )
-
-                        // sti 的 module 也是空的，不需要
-                        var newPlatform = Product.Platform(
-                            languageSet: [newLanguageSet],
-                            modules: [],
-                            range: [],
-                            id: platformId
-                        )
-
-                        if let range = platform["systemCompatibility"] as? [String: Any],
-                           let operatingSystem = range["operatingSystem"] as? [String: Any],
-                           let rangeArray = operatingSystem["range"] as? [String] {
-                            let min = rangeArray.first ?? ""
-                            let max = rangeArray.count > 1 ? rangeArray[1] : ""
-                            let newRange = Product.Platform.Range(min: min, max: max)
-                            newPlatform.range = [newRange]
-                        }
-
-                        productObject.platforms.append(newPlatform)
-                    }
-                }
-                products.append(productObject)
-                
-            }
-        }
-
-        return NewParseResult(products: products, cdn: cdn)
-    }
-
-    private static func parseStiResolved(jsonObject: [String: Any], apiVersion: Int) throws -> NewParseResult {
-        let previousStiResult = globalStiResult
-        let previousDependencyCache = globalDependencyCache
-
-        defer {
-            globalStiResult = previousStiResult
-            globalDependencyCache = previousDependencyCache
-        }
-
-        globalDependencyCache = [:]
-        let firstPass = try parseSti(jsonObject: jsonObject, apiVersion: apiVersion)
-
-        globalStiResult = firstPass
-        globalDependencyCache = [:]
-
-        return try parseSti(jsonObject: jsonObject, apiVersion: apiVersion)
-    }
-
-    private static func parseCcm(jsonObject: [String: Any], apiVersion: Int) throws -> NewParseResult {
-        let cdnPath: [String]
-        if apiVersion == 6 {
-            cdnPath = ["channels", "channel"]
+        let response = root.nodes("response").first ?? root
+        let channelRoot: CatalogNode
+        if response.xml?.name == "channels" || response.has("channel") {
+            channelRoot = response
+        } else if let channels = response.nodes("channels").first {
+            channelRoot = channels
         } else {
-            cdnPath = ["channel"]
+            throw ParserError.missingRequired
+        }
+        var metadata: [[String]: [CatalogBuildMetadata]] = [:]
+        for build in response.nodes("builds/build") {
+            try Task.checkCancellation()
+            let key = ["id", "version", "platform", "languageSet"].map { build.value($0) }
+            metadata[key, default: []].append(buildMetadata(build))
         }
 
-        func getValue(from dict: [String: Any], path: [String]) -> Any? {
-            var current: Any = dict
-            for key in path {
-                guard let dict = current as? [String: Any],
-                      let value = dict[key] else {
-                    return nil
+        var result = ParsedCatalog()
+        for channel in channelRoot.nodes("channel") {
+            try Task.checkCancellation()
+            let name = channel.value("name")
+            guard !name.isEmpty else { throw ParserError.missingRequired }
+            let cdn = channel.value("cdn/secure")
+            result.channelCDNs[name] = cdn
+            for node in channel.nodes("products/product") {
+                try Task.checkCancellation()
+                let product = try autoreleasepool {
+                    try parseProduct(node, channel: name, cdn: cdn, context: context, metadata: metadata)
                 }
-                current = value
-            }
-            return current
-        }
-
-        var channelArray: [[String: Any]] = []
-        if let channels = getValue(from: jsonObject, path: cdnPath) {
-            if let array = channels as? [[String: Any]] {
-                channelArray = array
-            } else if let dict = channels as? [String: Any],
-                      let array = dict["channel"] as? [[String: Any]] {
-                channelArray = array
-            }
-        }
-
-        guard let firstChannel = channelArray.first,
-              let cdn = (firstChannel["cdn"] as? [String: Any])?["secure"] as? String else {
-            throw ParserError.missingCDN
-        }
-
-        var products = [Product]()
-
-        for channel in channelArray {
-            let channelName = channel["name"] as? String ?? ""
-            if(channelName != "ccm") { continue }
-
-            guard let productsContainer = channel["products"] as? [String: Any],
-                  let productArray = productsContainer["product"] as? [[String: Any]] else {
-                continue
-            }
-
-            for product in productArray {
-                guard let productId = product["id"] as? String,
-                      let productDisplayName = product["displayName"] as? String,
-                      let productVersion = product["version"] as? String else {
-                    continue
-                }
-
-                if(productDisplayName == "Creative Cloud" || productDisplayName == "Substance Alchemist") { continue }
-
-                let icons = (product["productIcons"] as? [String: Any])?["icon"] as? [[String: Any]] ?? []
-                let productIcons = icons.compactMap { icon -> Product.ProductIcon? in
-                    guard let size = icon["size"] as? String,
-                          let value = icon["value"] as? String else {
-                        return nil
+                for platform in product.platforms {
+                    for language in platform.languageSet {
+                        result.dependencyChannels.formUnion(language.dependencyChannels ?? [])
+                        for dependency in language.dependencies {
+                            result.dependencyChannels.formUnion(dependency.declaredChannels ?? [])
+                        }
                     }
-                    return Product.ProductIcon(value: value, size: size)
                 }
+                result.products.append(product)
+            }
+        }
+        return result
+    }
 
-                var productObject = Product(
-                    type: product["type"] as? String ?? "",
-                    displayName: productDisplayName,
-                    family: product["family"] as? String ?? "",
-                    appLineage: product["appLineage"] as? String ?? "",
-                    familyName: product["familyName"] as? String ?? "",
-                    productIcons: productIcons,
-                    platforms: [],
-                    referencedProducts: [],
-                    version: productVersion,
-                    id: productId,
-                    hidden: false
+    private static func parseProduct(
+        _ node: CatalogNode, channel: String, cdn: String, context: CatalogRequestContext,
+        metadata: [[String]: [CatalogBuildMetadata]]
+    ) throws -> Product {
+        let id = node.value("id"), version = node.value("version")
+        guard !id.isEmpty, !version.isEmpty, !node.value("displayName").isEmpty else {
+            throw ParserError.missingRequired
+        }
+        let icons = node.nodes("productIcons/icon").compactMap { icon -> Product.ProductIcon? in
+            let value = icon.text
+            guard !value.isEmpty, !icon.value("size").isEmpty else { return nil }
+            return Product.ProductIcon(value: value, size: icon.value("size"))
+        }
+        var product = Product(
+            type: node.value("type"), displayName: node.value("displayName"),
+            family: node.value("family"), appLineage: node.value("appLineage"),
+            familyName: node.value("familyName"), productIcons: icons, platforms: [],
+            referencedProducts: node.nodes("referencedProducts/referencedProduct").map {
+                Product.ReferencedProduct(sapCode: $0.value("sapCode"), version: $0.value("version"))
+            }, version: version, id: id, hidden: channel != "ccm"
+        )
+        product.catalogChannel = channel
+        product.channelCDN = cdn
+        let productAvailability = catalogAvailability(node)
+        product.platforms = try node.nodes("platforms/platform").map { platform in
+            try Task.checkCancellation()
+            let platformID = platform.value("id")
+            guard !platformID.isEmpty else { throw ParserError.missingRequired }
+            let channels = dependencyChannels(platform)
+            let availability = catalogAvailability(platform, inheriting: productAvailability)
+            let languages = try platform.nodes("languageSet").map { language -> Product.Platform.LanguageSet in
+                try Task.checkCancellation()
+                let localChannels = dependencyChannels(language)
+                let declaredChannels = localChannels.isEmpty ? channels : localChannels
+                var parsed = Product.Platform.LanguageSet(
+                    manifestURL: language.value("urls/manifestURL"), lbsURL: language.value("urls/lbsURL"),
+                    dependencies: language.nodes("dependencies/dependency").map { dependency in
+                        let selected = dependency.value("selectedPlatform")
+                        var parsed = Product.Platform.LanguageSet.Dependency(
+                            sapCode: dependency.value("sapCode"), baseVersion: dependency.value("baseVersion"),
+                            productVersion: dependency.value("productVersion"), buildGuid: dependency.value("buildGuid"),
+                            targetPlatform: selected.isEmpty ? context.architecture.defaultRequestedPlatform : selected,
+                            selectedPlatform: selected
+                        )
+                        let ownChannels = dependencyChannels(dependency)
+                        parsed.declaredChannels = (ownChannels.isEmpty ? declaredChannels : ownChannels).sorted()
+                        parsed.declaredPlatform = selected
+                        return parsed
+                    },
+                    productCode: language.value("productCode"), name: language.value("name"),
+                    installSize: Int(language.value("installSize")) ?? 0, buildGuid: language.value("buildGuid"),
+                    baseVersion: language.value("baseVersion"), productVersion: language.value("productVersion")
                 )
+                parsed.locales = Array(Set(language.nodes("locales/locale").map { $0.value("name") }.filter { !$0.isEmpty })).sorted()
+                parsed.packageType = language.rawValue("packageType")
+                parsed.catalogAvailability = availability
+                parsed.dependencyChannels = declaredChannels.sorted()
+                let associated = metadata[[id, version, platformID, parsed.name]] ?? []
+                parsed.buildMetadata = associated.isEmpty ? [buildMetadata(language)] : associated
+                return parsed
+            }
+            return Product.Platform(
+                languageSet: languages,
+                modules: platform.nodes("modules/module").map {
+                    Product.Platform.Module(displayName: $0.value("displayName"), deploymentType: $0.value("deploymentType"), id: $0.value("id"))
+                },
+                range: platform.nodes("systemCompatibility/operatingSystem/range").compactMap {
+                    let text = $0.text
+                    guard !text.isEmpty else { return nil }
+                    let parts = text.split(separator: "-", maxSplits: 1, omittingEmptySubsequences: false)
+                    return Product.Platform.Range(min: String(parts[0]), max: parts.count > 1 ? String(parts[1]) : "")
+                }, id: platformID
+            )
+        }
+        return product
+    }
 
-                if let platforms = product["platforms"] as? [String: Any],
-                   let platformArray = platforms["platform"] as? [[String: Any]] {
-                    for platform in platformArray {
-                        guard let platformId = platform["id"] as? String,
-                              let languageSets = platform["languageSet"] as? [[String: Any]],
-                              let languageSet = languageSets.first else {
-                            continue
-                        }
+    // HUM 的平台 custom-data 覆盖产品声明；各平台独立继承，避免遍历顺序造成字段残留。
+    private static func catalogAvailability(
+        _ node: CatalogNode, inheriting inherited: CatalogAvailability = CatalogAvailability()
+    ) -> CatalogAvailability {
+        var availability = inherited
+        for entry in node.nodes("custom-data/custom-entry") {
+            guard let value = entry.nodes("value").first?.rawText else { continue }
+            switch entry.rawValue("key") {
+            case "isVersionDisabled":
+                availability.isVersionDisabled = value.lowercased() == "true"
+            case "showInNewApps":
+                availability.showInNewApps = value
+            default:
+                break
+            }
+        }
+        return availability
+    }
 
-                        var newLanguageSet = Product.Platform.LanguageSet(
-                            manifestURL: (languageSet["urls"] as? [String: Any])?["manifestURL"] as? String ?? "",
-                            lbsURL: (languageSet["urls"] as? [String: Any])?["lbsURL"] as? String ?? "",
-                            dependencies: [],
-                            productCode: languageSet["productCode"] as? String ?? "",
-                            name: languageSet["name"] as? String ?? "",
-                            installSize: languageSet["installSize"] as? Int ?? 0,
-                            buildGuid: languageSet["buildGuid"] as? String ?? "",
-                            baseVersion: languageSet["baseVersion"] as? String ?? "",
-                            productVersion: languageSet["productVersion"] as? String ?? ""
-                        )
+    private static func dependencyChannels(_ node: CatalogNode) -> Set<String> {
+        var channels = Set(node.nodes("dependencyFFCChannel").map(\.text))
+        for entry in node.nodes("custom-data/custom-entry") where entry.value("key").lowercased() == "dependencyffcchannel" {
+            channels.formUnion(entry.nodes("value").map(\.text))
+        }
+        return Set(channels.filter { !$0.isEmpty })
+    }
 
-                        var dependencies: [Product.Platform.LanguageSet.Dependency] = []
-                        if let deps = languageSet["dependencies"] as? [String: Any],
-                           let depArray = deps["dependency"] as? [[String: Any]] {
-                            dependencies = depArray.compactMap { dep in
-                                guard let sapCode = dep["sapCode"] as? String,
-                                      let baseVersion = dep["baseVersion"] as? String else {
-                                    return Product.Platform.LanguageSet.Dependency(sapCode: "",baseVersion: "",productVersion: "",buildGuid: "")
-                                }
-                                let targetArchitecture = HDPIMParityTargetArchitecture.currentSelection
-                                let selectedPlatform = (dep["selectedPlatform"] as? String)?
-                                    .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-                                let targetPlatform = selectedPlatform.isEmpty
-                                    ? targetArchitecture.defaultRequestedPlatform
-                                    : selectedPlatform
-                                let cacheKey = DependencyCacheKey(
-                                    sapCode: sapCode,
-                                    targetPlatform: targetPlatform,
-                                    baseVersion: baseVersion
-                                )
+    private static func buildMetadata(_ node: CatalogNode) -> CatalogBuildMetadata {
+        let keys = ["appId", "appVersion", "libVersion", "buildId", "imsClientId", "imsAppProfileScope", "licenseMode"]
+        var licensing: [String: String] = [:]
+        for key in keys {
+            let value = node.value("nglLicensingInfo/\(key)")
+            if !value.isEmpty { licensing[key] = value }
+        }
+        return CatalogBuildMetadata(
+            entitled: node.value("entitled"), maintenanceBuild: node.value("maintenanceBuild"),
+            goLiveTime: node.value("goLiveTime"), licensing: licensing
+        )
+    }
+}
 
-                                if let cachedDependency = globalDependencyCache[cacheKey] {
-                                    return cachedDependency
-                                }
+private struct CatalogNode {
+    let xml: XMLElement?
+    let json: Any?
 
-                                let rawDependency = Product.Platform.LanguageSet.Dependency(
-                                    sapCode: sapCode,
-                                    baseVersion: baseVersion,
-                                    productVersion: dep["productVersion"] as? String ?? "",
-                                    buildGuid: dep["buildGuid"] as? String ?? "",
-                                    targetPlatform: targetPlatform,
-                                    selectedPlatform: selectedPlatform
-                                )
-                                let dependency = HDPIMParityDecisionEngine.shared.resolveDependencyPreview(
-                                    rawDependency: rawDependency,
-                                    targetArchitecture: targetArchitecture
-                                )
+    init(xml: XMLElement) { self.xml = xml; json = nil }
+    init(json: Any) { xml = nil; self.json = json }
 
-                                globalDependencyCache[cacheKey] = dependency
-                                
-                                return dependency
-                            }
-                            newLanguageSet.dependencies.append(contentsOf: dependencies)
-                        }
+    var text: String { rawText.trimmingCharacters(in: .whitespacesAndNewlines) }
 
-                        var newPlatform = Product.Platform(
-                            languageSet: [newLanguageSet],
-                            modules: [],
-                            range: [],
-                            id: platformId
-                        )
+    var rawText: String {
+        if let xml { return xml.stringValue ?? "" }
+        if let value = json as? String { return value }
+        if let value = json as? NSNumber {
+            if CFGetTypeID(value) == CFBooleanGetTypeID() { return value.boolValue ? "true" : "false" }
+            return value.stringValue
+        }
+        if let object = json as? [String: Any] {
+            for key in ["value", "content", "text"] {
+                if let value = object[key] { return CatalogNode(json: value).rawText }
+            }
+        }
+        return ""
+    }
 
-                        if let modules = platform["modules"] as? [String: Any],
-                           let moduleArray = modules["module"] as? [[String: Any]] {
-                            let newModules: [Product.Platform.Module] = moduleArray.compactMap { (module: [String: Any]) -> Product.Platform.Module? in
-                                guard let displayName = module["displayName"] as? String,
-                                      let deploymentType = module["deploymentType"] as? String,
-                                      let id = module["id"] as? String else {
-                                    return nil
-                                }
-                                return Product.Platform.Module(displayName: displayName, deploymentType: deploymentType, id: id)
-                            }
-                            newPlatform.modules = newModules
-                        }
+    func has(_ key: String) -> Bool {
+        if let xml { return xml.children?.contains { $0.name == key } ?? false }
+        return (json as? [String: Any])?[key] != nil
+    }
 
-                        if let range = platform["systemCompatibility"] as? [String: Any],
-                           let operatingSystem = range["operatingSystem"] as? [String: Any],
-                           let rangeArray = operatingSystem["range"] as? [String] {
-                            let min = rangeArray.first ?? ""
-                            let max = rangeArray.count > 1 ? rangeArray[1] : ""
-                            let newRange = Product.Platform.Range(min: min, max: max)
-                            newPlatform.range = [newRange]
-                        }
-
-                        productObject.platforms.append(newPlatform)
+    // 仅用于固定的子元素路径；无命名空间匹配和文档顺序与原 XPath 保持一致。
+    func nodes(_ path: String) -> [CatalogNode] {
+        var result = [self]
+        for component in path.split(separator: "/") {
+            let key = String(component)
+            result = result.flatMap { parent -> [CatalogNode] in
+                if let xml = parent.xml {
+                    return (xml.children ?? []).compactMap { node in
+                        guard let child = node as? XMLElement, child.name == key, (child.uri ?? "").isEmpty else { return nil }
+                        return CatalogNode(xml: child)
                     }
                 }
-
-                if let referencedProductsArray = product["referencedProducts"] as? [[String: Any]] {
-                    let referencedProducts: [Product.ReferencedProduct] = referencedProductsArray.compactMap { (refProduct: [String: Any]) -> Product.ReferencedProduct? in
-                        guard let sapCode = refProduct["sapCode"] as? String,
-                              let version = refProduct["version"] as? String else {
-                            return nil
-                        }
-                        return Product.ReferencedProduct(sapCode: sapCode, version: version)
-                    }
-                    productObject.referencedProducts = referencedProducts
-                }
-                products.append(productObject)
+                guard let value = (parent.json as? [String: Any])?[key] else { return [] }
+                if let array = value as? [Any] { return array.map { CatalogNode(json: $0) } }
+                return [CatalogNode(json: value)]
             }
         }
-
-        return NewParseResult(products: products, cdn: cdn)
+        return result
     }
 
-    private static func parseXMLResults(xmlString: String) throws -> (sti: NewParseResult, ccm: NewParseResult) {
-        guard let xmlData = xmlString.data(using: .utf8) else {
-            throw ParserError.invalidJSON
-        }
-
-        let document = try XMLDocument(data: xmlData, options: [])
-        let previousStiResult = globalStiResult
-        let previousDependencyCache = globalDependencyCache
-
-        let stiResult = try parseXMLStiResolved(document: document)
-
-        globalStiResult = stiResult
-        globalDependencyCache = [:]
-
-        let ccmResult = try parseXMLChannel(document: document, channelName: "ccm")
-
-        globalStiResult = previousStiResult
-        globalDependencyCache = previousDependencyCache
-
-        return (sti: stiResult, ccm: ccmResult)
+    func value(_ path: String) -> String {
+        rawValue(path).trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    private static func parseXMLStiResolved(document: XMLDocument) throws -> NewParseResult {
-        let previousStiResult = globalStiResult
-        let previousDependencyCache = globalDependencyCache
-
-        defer {
-            globalStiResult = previousStiResult
-            globalDependencyCache = previousDependencyCache
+    func rawValue(_ path: String) -> String {
+        if !path.contains("/"), let value = xml?.attribute(forName: path)?.stringValue {
+            return value
         }
-
-        globalDependencyCache = [:]
-        let firstPass = try parseXMLChannel(document: document, channelName: "sti")
-
-        globalStiResult = firstPass
-        globalDependencyCache = [:]
-
-        return try parseXMLChannel(document: document, channelName: "sti")
-    }
-
-    private static func parseXMLChannel(
-        document: XMLDocument,
-        channelName: String
-    ) throws -> NewParseResult {
-        guard let cdn = try document.nodes(forXPath: "/response/channels/channel[1]/cdn/secure").first?.stringValue,
-              !cdn.isEmpty else {
-            throw ParserError.missingCDN
-        }
-
-        let productNodes = try document.nodes(forXPath: "/response/channels/channel[@name='\(channelName)']/products/product")
-        let products = productNodes.compactMap { node -> Product? in
-            guard let productElement = node as? XMLElement else {
-                return nil
-            }
-            return parseXMLProduct(productElement, channelName: channelName)
-        }
-
-        return NewParseResult(products: products, cdn: cdn)
-    }
-
-    private static func parseXMLProduct(
-        _ productElement: XMLElement,
-        channelName: String
-    ) -> Product? {
-        let productId = xmlAttribute(productElement, "id")
-        let productVersion = xmlAttribute(productElement, "version")
-        let productDisplayName = xmlChildText(productElement, "displayName")
-
-        guard !productId.isEmpty,
-              !productVersion.isEmpty,
-              !productDisplayName.isEmpty else {
-            return nil
-        }
-
-        let productIcons = xmlElements(productElement, "productIcons/icon").compactMap { icon -> Product.ProductIcon? in
-            let size = xmlAttribute(icon, "size")
-            let value = icon.stringValue?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-            guard !size.isEmpty, !value.isEmpty else {
-                return nil
-            }
-            return Product.ProductIcon(value: value, size: size)
-        }
-
-        var productObject = Product(
-            type: xmlChildText(productElement, "type"),
-            displayName: productDisplayName,
-            family: xmlChildText(productElement, "family"),
-            appLineage: xmlChildText(productElement, "appLineage"),
-            familyName: xmlChildText(productElement, "familyName"),
-            productIcons: productIcons,
-            platforms: [],
-            referencedProducts: [],
-            version: productVersion,
-            id: productId,
-            hidden: channelName == "sti"
-        )
-
-        productObject.platforms = xmlElements(productElement, "platforms/platform").compactMap { platformElement in
-            parseXMLPlatform(platformElement)
-        }
-
-        productObject.referencedProducts = xmlElements(productElement, "referencedProducts/referencedProduct").compactMap { element in
-            let sapCode = xmlChildText(element, "sapCode")
-            let version = xmlChildText(element, "version")
-            guard !sapCode.isEmpty, !version.isEmpty else {
-                return nil
-            }
-            return Product.ReferencedProduct(sapCode: sapCode, version: version)
-        }
-
-        return productObject
-    }
-
-    private static func parseXMLPlatform(_ platformElement: XMLElement) -> Product.Platform? {
-        let platformId = xmlAttribute(platformElement, "id")
-        guard !platformId.isEmpty else {
-            return nil
-        }
-
-        let languageSets = xmlElements(platformElement, "languageSet").compactMap { languageSetElement in
-            parseXMLLanguageSet(languageSetElement)
-        }
-
-        let modules = xmlElements(platformElement, "modules/module").compactMap { moduleElement -> Product.Platform.Module? in
-            let id = xmlAttribute(moduleElement, "id").isEmpty ? xmlChildText(moduleElement, "id") : xmlAttribute(moduleElement, "id")
-            let displayName = xmlChildText(moduleElement, "displayName")
-            let deploymentType = xmlChildText(moduleElement, "deploymentType")
-            guard !id.isEmpty else {
-                return nil
-            }
-            return Product.Platform.Module(displayName: displayName, deploymentType: deploymentType, id: id)
-        }
-
-        let ranges = xmlElements(platformElement, "systemCompatibility/operatingSystem/range").compactMap { rangeElement -> Product.Platform.Range? in
-            let rawRange = (rangeElement.stringValue ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !rawRange.isEmpty else {
-                return nil
-            }
-            let components = rawRange.split(separator: "-", maxSplits: 1, omittingEmptySubsequences: false)
-            let min = components.first.map(String.init) ?? ""
-            let max = components.count > 1 ? String(components[1]) : ""
-            return Product.Platform.Range(min: min, max: max)
-        }
-
-        return Product.Platform(
-            languageSet: languageSets,
-            modules: modules,
-            range: ranges,
-            id: platformId
-        )
-    }
-
-    private static func parseXMLLanguageSet(_ languageSetElement: XMLElement) -> Product.Platform.LanguageSet? {
-        var languageSet = Product.Platform.LanguageSet(
-            manifestURL: xmlChildText(languageSetElement, "urls/manifestURL"),
-            lbsURL: xmlChildText(languageSetElement, "urls/lbsURL"),
-            dependencies: [],
-            productCode: xmlAttribute(languageSetElement, "productCode"),
-            name: xmlAttribute(languageSetElement, "name"),
-            installSize: Int(xmlAttribute(languageSetElement, "installSize")) ?? 0,
-            buildGuid: xmlAttribute(languageSetElement, "buildGuid"),
-            baseVersion: xmlAttribute(languageSetElement, "baseVersion"),
-            productVersion: xmlAttribute(languageSetElement, "productVersion")
-        )
-
-        let dependencyElements = xmlElements(languageSetElement, "dependencies/dependency")
-        languageSet.dependencies = dependencyElements.compactMap { dependencyElement in
-            let sapCode = xmlChildText(dependencyElement, "sapCode")
-            let baseVersion = xmlChildText(dependencyElement, "baseVersion")
-            guard !sapCode.isEmpty, !baseVersion.isEmpty else {
-                return nil
-            }
-
-            let targetArchitecture = HDPIMParityTargetArchitecture.currentSelection
-            let selectedPlatform = xmlChildText(dependencyElement, "selectedPlatform")
-            let targetPlatform = selectedPlatform.isEmpty
-                ? targetArchitecture.defaultRequestedPlatform
-                : selectedPlatform
-            let cacheKey = DependencyCacheKey(
-                sapCode: sapCode,
-                targetPlatform: targetPlatform,
-                baseVersion: baseVersion
-            )
-
-            if let cached = globalDependencyCache[cacheKey] {
-                return cached
-            }
-
-            let rawDependency = Product.Platform.LanguageSet.Dependency(
-                sapCode: sapCode,
-                baseVersion: baseVersion,
-                productVersion: xmlChildText(dependencyElement, "productVersion"),
-                buildGuid: xmlChildText(dependencyElement, "buildGuid"),
-                targetPlatform: targetPlatform,
-                selectedPlatform: selectedPlatform
-            )
-
-            let dependency = HDPIMParityDecisionEngine.shared.resolveDependencyPreview(
-                rawDependency: rawDependency,
-                targetArchitecture: targetArchitecture
-            )
-            globalDependencyCache[cacheKey] = dependency
-            return dependency
-        }
-
-        return languageSet
-    }
-
-    private static func xmlElements(_ element: XMLElement, _ xpath: String) -> [XMLElement] {
-        (try? element.nodes(forXPath: xpath))?.compactMap { $0 as? XMLElement } ?? []
-    }
-
-    private static func xmlChildText(_ element: XMLElement, _ xpath: String) -> String {
-        ((try? element.nodes(forXPath: xpath).first?.stringValue) ?? "")
-            .trimmingCharacters(in: .whitespacesAndNewlines)
-    }
-
-    private static func xmlAttribute(_ element: XMLElement, _ name: String) -> String {
-        (element.attribute(forName: name)?.stringValue ?? "")
-            .trimmingCharacters(in: .whitespacesAndNewlines)
+        return nodes(path).first?.rawText ?? ""
     }
 }
 
@@ -660,10 +259,10 @@ extension NewParseResult {
     }
 
     private func mergeProducts(_ candidates: [Product]) -> [Product] {
-        var mergedByKey: [String: Product] = [:]
+        var mergedByKey: [[String]: Product] = [:]
 
         for product in candidates {
-            let key = "\(product.id)|\(product.version)"
+            let key = [product.catalogChannel ?? "", product.id, product.version]
             guard let existing = mergedByKey[key] else {
                 mergedByKey[key] = product
                 continue
@@ -675,13 +274,17 @@ extension NewParseResult {
             if lhs.id != rhs.id {
                 return lhs.id < rhs.id
             }
-            return AppStatics.compareVersions(lhs.version, rhs.version) > 0
+            let order = AppStatics.compareVersions(lhs.version, rhs.version)
+            if order != 0 { return order > 0 }
+            return (lhs.catalogChannel ?? "") < (rhs.catalogChannel ?? "")
         }
     }
 
     private func mergeProduct(_ lhs: Product, _ rhs: Product) -> Product {
         var merged = lhs
         merged.hidden = lhs.hidden && rhs.hidden
+        let cdns = [lhs.channelCDN, rhs.channelCDN].compactMap { $0 }.filter { !$0.isEmpty }
+        merged.channelCDN = cdns.min()
         if merged.displayName.isEmpty {
             merged.displayName = rhs.displayName
         }
@@ -707,7 +310,9 @@ extension NewParseResult {
             if lhs.sapCode != rhs.sapCode {
                 return lhs.sapCode < rhs.sapCode
             }
-            return AppStatics.compareVersions(lhs.version, rhs.version) > 0
+            let order = AppStatics.compareVersions(lhs.version, rhs.version)
+            if order != 0 { return order > 0 }
+            return lhs.version < rhs.version
         }
 
         let combinedPlatforms = lhs.platforms + rhs.platforms
@@ -726,7 +331,8 @@ extension NewParseResult {
     private func mergePlatform(_ lhs: Product.Platform, _ rhs: Product.Platform) -> Product.Platform {
         var merged = lhs
         merged.languageSet = mergedLanguageSets(lhs.languageSet + rhs.languageSet).sorted {
-            AppStatics.compareVersions($0.productVersion, $1.productVersion) > 0
+            let order = AppStatics.compareVersions($0.productVersion, $1.productVersion)
+            return order == 0 ? $0.catalogIdentity.lexicographicallyPrecedes($1.catalogIdentity) : order > 0
         }
         merged.modules = deduplicatedPreservingLast(
             lhs.modules + rhs.modules,
@@ -740,11 +346,11 @@ extension NewParseResult {
     }
 
     private func mergedLanguageSets(_ items: [Product.Platform.LanguageSet]) -> [Product.Platform.LanguageSet] {
-        var orderedKeys: [String] = []
-        var mergedByKey: [String: Product.Platform.LanguageSet] = [:]
+        var orderedKeys: [[String]] = []
+        var mergedByKey: [[String]: Product.Platform.LanguageSet] = [:]
 
         for item in items {
-            let key = "\(item.name)|\(item.productVersion)|\(item.baseVersion)|\(item.buildGuid)"
+            let key = item.catalogIdentity
             if let existing = mergedByKey[key] {
                 mergedByKey[key] = mergeLanguageSet(existing, item)
                 continue
@@ -782,6 +388,18 @@ extension NewParseResult {
         if merged.productVersion.isEmpty {
             merged.productVersion = rhs.productVersion
         }
+        merged.locales = Array(Set((lhs.locales ?? []) + (rhs.locales ?? []))).sorted()
+        merged.dependencyChannels = Array(Set((lhs.dependencyChannels ?? []) + (rhs.dependencyChannels ?? []))).sorted()
+        merged.buildMetadata = (lhs.buildMetadata ?? []) + (rhs.buildMetadata ?? []).filter { !(lhs.buildMetadata ?? []).contains($0) }
+        if let left = lhs.catalogAvailability, let right = rhs.catalogAvailability {
+            // 单份响应已完成平台覆盖；跨响应的同构建声明冲突时，禁用优先且合并顺序无关。
+            merged.catalogAvailability = CatalogAvailability(
+                isVersionDisabled: left.isVersionDisabled || right.isVersionDisabled,
+                showInNewApps: [left.showInNewApps, right.showInNewApps].compactMap { $0 }.min()
+            )
+        } else {
+            merged.catalogAvailability = lhs.catalogAvailability ?? rhs.catalogAvailability
+        }
         merged.dependencies = mergedDependencies(lhs.dependencies + rhs.dependencies)
         return merged
     }
@@ -789,11 +407,11 @@ extension NewParseResult {
     private func mergedDependencies(
         _ items: [Product.Platform.LanguageSet.Dependency]
     ) -> [Product.Platform.LanguageSet.Dependency] {
-        var orderedKeys: [String] = []
-        var mergedByKey: [String: Product.Platform.LanguageSet.Dependency] = [:]
+        var orderedKeys: [[String]] = []
+        var mergedByKey: [[String]: Product.Platform.LanguageSet.Dependency] = [:]
 
         for item in items {
-            let key = "\(item.sapCode)|\(item.productVersion)|\(item.baseVersion)|\(item.buildGuid)"
+            let key = [item.sapCode, item.productVersion, item.baseVersion, item.buildGuid, item.declaredPlatform ?? ""] + (item.declaredChannels ?? []).sorted()
             if let existing = mergedByKey[key] {
                 mergedByKey[key] = mergeDependency(existing, item)
                 continue
@@ -819,7 +437,9 @@ extension NewParseResult {
             selectedPlatform: lhs.selectedPlatform.isEmpty ? rhs.selectedPlatform : lhs.selectedPlatform,
             selectedReason: lhs.selectedReason.isEmpty ? rhs.selectedReason : lhs.selectedReason,
             isSoftDependency: lhs.isSoftDependency || rhs.isSoftDependency,
-            hostValidation: lhs.hostValidation ?? rhs.hostValidation
+            hostValidation: lhs.hostValidation ?? rhs.hostValidation,
+            declaredChannels: lhs.declaredChannels ?? rhs.declaredChannels,
+            declaredPlatform: lhs.declaredPlatform ?? rhs.declaredPlatform
         )
     }
 

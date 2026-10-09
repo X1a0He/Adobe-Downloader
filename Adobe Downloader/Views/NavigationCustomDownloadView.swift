@@ -28,16 +28,18 @@ private enum CustomDownloadPackageInfoLoader {
         requestedLanguage: String,
         progressHandler: @escaping (String) -> Void
     ) async throws -> ([Package], [DependenciesToDownload]) {
-        guard let product = findProduct(id: productId, version: version) else {
+        guard let snapshot = CatalogStore.shared.snapshot,
+              let product = snapshot.product(id: productId, version: version) else {
             throw NetworkError.invalidData("找不到产品信息")
         }
 
         if isManifestInstallerProduct(productId) {
-            return makeInstallerPackageInfo(
+            return try makeInstallerPackageInfo(
                 productId: productId,
                 version: version,
                 requestedLanguage: requestedLanguage,
-                product: product
+                product: product,
+                snapshot: snapshot
             )
         }
 
@@ -45,6 +47,7 @@ private enum CustomDownloadPackageInfoLoader {
             productId: product.id,
             version: version,
             requestedLanguage: requestedLanguage,
+            catalogSnapshot: snapshot,
             progressHandler: progressHandler
         )
 
@@ -55,11 +58,12 @@ private enum CustomDownloadPackageInfoLoader {
         productId: String,
         version: String,
         requestedLanguage: String,
-        product: Product
-    ) -> ([Package], [DependenciesToDownload]) {
-        guard let match = installerPlatformMatch(product: product, selectedVersion: version) else {
-            return ([], [])
-        }
+        product: Product,
+        snapshot: CatalogSnapshot
+    ) throws -> ([Package], [DependenciesToDownload]) {
+        let match = try catalogInstallerMatch(
+            product: product, targetArchitecture: snapshot.context.architecture, requestedLanguage: requestedLanguage
+        )
 
         let platform = match.platform
         let languageSet = match.languageSet
@@ -73,8 +77,8 @@ private enum CustomDownloadPackageInfoLoader {
                 platform: platform.id
             ),
             downloadSize: Int64(max(languageSet.installSize, 0)),
-            downloadURL: languageSet.lbsURL,
-            manifestURL: languageSet.manifestURL,
+            downloadURL: normalizedInstallerURL(languageSet.lbsURL, cdn: product.channelCDN ?? snapshot.cdn),
+            manifestURL: normalizedInstallerURL(languageSet.manifestURL, cdn: product.channelCDN ?? snapshot.cdn),
             packageVersion: productVersion
         )
         package.isSelected = true
@@ -87,6 +91,9 @@ private enum CustomDownloadPackageInfoLoader {
             buildGuid: languageSet.buildGuid,
             platform: platform.id
         )
+        dependency.catalogSnapshot = snapshot
+        dependency.catalogCDN = product.channelCDN ?? snapshot.cdn
+        dependency.catalogLanguage = requestedLanguage
         dependency.packages = [package]
         return ([package], [dependency])
     }
@@ -227,10 +234,16 @@ struct NavigationCustomDownloadView: View {
     }
 
     private func createCompletedCustomTask(path: URL, dependencies: [DependenciesToDownload]) async {
+        guard let main = dependencies.first(where: { $0.sapCode == productId }),
+              let snapshot = main.catalogSnapshot else { return }
+        let language = main.catalogLanguage ?? StorageData.shared.defaultLanguage
+        let platform = main.platform
         let existingTask = globalNetworkManager.downloadTasks.first { task in
             return task.productId == productId &&
                    task.productVersion == version &&
-                   task.language == StorageData.shared.defaultLanguage &&
+                   task.language == language &&
+                   task.platform == platform &&
+                   task.targetArchitecture == snapshot.context.architecture.rawValue &&
                    task.directory == path
         }
 
@@ -238,27 +251,21 @@ struct NavigationCustomDownloadView: View {
             return
         }
 
-        let platform = dependencies.first(where: { $0.sapCode == productId })?.platform
-            ?? installerSelectedPlatformId(
-                productId: productId,
-                version: version
-            )
-            ?? "unknown"
-
         let task = NewDownloadTask(
             productId: productId,
             productVersion: version,
-            language: StorageData.shared.defaultLanguage,
-            displayName: findProduct(id: productId)?.displayName ?? productId,
+            language: language,
+            displayName: snapshot.product(id: productId, version: version)?.displayName ?? productId,
             directory: path,
             dependenciesToDownload: dependencies,
             retryCount: 0,
             createAt: Date(),
             totalProgress: 1.0,
             platform: platform,
-            targetArchitecture: HDPIMParityTargetArchitecture.currentSelection.rawValue
+            targetArchitecture: snapshot.context.architecture.rawValue
         )
 
+        task.catalogSnapshot = snapshot
         task.dependenciesToDownload = dependencies
 
         let totalSize = dependencies.reduce(0) { productSum, product in
@@ -295,6 +302,9 @@ struct NavigationCustomDownloadView: View {
     }
 
     private func startCustomDownloadProcess(dependencies: [DependenciesToDownload], destinationURL existingDestinationURL: URL? = nil) {
+        guard let main = dependencies.first(where: { $0.sapCode == productId }) else { return }
+        let language = main.catalogLanguage ?? StorageData.shared.defaultLanguage
+        let platform = main.platform
         Task {
             let destinationURL: URL
             if let existingDestinationURL {
@@ -304,8 +314,8 @@ struct NavigationCustomDownloadView: View {
                     destinationURL = try await getDestinationURL(
                         productId: productId,
                         version: version,
-                        language: StorageData.shared.defaultLanguage,
-                        mainPlatform: dependencies.first(where: { $0.sapCode == productId })?.platform
+                        language: language,
+                        mainPlatform: platform
                     )
                 } catch {
                     await MainActor.run { onDismiss() }
@@ -317,7 +327,7 @@ struct NavigationCustomDownloadView: View {
                 try await globalNetworkManager.startCustomDownload(
                     productId: productId,
                     selectedVersion: version,
-                    language: StorageData.shared.defaultLanguage,
+                    language: language,
                     destinationURL: destinationURL,
                     customDependencies: dependencies
                 )
@@ -331,13 +341,8 @@ struct NavigationCustomDownloadView: View {
         }
     }
 
-    private func getDestinationURL(productId: String, version: String, language: String, mainPlatform: String?) async throws -> URL {
+    private func getDestinationURL(productId: String, version: String, language: String, mainPlatform: String) async throws -> URL {
         let platform = mainPlatform
-            ?? installerSelectedPlatformId(
-                productId: productId,
-                version: version
-            )
-            ?? "unknown"
         let installerName = installerOutputName(
             productId: productId,
             version: version,
@@ -414,6 +419,7 @@ private struct CustomDownloadHeaderView: View {
     let productId: String
     let version: String
     let productIcon: NSImage?
+    var architecture: HDPIMParityTargetArchitecture? = nil
     var onCopyAll: (() -> Void)? = nil
     var onCancel: (() -> Void)? = nil
     @StorageValue(\.downloadAppleSilicon) private var downloadAppleSilicon
@@ -509,10 +515,11 @@ private struct CustomDownloadHeaderView: View {
     }
 
     private var architectureChip: some View {
-        HStack(spacing: 3) {
-            Image(systemName: downloadAppleSilicon ? "m.square" : "x.square")
+        let isAppleSilicon = architecture.map { $0 == .appleSilicon } ?? downloadAppleSilicon
+        return HStack(spacing: 3) {
+            Image(systemName: isAppleSilicon ? "m.square" : "x.square")
                 .font(.system(size: 10))
-            Text(downloadAppleSilicon ? "Apple Silicon" : "Intel")
+            Text(isAppleSilicon ? "Apple Silicon" : "Intel")
                 .font(.system(size: 10, weight: .medium))
         }
         .foregroundColor(.blue.opacity(0.85))
@@ -887,6 +894,7 @@ private struct NavigationCustomPackageSelectorView: View {
                 productId: productId,
                 version: version,
                 productIcon: productIcon,
+                architecture: dependenciesToDownload.compactMap(\.catalogSnapshot).first?.context.architecture,
                 onCopyAll: copyAllInfo,
                 onCancel: onCancel
             )
@@ -1140,12 +1148,17 @@ private struct NavigationCustomPackageSelectorView: View {
     }
 
     private func existingDownloadDirectory() -> URL? {
-        let language = StorageData.shared.defaultLanguage
+        guard let main = dependenciesToDownload.first(where: { $0.sapCode == productId }),
+              let snapshot = main.catalogSnapshot else { return nil }
+        let language = main.catalogLanguage ?? StorageData.shared.defaultLanguage
+        let platform = main.platform
 
         if let task = globalNetworkManager.downloadTasks.first(where: {
             $0.productId == productId &&
             $0.productVersion == version &&
             $0.language == language &&
+            $0.platform == platform &&
+            $0.targetArchitecture == snapshot.context.architecture.rawValue &&
             FileManager.default.fileExists(atPath: $0.directory.path)
         }) {
             return task.directory
@@ -1156,12 +1169,6 @@ private struct NavigationCustomPackageSelectorView: View {
             return nil
         }
 
-        let platform = dependenciesToDownload.first(where: { $0.sapCode == productId })?.platform
-            ?? installerSelectedPlatformId(
-                productId: productId,
-                version: version
-            )
-            ?? "unknown"
         let directoryName = installerOutputName(
             productId: productId,
             version: version,

@@ -8,258 +8,65 @@
 import Foundation
 
 class NewNetworkService {
-    typealias ProductsData = ([Product], [UniqueProduct])
-    private let defaultChannels = ["ccm", "sti", "nocc"]
-
-    private func makeProductsURL(channels: [String] = ["ccm", "sti", "nocc"]) throws -> URL {
-        var components = URLComponents(string: NetworkConstants.productsURL)
-
-        var queryItems: [URLQueryItem] = channels.map {
-            URLQueryItem(name: "channel", value: $0)
-        }
-
-        appendRequestedProductPlatforms(to: &queryItems)
-
-        queryItems.append(URLQueryItem(name: "payload", value: "true"))
-        queryItems.append(URLQueryItem(name: "productType", value: "Desktop"))
-        queryItems.append(URLQueryItem(name: "_type", value: "xml"))
-
-        components?.queryItems = queryItems
-
-        guard let url = components?.url else {
-            throw NetworkError.invalidURL(NetworkConstants.productsURL)
-        }
-        return url
-    }
-
-    func fetchProductsData() async throws -> ProductsData {
-        let primaryURL = try makeProductsURL(channels: defaultChannels)
-        let primaryJSONString = try await fetchProductsJSONString(url: primaryURL)
-        let primaryResults = try await Task.detached(priority: .userInitiated) {
-            try NewJSONParser.parseResults(jsonString: primaryJSONString)
-        }.value
-
-        let extraChannels = extractDependencyChannels(from: primaryJSONString)
-            .subtracting(defaultChannels)
-        let mergedResults: (sti: NewParseResult, ccm: NewParseResult)
-        if extraChannels.isEmpty {
-            mergedResults = primaryResults
+    func fetchProductsData(context: CatalogRequestContext, generation: UUID) async throws -> CatalogSnapshot {
+        var requests: [CatalogShard]
+        if context.apiVersion == "4" {
+            requests = context.platforms.map { CatalogShard(channels: ["ccm"], platforms: [$0]) }
+                + [CatalogShard(channels: ["sti"], platforms: context.platforms),
+                   CatalogShard(channels: ["nocc"], platforms: context.platforms)]
         } else {
-            let secondaryURL = try makeProductsURL(channels: defaultChannels + extraChannels.sorted())
-            let secondaryJSONString = try await fetchProductsJSONString(url: secondaryURL)
-            let secondaryResults = try await Task.detached(priority: .userInitiated) {
-                try NewJSONParser.parseResults(jsonString: secondaryJSONString)
-            }.value
-            mergedResults = (
-                sti: primaryResults.sti.merged(with: secondaryResults.sti),
-                ccm: primaryResults.ccm.merged(with: secondaryResults.ccm)
-            )
+            requests = [CatalogShard(channels: context.channels, platforms: context.platforms)]
         }
-
-        let result: ProductsData = await Task.detached(priority: .userInitiated) {
-            globalStiResult = mergedResults.sti
-            globalCcmResult = mergedResults.ccm
-            globalDependencyCache = [:]
-            await HDPIMParityDecisionEngine.shared.clearDownloadDecisionCache()
-            if !mergedResults.ccm.cdn.isEmpty {
-                globalCdn = mergedResults.ccm.cdn
-            } else if !mergedResults.sti.cdn.isEmpty {
-                globalCdn = mergedResults.sti.cdn
-            }
-
-            let products = globalCcmResult.products
-            if products.isEmpty { return ([], []) }
-            globalRawProducts = products
-
-            let validProducts = products.filter {
-                guard !isBlockedVisibleProduct($0.id) else {
-                    return false
+        var parsed = ParsedCatalog()
+        var metrics = CatalogMeasurements()
+        var requestedChannels = Set(context.channels)
+        while !requests.isEmpty {
+            try await withThrowingTaskGroup(of: CatalogShardResult.self) { group in
+                var remaining = requests.makeIterator()
+                for _ in 0..<2 {
+                    if let shard = remaining.next() {
+                        group.addTask { try await self.fetchCatalogShard(shard, context: context) }
+                    }
                 }
-                return HDPIMParityDecisionEngine.shared.hasVisibleVersion(product: $0)
+                while let result = try await group.next() {
+                    try Task.checkCancellation()
+                    let start = ProcessInfo.processInfo.systemUptime
+                    parsed.merge(result.catalog)
+                    metrics.mergingAndIndexing += ProcessInfo.processInfo.systemUptime - start
+                    metrics.requests += result.requestTime
+                    metrics.decoding += result.decodeTime
+                    metrics.responseBytes += result.bytes
+                    if let shard = remaining.next() {
+                        group.addTask { try await self.fetchCatalogShard(shard, context: context) }
+                    }
+                }
             }
-
-            var uniqueProductsDict = [String: UniqueProduct]()
-            for product in validProducts {
-                uniqueProductsDict[product.id] = UniqueProduct(id: product.id, displayName: product.displayName)
-            }
-            let uniqueProducts = Array(uniqueProductsDict.values)
-
-            return (validProducts, uniqueProducts)
-        }.value
-
-        return result
+            let extra = parsed.dependencyChannels.subtracting(requestedChannels)
+            requestedChannels.formUnion(extra)
+            requests = extra.isEmpty ? [] : [CatalogShard(channels: extra.sorted(), platforms: context.platforms)]
+        }
+        return try await CatalogDecoder.shared.snapshot(parsed: parsed, context: context, generation: generation, measurements: metrics)
     }
 
-    private func fetchProductsJSONString(url: URL) async throws -> String {
-        var request = URLRequest(url: url)
+    private func fetchCatalogShard(_ shard: CatalogShard, context: CatalogRequestContext) async throws -> CatalogShardResult {
+        var request = URLRequest(url: try context.url(channels: shard.channels, platforms: shard.platforms))
         request.httpMethod = "GET"
         request.timeoutInterval = NetworkConstants.ffcRequestTimeout
-
-        NetworkConstants.ffcRequestHeaders.forEach {
-            request.setValue($0.value, forHTTPHeaderField: $0.key)
-        }
-
-        let (data, response) = try await URLSession.shared.data(for: request)
-
-        guard let httpResponse = response as? HTTPURLResponse else {
-            throw NetworkError.invalidResponse
-        }
-
-        guard (200...299).contains(httpResponse.statusCode) else {
-            throw NetworkError.httpError(httpResponse.statusCode, nil)
-        }
-
-        guard let jsonString = String(data: data, encoding: .utf8) else {
-            throw NetworkError.invalidData("无法解码JSON数据")
-        }
-
-        return jsonString
-    }
-
-    private func extractDependencyChannels(from jsonString: String) -> Set<String> {
-        let trimmed = jsonString.trimmingCharacters(in: .whitespacesAndNewlines)
-        if trimmed.hasPrefix("<") {
-            return extractDependencyChannelsFromXML(xmlString: jsonString)
-        }
-
-        guard let data = jsonString.data(using: .utf8),
-              let jsonObject = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-            return []
-        }
-
-        return extractDependencyChannels(from: jsonObject)
-    }
-
-    private func extractDependencyChannelsFromXML(xmlString: String) -> Set<String> {
-        guard let data = xmlString.data(using: .utf8),
-              let document = try? XMLDocument(data: data, options: []) else {
-            return []
-        }
-
-        let nodes = (try? document.nodes(
-            forXPath: "/response/channels/channel/products/product/platforms/platform/custom-data/custom-entry[@key='dependencyFFCChannel']/value"
-        )) ?? []
-
-        return Set(
-            nodes.compactMap { node in
-                node.stringValue?.trimmingCharacters(in: .whitespacesAndNewlines)
-            }.filter { !$0.isEmpty }
-        )
-    }
-
-    private func extractDependencyChannels(from jsonObject: [String: Any]) -> Set<String> {
-        let channels = channelArray(from: jsonObject)
-        guard !channels.isEmpty else {
-            return []
-        }
-
-        var results = Set<String>()
-        for channel in channels {
-            guard let productsContainer = channel["products"] as? [String: Any] else {
-                continue
-            }
-
-            for product in dictionaryArray(from: productsContainer["product"]) {
-                guard let platformsContainer = product["platforms"] as? [String: Any] else {
-                    continue
-                }
-
-                for platform in dictionaryArray(from: platformsContainer["platform"]) {
-                    guard let customData = firstDictionary(
-                        from: platform,
-                        candidateKeys: ["custom-data", "customData", "custom_data"]
-                    ) else {
-                        continue
-                    }
-
-                    for entry in dictionaryArray(
-                        from: firstValue(
-                            in: customData,
-                            candidateKeys: ["custom-entry", "customEntry", "custom_entry"]
-                        )
-                    ) {
-                        let entryKey = (stringValue(in: entry, keys: ["key", "name"]) ?? "").lowercased()
-                        guard entryKey == "dependencyffcchannel",
-                              let channelValue = stringValue(in: entry, keys: ["value", "content", "text"]),
-                              !channelValue.isEmpty else {
-                            continue
-                        }
-                        results.insert(channelValue)
-                    }
-                }
-            }
-        }
-
-        return results
-    }
-
-    private func channelArray(from jsonObject: [String: Any]) -> [[String: Any]] {
-        if let channels = jsonObject["channels"] as? [String: Any] {
-            let channelArray = dictionaryArray(from: channels["channel"])
-            if !channelArray.isEmpty {
-                return channelArray
-            }
-        }
-
-        return dictionaryArray(from: jsonObject["channel"])
-    }
-
-    private func dictionaryArray(from value: Any?) -> [[String: Any]] {
-        if let array = value as? [[String: Any]] {
-            return array
-        }
-        if let dictionary = value as? [String: Any] {
-            return [dictionary]
-        }
-        return []
-    }
-
-    private func firstDictionary(
-        from dictionary: [String: Any],
-        candidateKeys: [String]
-    ) -> [String: Any]? {
-        for key in candidateKeys {
-            if let value = dictionary[key] as? [String: Any] {
-                return value
-            }
-        }
-        return nil
-    }
-
-    private func firstValue(
-        in dictionary: [String: Any],
-        candidateKeys: [String]
-    ) -> Any? {
-        for key in candidateKeys {
-            if let value = dictionary[key] {
-                return value
-            }
-        }
-        return nil
-    }
-
-    private func stringValue(in dictionary: [String: Any], keys: [String]) -> String? {
-        for key in keys {
-            if let value = dictionary[key] as? String {
-                let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
-                if !trimmed.isEmpty {
-                    return trimmed
-                }
-            }
-            if let nested = dictionary[key] as? [String: Any] {
-                if let value = stringValue(in: nested, keys: ["value", "content", "text"]) {
-                    return value
-                }
-            }
-        }
-        return nil
+        context.headers.forEach { request.setValue($0.value, forHTTPHeaderField: $0.key) }
+        let start = ProcessInfo.processInfo.systemUptime
+        let data = try await CatalogHTTPGate.shared.fetch(request)
+        let elapsed = ProcessInfo.processInfo.systemUptime - start
+        try Task.checkCancellation()
+        let decoded = try await CatalogDecoder.shared.decode(data: data, context: context)
+        return CatalogShardResult(catalog: decoded.0, bytes: data.count, requestTime: elapsed, decodeTime: decoded.1)
     }
 
     func getApplicationInfo(
         buildGuid: String,
         sapCode: String? = nil,
         version: String? = nil,
-        platform: String? = nil
+        platform: String? = nil,
+        catalogContext: CatalogRequestContext? = nil
     ) async throws -> String {
         let url: URL
 
@@ -272,7 +79,11 @@ class NewNetworkService {
             if let platform = platform {
                 queryItems.append(URLQueryItem(name: "platform", value: platform))
             } else {
-                appendDefaultApplicationPlatforms(to: &queryItems)
+                if let catalogContext {
+                    queryItems += catalogContext.architecture.requestedPlatformIds.map { URLQueryItem(name: "platform", value: $0) }
+                } else {
+                    appendDefaultApplicationPlatforms(to: &queryItems)
+                }
             }
             components?.queryItems = queryItems
             guard let builtURL = components?.url else {
@@ -290,7 +101,7 @@ class NewNetworkService {
 
         for attempt in 0..<NetworkConstants.maxServiceCallRetries {
             do {
-                let result = try await performApplicationJsonRequest(url: url, buildGuid: buildGuid)
+                let result = try await performApplicationJsonRequest(url: url, buildGuid: buildGuid, catalogContext: catalogContext)
 
                 if result == "Build is not operational" {
                     throw NetworkError.invalidData(
@@ -321,18 +132,14 @@ class NewNetworkService {
         }
     }
 
-    private func appendRequestedProductPlatforms(to queryItems: inout [URLQueryItem]) {
-        for platform in HDPIMParityTargetArchitecture.currentSelection.catalogPlatformIds {
-            queryItems.append(URLQueryItem(name: "platform", value: platform))
-        }
-    }
-
-    private func performApplicationJsonRequest(url: URL, buildGuid: String) async throws -> String {
+    private func performApplicationJsonRequest(url: URL, buildGuid: String, catalogContext: CatalogRequestContext?) async throws -> String {
         var request = URLRequest(url: url)
         request.httpMethod = "GET"
         request.timeoutInterval = NetworkConstants.serviceCallTimeout
 
-        var headers = NetworkConstants.applicationJsonHeaders
+        var headers = catalogContext.map { context in
+            context.headers.filter { ["x-adobe-app-id", "x-api-key", "User-Agent"].contains($0.key) }
+        } ?? NetworkConstants.applicationJsonHeaders
         if !buildGuid.isEmpty {
             headers["x-adobe-build-guid"] = buildGuid
         }

@@ -93,6 +93,7 @@ struct VersionSizeEstimate: Equatable {
 }
 
 struct NavigationVersionPickerView: View {
+    @ObservedObject private var networkManager = globalNetworkManager
     @Environment(\.dismiss) private var dismiss
     @StorageValue(\.defaultLanguage) private var defaultLanguage
     @StorageValue(\.downloadAppleSilicon) private var downloadAppleSilicon
@@ -121,6 +122,7 @@ struct NavigationVersionPickerView: View {
                     downloadAppleSilicon: downloadAppleSilicon,
                     onToggleArchitecture: { newValue in
                         StorageData.shared.downloadAppleSilicon = newValue
+                        Task { await networkManager.fetchProducts() }
                     },
                     onDismiss: { dismiss() }
                 )
@@ -140,6 +142,7 @@ struct NavigationVersionPickerView: View {
                         navigationPath.append(VersionPickerDestination.customDownload(productId: productId, version: version, useDelta: useDelta))
                     }
                 )
+                .id(networkManager.catalogGeneration)
             }
             .frame(
                 minWidth: 520,
@@ -180,11 +183,7 @@ struct NavigationVersionPickerView: View {
         }
     }
 
-    private func getDestinationURL(productId: String, version: String, language: String) async throws -> URL {
-        let platform = installerSelectedPlatformId(
-            productId: productId,
-            version: version
-        ) ?? "unknown"
+    private func getDestinationURL(productId: String, version: String, language: String, platform: String) async throws -> URL {
         let installerName = installerOutputName(
             productId: productId,
             version: version,
@@ -220,13 +219,16 @@ struct NavigationVersionPickerView: View {
     }
 
     private func handleCustomDownload(dependencies: [DependenciesToDownload]) {
-        guard let firstDependency = dependencies.first else { return }
-        let version = firstDependency.version
+        guard let mainDependency = dependencies.first(where: { $0.sapCode == productId }) else { return }
+        let version = mainDependency.version
+        let language = mainDependency.catalogLanguage ?? defaultLanguage
 
         let existingTask = globalNetworkManager.downloadTasks.first { task in
             task.productId == productId &&
             task.productVersion == version &&
-            task.language == StorageData.shared.defaultLanguage &&
+            task.language == language &&
+            task.platform == mainDependency.platform &&
+            task.targetArchitecture == mainDependency.catalogSnapshot?.context.architecture.rawValue &&
             task.status.isActive
         }
 
@@ -241,15 +243,17 @@ struct NavigationVersionPickerView: View {
     }
 
     private func startCustomDownloadProcess(dependencies: [DependenciesToDownload]) async {
-        guard let firstDependency = dependencies.first else { return }
-        let version = firstDependency.version
+        guard let mainDependency = dependencies.first(where: { $0.sapCode == productId }) else { return }
+        let version = mainDependency.version
+        let language = mainDependency.catalogLanguage ?? defaultLanguage
 
         let destinationURL: URL
         do {
             destinationURL = try await getDestinationURL(
                 productId: productId,
                 version: version,
-                language: StorageData.shared.defaultLanguage
+                language: language,
+                platform: mainDependency.platform
             )
         } catch {
             await MainActor.run { dismiss() }
@@ -260,7 +264,7 @@ struct NavigationVersionPickerView: View {
             try await globalNetworkManager.startCustomDownload(
                 productId: productId,
                 selectedVersion: version,
-                language: StorageData.shared.defaultLanguage,
+                language: language,
                 destinationURL: destinationURL,
                 customDependencies: dependencies
             )
@@ -302,6 +306,7 @@ struct NavigationVersionPickerView: View {
 }
 
 private struct VersionPickerHeaderView: View {
+    @ObservedObject private var networkManager = globalNetworkManager
     let productId: String
     let productIcon: NSImage?
     let downloadAppleSilicon: Bool
@@ -415,6 +420,7 @@ private struct VersionPickerHeaderView: View {
         .menuIndicator(.hidden)
         .fixedSize()
         .help("切换下载架构")
+        .disabled(networkManager.isFetchingProducts)
     }
 
     private var platformText: String {
@@ -584,6 +590,11 @@ private struct VersionListView: View {
                     cachedVersions = loadFilteredVersions()
                 }
             }
+            .onChange(of: defaultLanguage) { _ in
+                cachedVersions = loadFilteredVersions()
+                cachedPackageSizes.removeAll()
+                sizeLoadingVersions.removeAll()
+            }
             .onChange(of: downloadAppleSilicon) { _ in
                 cachedVersions = loadFilteredVersions()
                 cachedPackageSizes.removeAll()
@@ -662,7 +673,7 @@ private struct VersionListView: View {
     }
 
     private func loadFilteredVersions() -> [(key: String, value: Product.Platform)] {
-        HDPIMParityDecisionEngine.shared.visibleVersions(productId: productId)
+        HDPIMParityDecisionEngine.shared.visibleVersions(productId: productId, requestedLanguage: defaultLanguage)
     }
 
     private func handleVersionSelect(_ version: String) {
@@ -914,6 +925,8 @@ private struct VersionHeader: View {
 }
 
 private struct VersionDetails: View {
+    @ObservedObject private var networkManager = globalNetworkManager
+    @StorageValue(\.defaultLanguage) private var defaultLanguage
 	let productId: String
 	let info: Product.Platform
 	let version: String
@@ -925,7 +938,7 @@ private struct VersionDetails: View {
 	let onUninstallFinished: () -> Void
 
     private var hasRawDependencies: Bool {
-        !(info.languageSet.first?.dependencies.isEmpty ?? true)
+        !displayedDependencies.isEmpty
     }
 
     private var shouldShowDependencySection: Bool {
@@ -937,17 +950,31 @@ private struct VersionDetails: View {
     }
 
     private var displayedDependencies: [Product.Platform.LanguageSet.Dependency] {
-        info.languageSet.first?.dependencies ?? []
+        guard let snapshot = CatalogStore.shared.snapshot,
+              let language = try? CatalogSelection.languageSet(info.languageSet, locale: defaultLanguage, installer: isManifestInstallerProduct(productId)) else { return [] }
+        return language.dependencies.map {
+            snapshot.index.preview($0, architecture: snapshot.context.architecture, locale: defaultLanguage)
+        }
+    }
+
+    private var languageSelectionError: String? {
+        do {
+            _ = try CatalogSelection.languageSet(info.languageSet, locale: defaultLanguage, installer: isManifestInstallerProduct(productId))
+            return nil
+        } catch { return error.localizedDescription }
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: VersionPickerConstants.verticalSpacing) {
+            if let message = languageSelectionError {
+                Text(message).font(.caption).foregroundColor(.orange)
+            }
 			VersionSizeEstimateView(
 				version: version,
 				cachedPackageSizes: $cachedPackageSizes,
                 sizeLoadingVersions: $sizeLoadingVersions
             )
-            .task(id: version) {
+            .task(id: "\(version)|\(networkManager.catalogGeneration)|\(defaultLanguage)") {
                 await preloadSize(for: version)
 			}
 
@@ -1042,6 +1069,9 @@ private struct VersionDetails: View {
     }
 
     private func preloadSize(for version: String) async {
+        guard let snapshot = CatalogStore.shared.snapshot else { return }
+        let language = defaultLanguage
+        let generation = snapshot.generation
         if cachedPackageSizes[version] != nil { return }
         if sizeLoadingVersions.contains(version) { return }
         await MainActor.run {
@@ -1049,8 +1079,9 @@ private struct VersionDetails: View {
         }
 
         if isManifestInstallerProduct(productId) {
-            let size = await resolveInstallerSize(version: version)
+            let size = await resolveInstallerSize(version: version, snapshot: snapshot, language: language)
             await MainActor.run {
+                guard CatalogStore.shared.snapshot?.generation == generation, defaultLanguage == language else { return }
                 cachedPackageSizes[version] = VersionSizeEstimate(fullSize: size, deltaSize: nil)
                 _ = sizeLoadingVersions.remove(version)
             }
@@ -1061,7 +1092,8 @@ private struct VersionDetails: View {
             let decision = try await HDPIMParityDecisionEngine.shared.resolveDownloadDecision(
                 productId: productId,
                 version: version,
-                requestedLanguage: StorageData.shared.defaultLanguage
+                requestedLanguage: language,
+                catalogSnapshot: snapshot
             )
             let (_, fullDeps) = HDPIMParityDecisionEngine.shared.makeDownloadPresentation(from: decision, useDelta: false)
             let fullTotal = fullDeps.reduce(Int64(0)) { acc, dep in
@@ -1078,35 +1110,37 @@ private struct VersionDetails: View {
                 }
             }
             await MainActor.run {
+                guard CatalogStore.shared.snapshot?.generation == generation, defaultLanguage == language else { return }
                 cachedPackageSizes[version] = VersionSizeEstimate(fullSize: fullTotal, deltaSize: deltaTotal)
                 _ = sizeLoadingVersions.remove(version)
             }
         } catch {
             await MainActor.run {
+                guard CatalogStore.shared.snapshot?.generation == generation, defaultLanguage == language else { return }
                 _ = sizeLoadingVersions.remove(version)
             }
         }
     }
 
-    private func resolveInstallerSize(version: String) async -> Int64 {
-        guard let product = findProduct(id: productId, version: version, scope: .ccm) ?? findProduct(id: productId, version: version),
-              let match = installerPlatformMatch(product: product, selectedVersion: version) else {
-            return Int64(max(info.languageSet.first?.installSize ?? 0, 0))
+    private func resolveInstallerSize(version: String, snapshot: CatalogSnapshot, language: String) async -> Int64 {
+        guard let product = snapshot.product(id: productId, version: version),
+              let match = installerPlatformMatch(product: product, selectedVersion: version, targetArchitecture: snapshot.context.architecture, requestedLanguage: language) else {
+            return 0
         }
 
-        if let manifestSize = await installerManifestAssetSize(match.languageSet.manifestURL) {
+        if let manifestSize = await installerManifestAssetSize(match.languageSet.manifestURL, cdn: product.channelCDN ?? snapshot.cdn) {
             return manifestSize
         }
 
-        if let downloadSize = await installerContentLength(match.languageSet.lbsURL) {
+        if let downloadSize = await installerContentLength(match.languageSet.lbsURL, cdn: product.channelCDN ?? snapshot.cdn) {
             return downloadSize
         }
 
         return Int64(max(match.languageSet.installSize, 0))
     }
 
-    private func installerManifestAssetSize(_ manifestPath: String) async -> Int64? {
-        let manifestURL = normalizedInstallerURL(manifestPath)
+    private func installerManifestAssetSize(_ manifestPath: String, cdn: String) async -> Int64? {
+        let manifestURL = normalizedInstallerURL(manifestPath, cdn: cdn)
         guard !manifestURL.isEmpty,
               let url = URL(string: manifestURL) else {
             return nil
@@ -1133,8 +1167,8 @@ private struct VersionDetails: View {
         }
     }
 
-    private func installerContentLength(_ downloadPath: String) async -> Int64? {
-        let downloadURL = normalizedInstallerURL(downloadPath)
+    private func installerContentLength(_ downloadPath: String, cdn: String) async -> Int64? {
+        let downloadURL = normalizedInstallerURL(downloadPath, cdn: cdn)
         guard !downloadURL.isEmpty,
               let url = URL(string: downloadURL) else {
             return nil

@@ -34,20 +34,27 @@ private struct AppCardMetrics {
 @MainActor
 private enum AppCardMetricsCache {
     private static var storage: [String: AppCardMetrics] = [:]
+    private static var generation: UUID?
 
     static func metrics(for uniqueProduct: UniqueProduct) -> AppCardMetrics {
+        let snapshot = CatalogStore.shared.snapshot
+        if generation != snapshot?.generation {
+            generation = snapshot?.generation
+            storage.removeAll()
+        }
+        let architecture = snapshot?.context.architecture ?? .currentSelection
         if let metrics = storage[uniqueProduct.id] {
             return metrics
         }
 
-        let products = globalCcmResult.products.filter { $0.id == uniqueProduct.id }
+        let products = (snapshot?.ccm.products ?? []).filter { $0.id == uniqueProduct.id }
         let visibleMatches = products.compactMap { product -> (Product, Product.Platform)? in
             if isManifestInstallerProduct(uniqueProduct.id),
-               let match = installerPlatformMatch(product: product, selectedVersion: product.version) {
+               let match = installerPlatformMatch(product: product, selectedVersion: product.version, targetArchitecture: architecture) {
                 return (product, match.platform)
             }
 
-            guard let platform = HDPIMParityDecisionEngine.shared.preferredPlatform(for: product) else {
+            guard let platform = HDPIMParityDecisionEngine.shared.preferredPlatform(for: product, targetArchitecture: architecture) else {
                 return nil
             }
             return (product, platform)
@@ -131,7 +138,7 @@ final class AppCardViewModel: ObservableObject {
 
     @Published var isDownloading = false
     private let userDefaults = UserDefaults.standard
-    private let metrics: AppCardMetrics
+    @Published private var metrics: AppCardMetrics
     private var didRefreshInstallState = false
 
     private var useDefaultDirectory: Bool {
@@ -155,6 +162,14 @@ final class AppCardViewModel: ObservableObject {
 
     @MainActor
     private func setupObservers() {
+        globalNetworkManager.$catalogGeneration
+            .dropFirst()
+            .sink { [weak self] _ in
+                guard let self else { return }
+                self.metrics = AppCardMetricsCache.metrics(for: self.uniqueProduct)
+            }
+            .store(in: &cancellables)
+
         globalNetworkManager.$downloadTasks
             .receive(on: RunLoop.main)
             .sink { [weak self] tasks in
@@ -221,11 +236,7 @@ final class AppCardViewModel: ObservableObject {
 		)
     }
 
-    func getDestinationURL(version: String, language: String) async throws -> URL {
-        let platform = installerSelectedPlatformId(
-            productId: uniqueProduct.id,
-            version: version
-        ) ?? "unknown"
+    func getDestinationURL(version: String, language: String, platform: String) async throws -> URL {
         let installerName = installerOutputName(
             productId: uniqueProduct.id,
             version: version,
@@ -363,14 +374,18 @@ final class AppCardViewModel: ObservableObject {
 
     func startInstallerDownload(version: String, language: String) async {
         do {
-            let destinationURL = try await getDestinationURL(version: version, language: language)
+            guard let snapshot = CatalogStore.shared.snapshot,
+                  let product = snapshot.product(id: uniqueProduct.id, version: version) else { throw NetworkError.productNotFound }
+            let match = try CatalogSelection.productCandidate(product, architecture: snapshot.context.architecture, locale: language)
+            let destinationURL = try await getDestinationURL(version: version, language: language, platform: match.platform.id)
 
             try await globalNetworkManager.startCustomDownload(
                 productId: uniqueProduct.id,
                 selectedVersion: version,
                 language: language,
                 destinationURL: destinationURL,
-                customDependencies: []
+                customDependencies: [],
+                catalogSnapshot: snapshot
             )
         } catch {
             handleError(error)

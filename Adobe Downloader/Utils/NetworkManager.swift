@@ -19,7 +19,12 @@ class NetworkManager: ObservableObject {
 	internal var progressObservers: [UUID: NSKeyValueObservation] = [:]
 	internal var activeDownloadTaskId: UUID?
 	internal var monitor = NWPathMonitor()
-	internal var isFetchingProducts = false
+    @Published private(set) var isFetchingProducts = false
+    @Published private(set) var catalogGeneration = UUID()
+    @Published private(set) var catalogRefreshError: String?
+    private var catalogTask: Task<CatalogSnapshot, Error>?
+    private var requestedContext: CatalogRequestContext?
+    private var requestGeneration = UUID()
 	private let installManager = InstallManager()
     private var hasLoadedSavedTasks = false
 	private var lastInstallationProgress = 0.0
@@ -70,31 +75,93 @@ class NetworkManager: ObservableObject {
         configureNetworkMonitor()
     }
 
-    func fetchProducts() async {
-        loadingState = .loading
+    func fetchProducts(forceRefresh: Bool = true) async {
+        let context = CatalogRequestContext.capture()
+        if let task = catalogTask, requestedContext == context {
+            _ = await task.result
+            return
+        }
+        if !forceRefresh, CatalogStore.shared.snapshot?.context == context {
+            loadingState = .success
+            return
+        }
+        catalogTask?.cancel()
+        let generation = UUID()
+        requestGeneration = generation
+        requestedContext = context
+        let retainsList = CatalogStore.shared.snapshot?.context == context
+        if !retainsList {
+            CatalogStore.shared.replace(with: nil)
+            catalogGeneration = generation
+            loadingState = .loading
+        }
+        isFetchingProducts = true
+        catalogRefreshError = nil
+        let service = globalNetworkService
+        let task = Task.detached(priority: .userInitiated) {
+            try await service.fetchProductsData(context: context, generation: generation)
+        }
+        catalogTask = task
         do {
-            let (products, uniqueProducts) = try await globalNetworkService.fetchProductsData()
-            await MainActor.run {
-                globalProducts = products
-                globalUniqueProducts = uniqueProducts.sorted { $0.displayName < $1.displayName }
-                self.loadingState = .success
-            }
+            let snapshot = try await task.value
+            guard requestGeneration == generation, !task.isCancelled else { return }
+            let start = ProcessInfo.processInfo.systemUptime
+            CatalogStore.shared.replace(with: snapshot)
+            catalogGeneration = snapshot.generation
+            loadingState = .success
+            #if DEBUG
+            let m = snapshot.measurements
+            print("[Catalog] v\(context.apiVersion) bytes=\(m.responseBytes) request=\(m.requests)s decode=\(m.decoding)s merge/index=\(m.mergingAndIndexing)s dependencies=\(m.dependencies)s projection=\(m.projection)s publish=\(ProcessInfo.processInfo.systemUptime - start)s processPeakRSS=\(m.peakResidentBytes)")
+            #endif
         } catch {
-            await MainActor.run {
-                self.loadingState = .failed(error)
+            guard requestGeneration == generation else { return }
+            if error is CancellationError || (error as? URLError)?.code == .cancelled {
+                loadingState = retainsList ? .success : .idle
+            } else if retainsList {
+                catalogRefreshError = error.localizedDescription
+                loadingState = .success
+            } else {
+                loadingState = .failed(error)
             }
         }
+        guard requestGeneration == generation else { return }
+        catalogTask = nil
+        isFetchingProducts = false
     }
-    
-    func startCustomDownload(productId: String, selectedVersion: String, language: String, destinationURL: URL, customDependencies: [DependenciesToDownload]) async throws {
-        guard let productInfo = globalCcmResult.products.first(where: { $0.id == productId && $0.version == selectedVersion }) else {
+
+    func cancelCatalogRequest() {
+        catalogTask?.cancel()
+        catalogTask = nil
+        requestGeneration = UUID()
+        isFetchingProducts = false
+        loadingState = CatalogStore.shared.snapshot == nil ? .idle : .success
+    }
+
+    func validateDownloadDestination(_ destination: URL, excluding taskID: UUID? = nil) throws {
+        let path = destination.standardizedFileURL.resolvingSymlinksInPath()
+        if let owner = downloadTasks.first(where: {
+            $0.id != taskID && $0.status.isActive
+                && $0.directory.standardizedFileURL.resolvingSymlinksInPath() == path
+        }) {
+            throw NetworkError.invalidData("下载目录正由 \(owner.displayName) 的活动任务使用，请暂停或完成该任务后重试")
+        }
+    }
+
+    func startCustomDownload(productId: String, selectedVersion: String, language: String, destinationURL: URL, customDependencies: [DependenciesToDownload], catalogSnapshot: CatalogSnapshot? = nil) async throws {
+        guard let snapshot = customDependencies.compactMap(\.catalogSnapshot).first ?? catalogSnapshot ?? CatalogStore.shared.snapshot,
+              let productInfo = snapshot.product(id: productId, version: selectedVersion) else {
             throw NetworkError.productNotFound
         }
 
+        try validateDownloadDestination(destinationURL)
+        let language = customDependencies.compactMap(\.catalogLanguage).first ?? language
+        let selectedPlatform = try CatalogSelection.productCandidate(productInfo, architecture: snapshot.context.architecture, locale: language).platform.id
         let task = downloadTasks.first {
             $0.productId == productInfo.id &&
             $0.productVersion == selectedVersion &&
             $0.language == language &&
+            $0.platform == selectedPlatform &&
+            $0.targetArchitecture == snapshot.context.architecture.rawValue &&
             $0.directory.standardizedFileURL == destinationURL.standardizedFileURL
         } ?? NewDownloadTask(
             productId: productInfo.id,
@@ -114,21 +181,18 @@ class NetworkManager: ObservableObject {
             totalSize: 0,
             totalSpeed: 0,
             platform: customDependencies.first(where: { $0.sapCode == productId })?.platform
-                ?? installerSelectedPlatformId(
-                    productId: productId,
-                    version: selectedVersion
-                )
-                ?? "unknown",
-            targetArchitecture: HDPIMParityTargetArchitecture.currentSelection.rawValue)
+                ?? selectedPlatform,
+            targetArchitecture: snapshot.context.architecture.rawValue)
+        task.catalogSnapshot = snapshot
 
         if !downloadTasks.contains(where: { $0.id == task.id }) {
             downloadTasks.append(task)
         }
-        task.setStatus(.preparing(DownloadStatus.PrepareInfo(
+        task.totalStatus = .preparing(DownloadStatus.PrepareInfo(
             message: "正在准备自定义下载...",
             timestamp: Date(),
             stage: .initializing
-        )))
+        ))
         updateDockBadge()
         await saveTask(task)
         
@@ -210,35 +274,13 @@ class NetworkManager: ObservableObject {
    }
 
     private func fetchProductsWithRetry() async {
-        guard !isFetchingProducts else { return }
-        
-        isFetchingProducts = true
-        loadingState = .loading
-        
-        let maxRetries = 3
-        var retryCount = 0
-        
-        while retryCount < maxRetries {
-            do {
-                let (products, uniqueProducts) = try await globalNetworkService.fetchProductsData()
-                await MainActor.run {
-                    globalProducts = products
-                    globalUniqueProducts = uniqueProducts
-                    self.loadingState = .success
-                    self.isFetchingProducts = false
-                }
-
-                return
-            } catch {
-                retryCount += 1
-                if retryCount == maxRetries {
-                    await MainActor.run {
-                        self.loadingState = .failed(error)
-                        self.isFetchingProducts = false
-                    }
-                } else {
-                    try? await Task.sleep(nanoseconds: UInt64(pow(2.0, Double(retryCount))) * 1_000_000_000)
-                }
+        for attempt in 0..<3 {
+            await fetchProducts()
+            if loadingState == .success && catalogRefreshError == nil { return }
+            if Task.isCancelled { return }
+            if attempt < 2 {
+                do { try await Task.sleep(nanoseconds: UInt64(1 << (attempt + 1)) * 1_000_000_000) }
+                catch { return }
             }
         }
     }
@@ -890,8 +932,6 @@ class NetworkManager: ObservableObject {
 
     func retryFetchData() {
         Task {
-            isFetchingProducts = false
-            loadingState = .idle
             await fetchProducts()
         }
     }

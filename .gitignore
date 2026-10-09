@@ -45,3 +45,5 @@ playground.xcworkspace
 
 # Swift Package Manager
 .build/
+
+analyze

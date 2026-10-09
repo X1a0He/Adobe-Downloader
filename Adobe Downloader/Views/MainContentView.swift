@@ -33,6 +33,21 @@ struct MainContentView: View {
                 onTap: onOpenDownloadManager
             )
 
+            if networkManager.isFetchingProducts && loadingState == .success {
+                HStack {
+                    ProgressView().controlSize(.small)
+                    Text("正在刷新产品目录…")
+                }
+                .padding(8)
+            }
+            if let message = networkManager.catalogRefreshError {
+                HStack {
+                    Text("刷新失败：\(message)").foregroundColor(.secondary)
+                    Button("重试", action: onRetry).disabled(networkManager.isFetchingProducts)
+                }
+                .padding(8)
+            }
+
             ZStack {
                 switch loadingState {
                 case .idle, .loading:

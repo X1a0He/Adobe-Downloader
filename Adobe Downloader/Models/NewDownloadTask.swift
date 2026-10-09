@@ -20,6 +20,7 @@ class NewDownloadTask: Identifiable, ObservableObject, @unchecked Sendable  {
 
     var platform: String
     var targetArchitecture: String
+    var catalogSnapshot: CatalogSnapshot?
 
     @Published var totalStatus: DownloadStatus?
     @Published var totalProgress: Double

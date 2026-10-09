@@ -43,6 +43,8 @@ struct Product: Codable, Equatable {
     var version: String
     var id: String
     var hidden: Bool
+    var catalogChannel: String?
+    var channelCDN: String?
     
     func hasValidVersions(allowedPlatform: [String]) -> Bool {
         return platforms.contains { platform in
@@ -80,6 +82,11 @@ struct Product: Codable, Equatable {
             var buildGuid: String
             var baseVersion: String
             var productVersion: String
+            var locales: [String]?
+            var packageType: String?
+            var dependencyChannels: [String]?
+            var buildMetadata: [CatalogBuildMetadata]?
+            var catalogAvailability: CatalogAvailability?
 
             struct Dependency: Codable, Equatable {
                 var sapCode: String
@@ -92,8 +99,10 @@ struct Product: Codable, Equatable {
                 var selectedReason: String
                 var isSoftDependency: Bool
                 var hostValidation: HDPIMHostValidationSnapshot?
+                var declaredChannels: [String]?
+                var declaredPlatform: String?
 
-                init(sapCode: String, baseVersion: String, productVersion: String, buildGuid: String, isMatchPlatform: Bool = false, targetPlatform: String = "", selectedPlatform: String = "", selectedReason: String = "", isSoftDependency: Bool = false, hostValidation: HDPIMHostValidationSnapshot? = nil) {
+                init(sapCode: String, baseVersion: String, productVersion: String, buildGuid: String, isMatchPlatform: Bool = false, targetPlatform: String = "", selectedPlatform: String = "", selectedReason: String = "", isSoftDependency: Bool = false, hostValidation: HDPIMHostValidationSnapshot? = nil, declaredChannels: [String]? = nil, declaredPlatform: String? = nil) {
                     self.sapCode = sapCode
                     self.baseVersion = baseVersion
                     self.productVersion = productVersion
@@ -104,6 +113,8 @@ struct Product: Codable, Equatable {
                     self.selectedReason = selectedReason
                     self.isSoftDependency = isSoftDependency
                     self.hostValidation = hostValidation
+                    self.declaredChannels = declaredChannels
+                    self.declaredPlatform = declaredPlatform
                 }
             }
         }
@@ -150,6 +161,10 @@ struct UniqueProduct: Equatable {
 
 /* ========== */
 class DependenciesToDownload: ObservableObject, Codable {
+    // 仅会话内使用，任务持久化仍沿用现有格式。
+    var catalogSnapshot: CatalogSnapshot?
+    var catalogCDN: String?
+    var catalogLanguage: String?
     // 别人依赖就他吗叫sapCode，Adobe也是傻逼，一会id一会sapCode
     var sapCode: String
     var version: String
