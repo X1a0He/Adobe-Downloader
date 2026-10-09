@@ -510,10 +510,16 @@ final class HDPIMParityDecisionEngine {
                 installedProducts: installedProducts
             )
             let skipReason = shouldSkipProduct ? "已安装同版本或更高版本依赖" : nil
+            let packageLanguage: String
+            if dependencySeed.sapCode == product.id {
+                packageLanguage = requestedLanguage
+            } else {
+                packageLanguage = try languageWithEnglishFallback(requestedLanguage, applicationInfo: applicationInfo)
+            }
             let selectedModuleIds = defaultSelectedModuleIds(
                 sapCode: dependencySeed.sapCode,
                 applicationInfo: applicationInfo,
-                requestedLanguage: requestedLanguage
+                requestedLanguage: packageLanguage
             )
             let packageDecisions = shouldSkipProduct ? [] : buildPackageDecisions(
                 workflow: .download,
@@ -521,7 +527,7 @@ final class HDPIMParityDecisionEngine {
                 productVersion: resolvedVersion,
                 platform: dependencySeed.platform,
                 applicationInfo: applicationInfo,
-                requestedLanguage: requestedLanguage,
+                requestedLanguage: packageLanguage,
                 targetArchitecture: targetArchitecture,
                 selectedModuleIds: selectedModuleIds,
                 expectedInstallDir: expandedInstallDirectory(for: applicationInfo),
@@ -1250,8 +1256,16 @@ final class HDPIMParityDecisionEngine {
             )
         }
 
+        let packageLanguage: String
+        do {
+            packageLanguage = try languageWithEnglishFallback(
+                requestedLanguage, applicationInfo: package.applicationInfo
+            )
+        } catch {
+            return HDPIMHostValidationSnapshot(isInstallable: false, reason: error.localizedDescription)
+        }
         let context = makeConditionContext(
-            requestedLanguage: requestedLanguage,
+            requestedLanguage: packageLanguage,
             targetArchitecture: targetArchitecture,
             installDirectory: expectedInstallDir,
             mode: .target(targetArchitecture)
@@ -1277,11 +1291,15 @@ final class HDPIMParityDecisionEngine {
         let target = rawDependency.declaredPlatform ?? rawDependency.selectedPlatform
         let targetPlatform = target.isEmpty ? targetArchitecture.defaultRequestedPlatform : target
         let diagnostics = makePlatformSelectionDiagnostics(targetPlatform: targetPlatform, selectedPlatform: match.platform.id)
+        var selectedReason = diagnostics.reason
+        if match.languageSet.usesEnglishFallback(for: requestedLanguage) {
+            selectedReason += "；依赖语言回退至 en_US"
+        }
         return HDPIMDependencySeed(
             sapCode: rawDependency.sapCode, version: match.product.version,
             baseVersion: match.languageSet.baseVersion, buildGuid: match.languageSet.buildGuid,
             platform: match.platform.id, targetPlatform: targetPlatform,
-            isPlatformMatched: diagnostics.isMatch, selectedReason: diagnostics.reason,
+            isPlatformMatched: diagnostics.isMatch, selectedReason: selectedReason,
             isSoftDependency: softDependencySet.contains(rawDependency.sapCode), catalogCDN: match.cdn
         )
     }
@@ -1562,6 +1580,34 @@ final class HDPIMParityDecisionEngine {
         }
     }
 
+    // HDPIM 遇到不支持的请求语言时加入 en_US，保留原请求供包条件判断。
+    private func languageWithEnglishFallback(
+        _ requestedLanguage: String,
+        applicationInfo: ApplicationInfo
+    ) throws -> String {
+        let requested = requestedLanguage.split(separator: ",")
+            .map { String($0).trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+        let supported = Set(applicationInfo.supportedLanguages.map {
+            $0.trimmingCharacters(in: .whitespacesAndNewlines)
+                .replacingOccurrences(of: "-", with: "_").lowercased()
+        }.filter { !$0.isEmpty })
+        guard !requested.isEmpty, !supported.isEmpty, !supported.contains("mul"),
+              !requested.contains(where: { $0.caseInsensitiveCompare("ALL") == .orderedSame }) else {
+            return requestedLanguage
+        }
+        let hasUnsupportedLanguage = requested.contains {
+            !supported.contains($0.replacingOccurrences(of: "-", with: "_").lowercased())
+        }
+        guard hasUnsupportedLanguage else { return requestedLanguage }
+        guard supported.contains("en_us") else {
+            throw NetworkError.invalidData(
+                "产品 \(applicationInfo.sapCode) 不支持语言 \(requestedLanguage)，且不支持回退语言 en_US"
+            )
+        }
+        return Array(Set(requested + ["en_US"])).sorted().joined(separator: ",")
+    }
+
     private func defaultSelectedModuleIds(
         sapCode: String,
         applicationInfo: ApplicationInfo,
@@ -1571,7 +1617,9 @@ final class HDPIMParityDecisionEngine {
             return []
         }
 
-        let languageTokens = languageModuleTokens(requestedLanguage)
+        let languageTokens = requestedLanguage.split(separator: ",").flatMap {
+            languageModuleTokens(String($0))
+        }
         guard !languageTokens.isEmpty else {
             return []
         }

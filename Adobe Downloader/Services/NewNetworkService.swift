@@ -98,10 +98,14 @@ class NewNetworkService {
         }
 
         var lastError: Error?
+        var requestURL = url
+        var usesBuildGuidFallback = false
 
         for attempt in 0..<NetworkConstants.maxServiceCallRetries {
+            try Task.checkCancellation()
             do {
-                let result = try await performApplicationJsonRequest(url: url, buildGuid: buildGuid, catalogContext: catalogContext)
+                let result = try await performApplicationJsonRequest(url: requestURL, buildGuid: buildGuid, catalogContext: catalogContext)
+                try Task.checkCancellation()
 
                 if result == "Build is not operational" {
                     throw NetworkError.invalidData(
@@ -109,12 +113,33 @@ class NewNetworkService {
                     )
                 }
 
+                if usesBuildGuidFallback {
+                    try validateApplicationIdentity(
+                        result, buildGuid: buildGuid, sapCode: sapCode, version: version, platform: platform
+                    )
+                }
                 return result
 
             } catch {
+                if Task.isCancelled || error is CancellationError || (error as? URLError)?.code == .cancelled {
+                    throw CancellationError()
+                }
                 lastError = error
 
-                if case NetworkError.invalidData = error { throw error }
+                if case NetworkError.invalidData = error {
+                    throw applicationInfoRequestError(error, sapCode: sapCode, version: version, platform: platform)
+                }
+
+                // 带目录查询参数的 CDN 路径可能返回 5xx；恢复时仍锁定原 BuildGuid。
+                if case NetworkError.httpError(let status, _) = error,
+                   (500...599).contains(status), !buildGuid.isEmpty,
+                   let fallbackURL = URL(string: NetworkConstants.applicationJsonURLV3),
+                   requestURL != fallbackURL,
+                   attempt < NetworkConstants.maxServiceCallRetries - 1 {
+                    requestURL = fallbackURL
+                    usesBuildGuidFallback = true
+                    continue
+                }
 
                 if attempt < NetworkConstants.maxServiceCallRetries - 1 {
                     let delay = UInt64(5 * (attempt + 1)) * 1_000_000_000
@@ -123,7 +148,41 @@ class NewNetworkService {
             }
         }
 
-        throw lastError ?? NetworkError.invalidResponse
+        throw applicationInfoRequestError(
+            lastError ?? NetworkError.invalidResponse, sapCode: sapCode, version: version, platform: platform
+        )
+    }
+
+    private func validateApplicationIdentity(
+        _ jsonString: String, buildGuid: String, sapCode: String?, version: String?, platform: String?
+    ) throws {
+        guard let data = jsonString.data(using: .utf8),
+              let object = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] else {
+            throw NetworkError.invalidData("无法验证按 BuildGuid 获取的应用信息")
+        }
+        let expectedFields: [(String, String?)] = [
+            ("BuildGuid", buildGuid), ("SAPCode", sapCode), ("CodexVersion", version), ("Platform", platform)
+        ]
+        for (field, expected) in expectedFields {
+            guard let expected, !expected.isEmpty else { continue }
+            guard let actual = object[field] as? String,
+                  actual.caseInsensitiveCompare(expected) == .orderedSame else {
+                throw NetworkError.invalidData("按 BuildGuid 获取的应用信息与请求不符：\(field)")
+            }
+        }
+    }
+
+    private func applicationInfoRequestError(
+        _ error: Error, sapCode: String?, version: String?, platform: String?
+    ) -> NetworkError {
+        let identity = [sapCode, version, platform].compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: " ")
+        let underlying: Error
+        if case NetworkError.httpError(let status, _) = error {
+            underlying = NetworkError.httpError(status, nil)
+        } else {
+            underlying = error
+        }
+        return .applicationInfoError(identity.isEmpty ? "Application.json" : identity, underlying)
     }
 
     private func appendDefaultApplicationPlatforms(to queryItems: inout [URLQueryItem]) {

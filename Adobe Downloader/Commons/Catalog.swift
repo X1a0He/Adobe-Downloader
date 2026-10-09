@@ -72,6 +72,14 @@ extension Product.Platform.LanguageSet {
     var declaredLocales: Set<String> {
         Set((locales ?? []).map { $0.replacingOccurrences(of: "-", with: "_").lowercased() })
     }
+
+    func usesEnglishFallback(for locale: String?) -> Bool {
+        guard let locale else { return false }
+        let requested = locale.replacingOccurrences(of: "-", with: "_").lowercased()
+        let supported = declaredLocales
+        return requested != "all" && !supported.contains(requested)
+            && !supported.contains("mul") && supported.contains("en_us")
+    }
 }
 
 enum CatalogSelection {
@@ -97,7 +105,8 @@ enum CatalogSelection {
     static func languageSet(
         _ candidates: [Product.Platform.LanguageSet],
         locale: String?,
-        installer: Bool = false
+        installer: Bool = false,
+        allowEnglishFallback: Bool = false
     ) throws -> Product.Platform.LanguageSet {
         guard !candidates.isEmpty else { throw NetworkError.invalidData("没有可用语言组") }
         let materials = installer ? candidates : candidates.filter { $0.packageType == "hdPackage" }
@@ -129,8 +138,12 @@ enum CatalogSelection {
             eligible = exact.isEmpty
                 ? enabled.filter { $0.declaredLocales.contains("mul") }
                 : exact
+            if eligible.isEmpty && allowEnglishFallback {
+                eligible = enabled.filter { $0.declaredLocales.contains("en_us") }
+            }
             guard !eligible.isEmpty else {
-                throw NetworkError.invalidData("此版本不支持语言 \(locale ?? "")")
+                let fallback = allowEnglishFallback ? "，且不支持回退语言 en_US" : ""
+                throw NetworkError.invalidData("此版本不支持语言 \(locale ?? "")\(fallback)")
             }
         }
         return eligible.sorted {
@@ -235,13 +248,18 @@ struct CatalogIndex {
         var languageError: Error?
         for group in groups {
             do {
-                let language = try CatalogSelection.languageSet(group.map(\.languageSet), locale: locale)
+                let language = try CatalogSelection.languageSet(
+                    group.map(\.languageSet), locale: locale, allowEnglishFallback: true
+                )
                 return group.first { $0.languageSet == language }!
             } catch {
                 languageError = error
             }
         }
-        throw languageError ?? NetworkError.invalidData("依赖 \(sap) 没有可用构建")
+        if let languageError {
+            throw NetworkError.invalidData("依赖 \(sap)：\(languageError.localizedDescription)")
+        }
+        throw NetworkError.invalidData("依赖 \(sap) 没有可用构建")
     }
 
     func preview(
@@ -257,6 +275,9 @@ struct CatalogIndex {
             result.selectedPlatform = match.platform.id
             result.isMatchPlatform = true
             result.selectedReason = "已匹配精确基线及声明频道"
+            if match.languageSet.usesEnglishFallback(for: locale) {
+                result.selectedReason += "；依赖语言回退至 en_US"
+            }
         } catch {
             result.selectedPlatform = ""
             result.isMatchPlatform = false

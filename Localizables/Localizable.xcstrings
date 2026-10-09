@@ -654,6 +654,7 @@
       }
     },
     "%lld 依赖" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -662,6 +663,9 @@
           }
         }
       }
+    },
+    "%lld 项未解析" : {
+
     },
     "%lld.x" : {
 
@@ -893,13 +897,13 @@
     "Apple Silicon (arm64)" : {
 
     },
-    "base:" : {
+    "BaseVersion" : {
 
     },
     "buildGuid" : {
 
     },
-    "buildGuid:" : {
+    "BuildGuid" : {
 
     },
     "By X1a0He." : {
@@ -1787,6 +1791,9 @@
         }
       }
     },
+    "下载大小" : {
+
+    },
     "下载失败" : {
       "extractionState" : "stale",
       "localizations" : {
@@ -2051,6 +2058,7 @@
       }
     },
     "仅最新" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -2286,6 +2294,9 @@
         }
       }
     },
+    "全部收起" : {
+
+    },
     "全部暂停" : {
       "localizations" : {
         "en" : {
@@ -2306,7 +2317,11 @@
         }
       }
     },
+    "全量包" : {
+
+    },
     "全量包 ~%@" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -2325,6 +2340,9 @@
           }
         }
       }
+    },
+    "共 %lld 个版本" : {
+
     },
     "共 %lld 款产品" : {
       "localizations" : {
@@ -3181,6 +3199,9 @@
         }
       }
     },
+    "各代最新" : {
+
+    },
     "同时进行的下载任务数（范围 1-10，推荐 %d）" : {
       "localizations" : {
         "en" : {
@@ -3918,6 +3939,9 @@
         }
       }
     },
+    "完整版本" : {
+
+    },
     "客户端错误: %d" : {
       "comment" : "Client error",
       "localizations" : {
@@ -4092,6 +4116,9 @@
           }
         }
       }
+    },
+    "展开详情" : {
+
     },
     "已下载" : {
       "localizations" : {
@@ -4279,6 +4306,9 @@
         }
       }
     },
+    "已展开" : {
+
+    },
     "已打开 Acrobat 安装器，请按提示完成安装" : {
       "localizations" : {
         "en" : {
@@ -4298,6 +4328,9 @@
           }
         }
       }
+    },
+    "已收起" : {
+
     },
     "已暂停" : {
       "comment" : "Download status paused",
@@ -4403,6 +4436,9 @@
           }
         }
       }
+    },
+    "平台" : {
+
     },
     "并发下载数" : {
       "localizations" : {
@@ -5117,6 +5153,9 @@
         }
       }
     },
+    "收起详情" : {
+
+    },
     "数据库错误: %@" : {
       "localizations" : {
         "en" : {
@@ -5495,6 +5534,16 @@
         }
       }
     },
+    "显示 %lld / %lld 个版本" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "显示 %1$lld / %2$lld 个版本"
+          }
+        }
+      }
+    },
     "暂停" : {
       "localizations" : {
         "en" : {
@@ -5828,6 +5877,9 @@
         }
       }
     },
+    "未解析" : {
+
+    },
     "未设置" : {
       "comment" : "Default directory not set",
       "localizations" : {
@@ -5864,6 +5916,9 @@
           }
         }
       }
+    },
+    "本代最新" : {
+
     },
     "本机: %@" : {
       "localizations" : {
@@ -5927,6 +5982,9 @@
           }
         }
       }
+    },
+    "构建信息" : {
+
     },
     "查看" : {
       "extractionState" : "stale",
@@ -6799,6 +6857,9 @@
         }
       }
     },
+    "每个主版本仅显示最新版本" : {
+
+    },
     "没有写入权限" : {
       "localizations" : {
         "en" : {
@@ -7094,6 +7155,9 @@
           }
         }
       }
+    },
+    "清除筛选" : {
+
     },
     "点击切换选择状态" : {
       "localizations" : {
@@ -8019,6 +8083,9 @@
         }
       }
     },
+    "计算失败" : {
+
+    },
     "设置" : {
       "localizations" : {
         "en" : {
@@ -8824,7 +8891,11 @@
         }
       }
     },
+    "预计下载" : {
+
+    },
     "预计下载 ~%@" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
