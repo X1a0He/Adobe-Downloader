@@ -3,10 +3,10 @@ import SwiftUI
 extension DownloadStatus.PrepareInfo.PrepareStage {
     var title: String {
         switch self {
-        case .initializing:      return String(localized: "初始化")
-        case .creatingInstaller: return String(localized: "创建安装器")
-        case .signingApp:        return String(localized: "签名应用")
-        case .fetchingInfo:      return String(localized: "获取清单")
+        case .initializing:      return AppLocalized("初始化")
+        case .creatingInstaller: return AppLocalized("创建安装器")
+        case .signingApp:        return AppLocalized("签名应用")
+        case .fetchingInfo:      return AppLocalized("获取清单")
         }
     }
 }
@@ -14,11 +14,11 @@ extension DownloadStatus.PrepareInfo.PrepareStage {
 extension DownloadStatus.PauseInfo.PauseReason {
     var localizedText: String {
         switch self {
-        case .userRequested: return String(localized: "用户暂停")
-        case .networkIssue:  return String(localized: "网络中断")
-        case .systemSleep:   return String(localized: "系统休眠")
+        case .userRequested: return AppLocalized("用户暂停")
+        case .networkIssue:  return AppLocalized("网络中断")
+        case .systemSleep:   return AppLocalized("系统休眠")
         case .other(let reason):
-            if reason.isEmpty { return String(localized: "其他原因") }
+            if reason.isEmpty { return AppLocalized("其他原因") }
             return reason
         }
     }
@@ -28,19 +28,19 @@ extension DownloadStatus {
     var compactDescription: String {
         switch self {
         case .waiting:
-            return String(localized: "等待中")
+            return AppLocalized("等待中")
         case .preparing(let info):
-            return String(localized: "准备中 · \(info.stage.title)")
+            return AppLocalized("准备中 · \(info.stage.title)")
         case .downloading:
-            return String(localized: "下载中")
+            return AppLocalized("下载中")
         case .paused(let info):
             return info.reason.localizedText
         case .completed:
-            return String(localized: "已完成")
+            return AppLocalized("已完成")
         case .failed:
-            return String(localized: "失败")
+            return AppLocalized("失败")
         case .retrying(let info):
-            return String(localized: "重试 \(info.attempt)/\(info.maxAttempts)")
+            return AppLocalized("重试 \(info.attempt)/\(info.maxAttempts)")
         }
     }
 
@@ -110,28 +110,28 @@ enum TaskAction {
 
     var confirmTitle: String {
         switch self {
-        case .cancel: return String(localized: "确认取消")
-        case .remove: return String(localized: "确认删除")
+        case .cancel: return AppLocalized("确认取消")
+        case .remove: return AppLocalized("确认删除")
         default: return ""
         }
     }
 
     func confirmMessage(for taskName: String) -> String {
         switch self {
-        case .cancel: return String(localized: "确定要取消\(taskName)的下载吗？")
-        case .remove: return String(localized: "确定要删除任务\(taskName)吗？")
+        case .cancel: return AppLocalized("确定要取消\(taskName)的下载吗？")
+        case .remove: return AppLocalized("确定要删除任务\(taskName)吗？")
         default: return ""
         }
     }
 
     var buttonLabel: String {
         switch self {
-        case .pause:   return String(localized: "暂停")
-        case .resume:  return String(localized: "继续")
-        case .cancel:  return String(localized: "取消")
-        case .retry:   return String(localized: "重试")
-        case .remove:  return String(localized: "移除")
-        case .install: return String(localized: "安装")
+        case .pause:   return AppLocalized("暂停")
+        case .resume:  return AppLocalized("继续")
+        case .cancel:  return AppLocalized("取消")
+        case .retry:   return AppLocalized("重试")
+        case .remove:  return AppLocalized("移除")
+        case .install: return AppLocalized("安装")
         }
     }
 

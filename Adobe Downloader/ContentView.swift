@@ -1,6 +1,7 @@
 import SwiftUI
 
 struct ContentView: View {
+    @StorageValue(\.interfaceLanguage) private var interfaceLanguage
     @StateObject private var networkManager = globalNetworkManager
     @State private var showDownloadManager = false
     @State private var searchText = ""
@@ -26,6 +27,7 @@ struct ContentView: View {
     }
 
     var body: some View {
+        let _ = interfaceLanguage
         VStack(spacing: 0) {
             BannerView()
             
@@ -53,7 +55,7 @@ struct ContentView: View {
                 openSettings: openSettings
             )
         }
-        .searchable(text: $searchText, placement: .toolbar, prompt: "搜索应用或产品 ID")
+        .searchable(text: $searchText, placement: .toolbar, prompt: AppLocalized("搜索应用或产品 ID"))
         .onChange(of: currentApiVersion) { newValue in
             refreshData()
         }
@@ -64,13 +66,15 @@ struct ContentView: View {
 }
 
 struct SearchField: View {
+    @StorageValue(\.interfaceLanguage) private var interfaceLanguage
     @Binding var text: String
 
     var body: some View {
+        let _ = interfaceLanguage
         HStack {
             Image(systemName: "magnifyingglass")
                 .foregroundColor(.secondary)
-            TextField("搜索应用", text: $text)
+            TextField(AppLocalized("搜索应用"), text: $text)
                 .textFieldStyle(PlainTextFieldStyle())
             if !text.isEmpty {
                 Button(action: { text = "" }) {

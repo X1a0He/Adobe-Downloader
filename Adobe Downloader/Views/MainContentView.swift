@@ -18,6 +18,7 @@ private enum GridMetrics {
 }
 
 struct MainContentView: View {
+    @StorageValue(\.interfaceLanguage) private var interfaceLanguage
     let loadingState: LoadingState
     let filteredProducts: [UniqueProduct]
     let searchText: String
@@ -27,6 +28,7 @@ struct MainContentView: View {
     @ObservedObject private var networkManager = globalNetworkManager
 
     var body: some View {
+        let _ = interfaceLanguage
         VStack(spacing: 0) {
             ActiveDownloadsBanner(
                 tasks: networkManager.downloadTasks,
@@ -36,14 +38,14 @@ struct MainContentView: View {
             if networkManager.isFetchingProducts && loadingState == .success {
                 HStack {
                     ProgressView().controlSize(.small)
-                    Text("正在刷新产品目录…")
+                    Text(AppLocalized("正在刷新产品目录…"))
                 }
                 .padding(8)
             }
             if let message = networkManager.catalogRefreshError {
                 HStack {
-                    Text("刷新失败：\(message)").foregroundColor(.secondary)
-                    Button("重试", action: onRetry).disabled(networkManager.isFetchingProducts)
+                    Text(AppLocalized("刷新失败：\(message)")).foregroundColor(.secondary)
+                    Button(AppLocalized("重试"), action: onRetry).disabled(networkManager.isFetchingProducts)
                 }
                 .padding(8)
             }
@@ -74,9 +76,11 @@ struct MainContentView: View {
 }
 
 struct EmptyStateView: View {
+    @StorageValue(\.interfaceLanguage) private var interfaceLanguage
     let searchText: String
 
     var body: some View {
+        let _ = interfaceLanguage
         VStack(spacing: 14) {
             ZStack {
                 Circle()
@@ -106,18 +110,19 @@ struct EmptyStateView: View {
 
     private var primaryMessage: String {
         searchText.isEmpty
-            ? String(localized: "暂无产品")
-            : String(localized: "未找到 \"\(searchText)\" 相关产品")
+            ? AppLocalized("暂无产品")
+            : AppLocalized("未找到 \"\(searchText)\" 相关产品")
     }
 
     private var secondaryMessage: String {
         searchText.isEmpty
-            ? String(localized: "请稍后再试，或到设置中切换 API 版本")
-            : String(localized: "尝试换一个关键词，或清空搜索查看全部")
+            ? AppLocalized("请稍后再试，或到设置中切换 API 版本")
+            : AppLocalized("尝试换一个关键词，或清空搜索查看全部")
     }
 }
 
 private struct ActiveDownloadsBanner: View {
+    @StorageValue(\.interfaceLanguage) private var interfaceLanguage
     let tasks: [NewDownloadTask]
     let onTap: () -> Void
 
@@ -130,6 +135,7 @@ private struct ActiveDownloadsBanner: View {
     }
 
     var body: some View {
+        let _ = interfaceLanguage
         if activeTasks.isEmpty {
             EmptyView()
         } else {
@@ -145,7 +151,7 @@ private struct ActiveDownloadsBanner: View {
                     }
 
                     VStack(alignment: .leading, spacing: 2) {
-                        Text("\(displayCount) 个下载任务进行中")
+                        Text(AppLocalized("\(displayCount) 个下载任务进行中"))
                             .font(.system(size: 12, weight: .semibold))
                             .foregroundColor(.primary.opacity(0.9))
 
@@ -166,7 +172,7 @@ private struct ActiveDownloadsBanner: View {
                                             .foregroundColor(.secondary.opacity(0.4))
                                         HStack(spacing: 2) {
                                             Image(systemName: "clock").font(.system(size: 9))
-                                            Text(String(format: String(localized: "下载剩余 %@"), remaining))
+                                            Text(String(format: AppLocalized("下载剩余 %@"), remaining))
                                                 .font(.system(size: 11))
                                                 .monospacedDigit()
                                         }
@@ -175,7 +181,7 @@ private struct ActiveDownloadsBanner: View {
                                 }
                             } else {
                                 Text(activeTasks.contains(where: { $0.isValidatingDownload })
-                                     ? String(localized: "正在校验下载文件") : String(localized: "等待带宽…"))
+                                     ? AppLocalized("正在校验下载文件") : AppLocalized("等待带宽…"))
                                     .font(.system(size: 11))
                                     .foregroundColor(.secondary.opacity(0.75))
                             }
@@ -185,7 +191,7 @@ private struct ActiveDownloadsBanner: View {
                     Spacer()
 
                     HStack(spacing: 3) {
-                        Text("打开下载管理")
+                        Text(AppLocalized("打开下载管理"))
                             .font(.system(size: 11, weight: .medium))
                         Image(systemName: "chevron.right")
                             .font(.system(size: 9, weight: .semibold))
@@ -228,10 +234,12 @@ private struct ActiveDownloadsBanner: View {
 }
 
 private struct FeedLayout: View {
+    @StorageValue(\.interfaceLanguage) private var interfaceLanguage
     let products: [UniqueProduct]
     let searchText: String
 
     var body: some View {
+        let _ = interfaceLanguage
         GeometryReader { geo in
             let columns = GridMetrics.columns(for: geo.size.width)
             ScrollView(showsIndicators: false) {
@@ -257,8 +265,8 @@ private struct FeedLayout: View {
 
     private var sectionTitle: String {
         searchText.isEmpty
-            ? String(localized: "全部产品")
-            : String(localized: "搜索结果")
+            ? AppLocalized("全部产品")
+            : AppLocalized("搜索结果")
     }
 }
 
@@ -286,6 +294,7 @@ private struct SectionHeaderView: View {
 }
 
 private struct FeedFooterView: View {
+    @StorageValue(\.interfaceLanguage) private var interfaceLanguage
     let count: Int
     let searchText: String
 
@@ -296,6 +305,7 @@ private struct FeedFooterView: View {
     }
 
     var body: some View {
+        let _ = interfaceLanguage
         HStack(spacing: 8) {
             Capsule()
                 .fill(Color.green)
@@ -309,7 +319,7 @@ private struct FeedFooterView: View {
                 HStack(spacing: 3) {
                     Image(systemName: "arrow.down.circle.fill")
                         .font(.system(size: 10))
-                    Text("\(activeDownloadCount) 个任务进行中")
+                    Text(AppLocalized("\(activeDownloadCount) 个任务进行中"))
                         .font(.system(size: 12))
                 }
                 .foregroundColor(.blue.opacity(0.85))
@@ -329,13 +339,15 @@ private struct FeedFooterView: View {
 
     private var footerText: String {
         searchText.isEmpty
-            ? String(localized: "共 \(count) 款产品")
-            : String(localized: "搜索 \"\(searchText)\" 命中 \(count) 款产品")
+            ? AppLocalized("共 \(count) 款产品")
+            : AppLocalized("搜索 \"\(searchText)\" 命中 \(count) 款产品")
     }
 }
 
 private struct LoadingSkeletonView: View {
+    @StorageValue(\.interfaceLanguage) private var interfaceLanguage
     var body: some View {
+        let _ = interfaceLanguage
         GeometryReader { geo in
             let columns = GridMetrics.columns(for: geo.size.width, spacing: 16)
             let skeletonCount = max(4, columns.count * 2)
@@ -344,7 +356,7 @@ private struct LoadingSkeletonView: View {
                 HStack(spacing: 8) {
                     ProgressView()
                         .controlSize(.small)
-                    Text("正在加载产品列表")
+                    Text(AppLocalized("正在加载产品列表"))
                         .font(.system(size: 13, weight: .medium))
                         .foregroundColor(.secondary)
                 }
@@ -410,10 +422,12 @@ private struct SkeletonCard: View {
 }
 
 private struct LoadingFailedView: View {
+    @StorageValue(\.interfaceLanguage) private var interfaceLanguage
     let error: Error
     let onRetry: () -> Void
 
     var body: some View {
+        let _ = interfaceLanguage
         VStack(spacing: 18) {
             ZStack {
                 Circle()
@@ -424,7 +438,7 @@ private struct LoadingFailedView: View {
                     .foregroundColor(.red.opacity(0.85))
             }
             VStack(spacing: 6) {
-                Text("加载失败")
+                Text(AppLocalized("加载失败"))
                     .font(.system(size: 16, weight: .semibold))
                 Text(error.localizedDescription)
                     .font(.system(size: 12))
@@ -432,7 +446,7 @@ private struct LoadingFailedView: View {
                     .multilineTextAlignment(.center)
                     .frame(maxWidth: 420)
                     .textSelection(.enabled)
-                Text("提示：检查网络连接，或到设置中切换 API 版本")
+                Text(AppLocalized("提示：检查网络连接，或到设置中切换 API 版本"))
                     .font(.system(size: 11))
                     .foregroundColor(.secondary.opacity(0.7))
                     .multilineTextAlignment(.center)
@@ -441,7 +455,7 @@ private struct LoadingFailedView: View {
                 HStack(spacing: 4) {
                     Image(systemName: "arrow.clockwise")
                         .font(.system(size: 11))
-                    Text("重试")
+                    Text(AppLocalized("重试"))
                         .font(.system(size: 13, weight: .semibold))
                 }
                 .foregroundColor(.white)

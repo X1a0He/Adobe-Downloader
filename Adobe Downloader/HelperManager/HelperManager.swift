@@ -92,7 +92,7 @@ final class HelperManager: ObservableObject {
     }
 
     func install() async throws {
-        guard !isBusy else { throw HelperError.operationFailed(String(localized: "Helper 正在处理其他操作，请稍后重试。")) }
+        guard !isBusy else { throw HelperError.operationFailed(AppLocalized("Helper 正在处理其他操作，请稍后重试。")) }
         isBusy = true
         defer { isBusy = false }
         await refreshTask?.value
@@ -143,7 +143,7 @@ final class HelperManager: ObservableObject {
     }
 
     func uninstall() async throws {
-        guard !isBusy else { throw HelperError.operationFailed(String(localized: "Helper 正在处理其他操作，请稍后重试。")) }
+        guard !isBusy else { throw HelperError.operationFailed(AppLocalized("Helper 正在处理其他操作，请稍后重试。")) }
         isBusy = true
         defer { isBusy = false }
         await refreshTask?.value
@@ -167,7 +167,7 @@ final class HelperManager: ObservableObject {
     }
 
     func reinstall() async throws {
-        guard !isBusy else { throw HelperError.operationFailed(String(localized: "Helper 正在处理其他操作，请稍后重试。")) }
+        guard !isBusy else { throw HelperError.operationFailed(AppLocalized("Helper 正在处理其他操作，请稍后重试。")) }
         isBusy = true
         defer { isBusy = false }
         await refreshTask?.value
@@ -190,7 +190,7 @@ final class HelperManager: ObservableObject {
     }
 
     func migrateLegacyHelper() async throws {
-        guard !isBusy else { throw HelperError.operationFailed(String(localized: "Helper 正在处理其他操作，请稍后重试。")) }
+        guard !isBusy else { throw HelperError.operationFailed(AppLocalized("Helper 正在处理其他操作，请稍后重试。")) }
         isBusy = true
         defer { isBusy = false }
         await refreshTask?.value
@@ -253,11 +253,11 @@ final class HelperManager: ObservableObject {
                   let program = plist["BundleProgram"] as? String,
                   !program.hasPrefix("/"),
                   (plist["MachServices"] as? [String: Bool])?[Self.machServiceName] == true else {
-                return String(localized: "Helper 服务配置不完整，请重新下载完整应用。") + "\n\(plistURL.path)"
+                return AppLocalized("Helper 服务配置不完整，请重新下载完整应用。") + "\n\(plistURL.path)"
             }
             let helper = bundle.appendingPathComponent(program).resolvingSymlinksInPath()
             guard helper.path.hasPrefix(bundle.path + "/"), FileManager.default.isExecutableFile(atPath: helper.path) else {
-                return String(localized: "Helper 可执行文件缺失或不在当前 App 内。") + "\n\(helper.path)"
+                return AppLocalized("Helper 可执行文件缺失或不在当前 App 内。") + "\n\(helper.path)"
             }
             return nil
         } catch {

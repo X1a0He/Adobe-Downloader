@@ -94,7 +94,7 @@ class NewDownloadTask: Identifiable, ObservableObject, @unchecked Sendable  {
     }
 
     var formattedTotalSize: String {
-        hasUnknownDownloadSize ? String(localized: "未知")
+        hasUnknownDownloadSize ? AppLocalized("未知")
             : ByteCountFormatter.string(fromByteCount: totalSize, countStyle: .file)
     }
 

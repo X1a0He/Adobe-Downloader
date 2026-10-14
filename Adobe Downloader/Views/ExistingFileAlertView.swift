@@ -19,6 +19,7 @@ private enum AlertConstants {
 }
 
 struct ExistingFileAlertView: View {
+    @StorageValue(\.interfaceLanguage) private var interfaceLanguage
     let path: URL
     let onUseExisting: () -> Void
     let onRedownload: () -> Void
@@ -26,10 +27,11 @@ struct ExistingFileAlertView: View {
     let iconImage: NSImage?
     
     var body: some View {
+        let _ = interfaceLanguage
         VStack(spacing: AlertConstants.verticalSpacing) {
             IconSection(iconImage: iconImage)
             
-            Text("安装程序已存在")
+            Text(AppLocalized("安装程序已存在"))
                 .font(.headline)
             
             PathSection(path: path)
@@ -127,28 +129,30 @@ private struct PathSection: View {
 }
 
 private struct ButtonSection: View {
+    @StorageValue(\.interfaceLanguage) private var interfaceLanguage
     let onUseExisting: () -> Void
     let onRedownload: () -> Void
     let onCancel: () -> Void
     
     var body: some View {
+        let _ = interfaceLanguage
         VStack(spacing: 12) {
             ActionButton(
-                title: String(localized: "使用现有程序"),
+                title: AppLocalized("使用现有程序"),
                 icon: "checkmark.circle",
                 color: .blue,
                 action: onUseExisting
             )
             
             ActionButton(
-                title: String(localized: "重新下载"),
+                title: AppLocalized("重新下载"),
                 icon: "arrow.down.circle",
                 color: .green,
                 action: onRedownload
             )
             
             ActionButton(
-                title: String(localized: "取消"),
+                title: AppLocalized("取消"),
                 icon: "xmark.circle",
                 color: .red,
                 action: onCancel,

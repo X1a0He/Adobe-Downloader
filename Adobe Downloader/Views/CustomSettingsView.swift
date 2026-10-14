@@ -8,6 +8,7 @@ import SwiftUI
 import Sparkle
 
 struct CustomSettingsView: View {
+    @StorageValue(\.interfaceLanguage) private var interfaceLanguage
     @State private var selectedTab: SettingsTab = .general
     @StateObject private var cleanupViewModel = CleanupViewModel()
     @StateObject private var helperPlaygroundViewModel = HelperPlaygroundViewModel()
@@ -30,11 +31,11 @@ struct CustomSettingsView: View {
 
         var title: String {
             switch self {
-            case .general: return String(localized: "通用")
-            case .helper:  return String(localized: "Helper 设置")
-            case .cleanup: return String(localized: "清理工具")
-            case .qa:      return String(localized: "常见问题")
-            case .about:   return String(localized: "关于")
+            case .general: return AppLocalized("通用")
+            case .helper:  return AppLocalized("Helper 设置")
+            case .cleanup: return AppLocalized("清理工具")
+            case .qa:      return AppLocalized("常见问题")
+            case .about:   return AppLocalized("关于")
             }
         }
 
@@ -60,6 +61,7 @@ struct CustomSettingsView: View {
     }
 
     var body: some View {
+        let _ = interfaceLanguage
         HStack(spacing: 0) {
             SettingsSidebar(selectedTab: $selectedTab)
                 .frame(width: 200)
@@ -122,11 +124,13 @@ struct CustomSettingsView: View {
 }
 
 private struct SettingsSidebar: View {
+    @StorageValue(\.interfaceLanguage) private var interfaceLanguage
     @Binding var selectedTab: CustomSettingsView.SettingsTab
 
     var body: some View {
+        let _ = interfaceLanguage
         VStack(alignment: .leading, spacing: 4) {
-            Text("设置")
+            Text(AppLocalized("设置"))
                 .font(.system(size: 13, weight: .semibold))
                 .foregroundColor(.secondary.opacity(0.85))
                 .padding(.horizontal, 16)
@@ -154,12 +158,14 @@ private struct SettingsSidebar: View {
 }
 
 private struct SettingsSidebarItem: View {
+    @StorageValue(\.interfaceLanguage) private var interfaceLanguage
     let tab: CustomSettingsView.SettingsTab
     let isActive: Bool
     let onTap: () -> Void
     @State private var isHovered = false
 
     var body: some View {
+        let _ = interfaceLanguage
         Button(action: onTap) {
             HStack(spacing: 10) {
                 ZStack {
@@ -191,10 +197,12 @@ private struct SettingsSidebarItem: View {
 }
 
 private struct SettingsCloseButton: View {
+    @StorageValue(\.interfaceLanguage) private var interfaceLanguage
     let onClose: () -> Void
     @State private var isHovered = false
 
     var body: some View {
+        let _ = interfaceLanguage
         Button(action: onClose) {
             Image(systemName: "xmark")
                 .font(.system(size: 10, weight: .bold))
@@ -211,6 +219,6 @@ private struct SettingsCloseButton: View {
         .buttonStyle(.plain)
         .keyboardShortcut(.escape, modifiers: [])
         .onHover { isHovered = $0 }
-        .help(String(localized: "关闭"))
+        .help(AppLocalized("关闭"))
     }
 }

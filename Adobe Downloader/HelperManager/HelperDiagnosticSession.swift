@@ -27,7 +27,7 @@ final class HelperDiagnosticSession: @unchecked Sendable {
                     let connection = NSXPCConnection(machServiceName: "com.x1a0he.macOS.Adobe-Downloader.helper", options: .privileged)
                     connection.remoteObjectInterface = NSXPCInterface(with: HelperXPCProtocol.self)
                     let disconnected: () -> Void = { [weak self] in
-                        self?.finish(.failure(String(localized: "诊断连接已中断；未收到命令的最终结果。")))
+                        self?.finish(.failure(AppLocalized("诊断连接已中断；未收到命令的最终结果。")))
                     }
                     connection.invalidationHandler = disconnected
                     connection.interruptionHandler = disconnected
@@ -39,17 +39,17 @@ final class HelperDiagnosticSession: @unchecked Sendable {
                         throw HelperError.proxyCreationFailed
                     }
                     let deadline = DispatchWorkItem { [weak self] in
-                        self?.finishOnQueue(.failure(String(localized: "Helper 未在时限内返回结果，诊断连接已关闭。请检查 Helper 状态。")))
+                        self?.finishOnQueue(.failure(AppLocalized("Helper 未在时限内返回结果，诊断连接已关闭。请检查 Helper 状态。")))
                     }
                     self.deadline = deadline
                     self.queue.asyncAfter(deadline: .now() + timeout + 5, execute: deadline)
                     proxy.executeOperation(data) { [weak self] data in
                         guard let result = try? JSONDecoder().decode(HelperOperationResult.self, from: data) else {
-                            self?.finish(.failure(String(localized: "无法读取诊断结果，请更新并重新注册 Helper。")))
+                            self?.finish(.failure(AppLocalized("无法读取诊断结果，请更新并重新注册 Helper。")))
                             return
                         }
                         guard result.diagnostic != nil else {
-                            self?.finish(.failure(String(localized: "Helper 不支持当前诊断请求，请更新并重新注册 Helper。") + "\n" + result.output))
+                            self?.finish(.failure(AppLocalized("Helper 不支持当前诊断请求，请更新并重新注册 Helper。") + "\n" + result.output))
                             return
                         }
                         self?.finish(result)

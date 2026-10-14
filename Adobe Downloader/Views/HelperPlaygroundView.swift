@@ -15,11 +15,11 @@ private enum HelperPlaygroundPreset: String, CaseIterable, Identifiable {
 
     var title: String {
         switch self {
-        case .whoami: return String(localized: "管理员身份")
-        case .id: return String(localized: "用户与组")
-        case .swVers: return String(localized: "系统版本")
-        case .launchctlPrint: return String(localized: "后台服务状态")
-        case .listAdobeSupport: return String(localized: "Adobe 支持目录")
+        case .whoami: return AppLocalized("管理员身份")
+        case .id: return AppLocalized("用户与组")
+        case .swVers: return AppLocalized("系统版本")
+        case .launchctlPrint: return AppLocalized("后台服务状态")
+        case .listAdobeSupport: return AppLocalized("Adobe 支持目录")
         }
     }
 
@@ -56,8 +56,8 @@ final class HelperPlaygroundViewModel: ObservableObject {
         guard !isRunning, !HelperManager.shared.isBusy else { return }
         isRunning = true
         isCancelling = false
-        summary = String(localized: "正在检查 Helper…")
-        let localID = logStore.begin(title: String(localized: "注册、授权与连接"))
+        summary = AppLocalized("正在检查 Helper…")
+        let localID = logStore.begin(title: AppLocalized("注册、授权与连接"))
         checkIDs = [localID]
         Task {
             defer { finishRun() }
@@ -70,20 +70,20 @@ final class HelperPlaygroundViewModel: ObservableObject {
                 checkIDs.append(id)
                 guard available, !isCancelling else {
                     logStore.finish(id, status: .skipped, detail: isCancelling
-                        ? String(localized: "用户已停止检查。") : manager.state.guidance)
+                        ? AppLocalized("用户已停止检查。") : manager.state.guidance)
                     continue
                 }
                 await execute(preset.command, timeout: 15, id: id, preset: preset)
             }
             let entries = logStore.entries.filter { checkIDs.contains($0.id) }
             if isCancelling {
-                summary = String(localized: "检查已停止，已完成的结果保留在下方。")
+                summary = AppLocalized("检查已停止，已完成的结果保留在下方。")
             } else if entries.contains(where: { [.failed, .timedOut].contains($0.status) }) {
-                summary = String(localized: "检查发现异常，请展开对应记录查看原因。")
+                summary = AppLocalized("检查发现异常，请展开对应记录查看原因。")
             } else if entries.contains(where: { $0.status == .warning }) {
-                summary = String(localized: "Helper 检查完成，部分项目需要留意。")
+                summary = AppLocalized("Helper 检查完成，部分项目需要留意。")
             } else {
-                summary = String(localized: "所有检查已通过。")
+                summary = AppLocalized("所有检查已通过。")
             }
         }
     }
@@ -95,7 +95,7 @@ final class HelperPlaygroundViewModel: ObservableObject {
 #if DEBUG
     func runCustomCommand() {
         guard allowCustomCommand else { return }
-        startCommand(customCommand, title: String(localized: "自定义命令"), timeout: customTimeout, preset: nil)
+        startCommand(customCommand, title: AppLocalized("自定义命令"), timeout: customTimeout, preset: nil)
     }
 #endif
 
@@ -126,13 +126,13 @@ final class HelperPlaygroundViewModel: ObservableObject {
         } else if result.success {
             if preset == .whoami, result.diagnostic?.standardOutput.trimmingCharacters(in: .whitespacesAndNewlines) != "root" {
                 status = .failed
-                detail = String(localized: "Helper 未以 root 身份执行。")
+                detail = AppLocalized("Helper 未以 root 身份执行。")
             } else {
                 status = .passed
             }
         } else if preset == .listAdobeSupport, result.exitCode != nil {
             status = .warning
-            detail = String(localized: "Adobe 目录不存在或无法列出，不单独代表 Helper 授权失败。")
+            detail = AppLocalized("Adobe 目录不存在或无法列出，不单独代表 Helper 授权失败。")
         } else {
             status = .failed
         }
@@ -153,6 +153,7 @@ final class HelperPlaygroundViewModel: ObservableObject {
 }
 
 struct HelperPlaygroundView: View {
+    @StorageValue(\.interfaceLanguage) private var interfaceLanguage
     @ObservedObject var viewModel: HelperPlaygroundViewModel
     @ObservedObject private var manager = HelperManager.shared
     @ObservedObject private var logStore = HelperExecutionLogStore.shared
@@ -162,6 +163,7 @@ struct HelperPlaygroundView: View {
 #endif
 
     var body: some View {
+        let _ = interfaceLanguage
         VStack(alignment: .leading, spacing: 20) {
             HelperStatusSection()
             diagnosticsSection
@@ -175,18 +177,18 @@ struct HelperPlaygroundView: View {
     }
 
     private var diagnosticsSection: some View {
-        SettingSection(String(localized: "快速诊断"), footer: String(localized: "检查注册、连接、权限及系统信息，不修改安装内容。")) {
+        SettingSection(AppLocalized("快速诊断"), footer: AppLocalized("检查注册、连接、权限及系统信息，不修改安装内容。")) {
             VStack(alignment: .leading, spacing: 12) {
                 HStack {
-                    Text(viewModel.summary.isEmpty ? String(localized: "一键检查 Helper 是否可用") : viewModel.summary)
+                    Text(viewModel.summary.isEmpty ? AppLocalized("一键检查 Helper 是否可用") : viewModel.summary)
                         .font(.callout)
                     Spacer()
                     if viewModel.isRunning {
                         ProgressView().controlSize(.small)
-                        Button(viewModel.isCancelling ? String(localized: "正在停止…") : String(localized: "停止")) { viewModel.cancel() }
+                        Button(viewModel.isCancelling ? AppLocalized("正在停止…") : AppLocalized("停止")) { viewModel.cancel() }
                             .disabled(viewModel.isCancelling)
                     } else {
-                        Button("开始检查") { viewModel.runDiagnostics() }
+                        Button(AppLocalized("开始检查")) { viewModel.runDiagnostics() }
                             .disabled(manager.isBusy)
                     }
                 }
@@ -199,12 +201,12 @@ struct HelperPlaygroundView: View {
                     }
                     .font(.caption)
                 }
-                DisclosureGroup("单项检查") {
+                DisclosureGroup(AppLocalized("单项检查")) {
                     HStack {
-                        Picker("检查项目", selection: $viewModel.selectedPreset) {
+                        Picker(AppLocalized("检查项目"), selection: $viewModel.selectedPreset) {
                             ForEach(HelperPlaygroundPreset.allCases) { Text($0.title).tag($0) }
                         }
-                        Button("运行") { recordsExpanded = true; viewModel.runPreset() }
+                        Button(AppLocalized("运行")) { recordsExpanded = true; viewModel.runPreset() }
                     }
                     .disabled(viewModel.isRunning || manager.isBusy)
                     .padding(.top, 6)
@@ -216,12 +218,12 @@ struct HelperPlaygroundView: View {
 
 #if DEBUG
     private var customSection: some View {
-        SettingSection(String(localized: "自定义命令 (Debug)")) {
+        SettingSection(AppLocalized("自定义命令 (Debug)")) {
             DisclosureGroup(isExpanded: $customExpanded) {
                 VStack(alignment: .leading, spacing: 10) {
-                    Text("以 root 身份执行非交互命令。不支持后台任务；超时或取消会终止命令进程组。")
+                    Text(AppLocalized("以 root 身份执行非交互命令。不支持后台任务；超时或取消会终止命令进程组。"))
                         .font(.caption).foregroundColor(.secondary)
-                    Toggle("允许自定义命令（高风险）", isOn: $viewModel.allowCustomCommand)
+                    Toggle(AppLocalized("允许自定义命令（高风险）"), isOn: $viewModel.allowCustomCommand)
                         .disabled(viewModel.isRunning)
                     TextEditor(text: $viewModel.customCommand)
                         .font(.system(.caption, design: .monospaced))
@@ -229,27 +231,27 @@ struct HelperPlaygroundView: View {
                         .border(Color.secondary.opacity(0.25))
                         .disabled(!viewModel.allowCustomCommand || viewModel.isRunning)
                     HStack {
-                        Picker("超时", selection: $viewModel.customTimeout) {
-                            Text("15 秒").tag(15.0)
-                            Text("30 秒").tag(30.0)
-                            Text("60 秒").tag(60.0)
-                            Text("120 秒").tag(120.0)
+                        Picker(AppLocalized("超时"), selection: $viewModel.customTimeout) {
+                            Text(AppLocalized("15 秒")).tag(15.0)
+                            Text(AppLocalized("30 秒")).tag(30.0)
+                            Text(AppLocalized("60 秒")).tag(60.0)
+                            Text(AppLocalized("120 秒")).tag(120.0)
                         }
                         .frame(width: 170)
                         .disabled(viewModel.isRunning)
                         Spacer()
-                        Button("运行") { recordsExpanded = true; viewModel.runCustomCommand() }
+                        Button(AppLocalized("运行")) { recordsExpanded = true; viewModel.runCustomCommand() }
                             .disabled(viewModel.isRunning || manager.isBusy || !viewModel.allowCustomCommand ||
                                 viewModel.customCommand.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ||
                                 viewModel.customCommand.utf8.count > 16_384)
                     }
                     if viewModel.customCommand.utf8.count > 16_384 {
-                        Text("命令不能超过 16 KiB。").font(.caption).foregroundColor(.orange)
+                        Text(AppLocalized("命令不能超过 16 KiB。")).font(.caption).foregroundColor(.orange)
                     }
                 }
                 .padding(.top, 10)
             } label: {
-                Label("开发调试工具", systemImage: "terminal")
+                Label(AppLocalized("开发调试工具"), systemImage: "terminal")
             }
             .padding(12)
         }
@@ -257,23 +259,23 @@ struct HelperPlaygroundView: View {
 #endif
 
     private var recordsSection: some View {
-        SettingSection(String(localized: "执行记录"), footer: String(localized: "仅保留本次运行最近 30 条记录；输出在命令结束后显示。")) {
+        SettingSection(AppLocalized("执行记录"), footer: AppLocalized("仅保留本次运行最近 30 条记录；输出在命令结束后显示。")) {
             VStack(alignment: .leading, spacing: 10) {
                 HStack {
-                    Text(String(format: String(localized: "共 %d 条记录"), logStore.entries.count)).font(.caption)
+                    Text(String(format: AppLocalized("共 %d 条记录"), logStore.entries.count)).font(.caption)
                     Spacer()
-                    Button("清空") { logStore.clear(); viewModel.checkIDs = [] }
+                    Button(AppLocalized("清空")) { logStore.clear(); viewModel.checkIDs = [] }
                         .disabled(viewModel.isRunning || logStore.entries.isEmpty)
-                    Button("复制全部") { copy(logStore.exportText()) }
+                    Button(AppLocalized("复制全部")) { copy(logStore.exportText()) }
                         .disabled(logStore.entries.isEmpty)
                 }
                 if logStore.discardedCount > 0 {
-                    Text(String(format: String(localized: "较早的 %d 条记录已移出本次会话。"), logStore.discardedCount))
+                    Text(String(format: AppLocalized("较早的 %d 条记录已移出本次会话。"), logStore.discardedCount))
                         .font(.caption).foregroundColor(.secondary)
                 }
-                DisclosureGroup("查看命令与输出", isExpanded: $recordsExpanded) {
+                DisclosureGroup(AppLocalized("查看命令与输出"), isExpanded: $recordsExpanded) {
                     if logStore.entries.isEmpty {
-                        Text("运行检查后在这里查看详情。").foregroundColor(.secondary).padding(.vertical, 8)
+                        Text(AppLocalized("运行检查后在这里查看详情。")).foregroundColor(.secondary).padding(.vertical, 8)
                     } else {
                         ScrollView {
                             LazyVStack(alignment: .leading, spacing: 12) {
@@ -296,9 +298,11 @@ struct HelperPlaygroundView: View {
 }
 
 private struct HelperExecutionEntryRow: View {
+    @StorageValue(\.interfaceLanguage) private var interfaceLanguage
     let entry: HelperExecutionLogStore.Entry
 
     var body: some View {
+        let _ = interfaceLanguage
         VStack(alignment: .leading, spacing: 6) {
             HStack {
                 statusIcon(entry.status)
@@ -307,11 +311,11 @@ private struct HelperExecutionEntryRow: View {
                 Spacer()
                 if entry.status == .running {
                     TimelineView(.periodic(from: entry.date, by: 1)) { context in
-                        Text(String(format: String(localized: "已等待 %.0f 秒"), max(0, context.date.timeIntervalSince(entry.date))))
+                        Text(String(format: AppLocalized("已等待 %.0f 秒"), max(0, context.date.timeIntervalSince(entry.date))))
                             .foregroundColor(.secondary)
                     }
                 }
-                Button("复制") {
+                Button(AppLocalized("复制")) {
                     NSPasteboard.general.clearContents()
                     NSPasteboard.general.setString(entry.exportText, forType: .string)
                 }

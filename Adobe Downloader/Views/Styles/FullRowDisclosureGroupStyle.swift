@@ -1,8 +1,11 @@
 import SwiftUI
 
 struct FullRowDisclosureGroupStyle: DisclosureGroupStyle {
+    @StorageValue(\.interfaceLanguage) private var interfaceLanguage
+
     func makeBody(configuration: Configuration) -> some View {
-        VStack(alignment: .leading, spacing: 0) {
+        let _ = interfaceLanguage
+        return VStack(alignment: .leading, spacing: 0) {
             Button {
                 withAnimation(.easeInOut(duration: 0.2)) {
                     configuration.isExpanded.toggle()
@@ -22,7 +25,7 @@ struct FullRowDisclosureGroupStyle: DisclosureGroupStyle {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .accessibilityValue(configuration.isExpanded ? String(localized: "已展开") : String(localized: "已收起"))
+            .accessibilityValue(configuration.isExpanded ? AppLocalized("已展开") : AppLocalized("已收起"))
 
             if configuration.isExpanded {
                 configuration.content

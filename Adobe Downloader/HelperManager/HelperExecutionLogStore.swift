@@ -16,13 +16,13 @@ final class HelperExecutionLogStore: ObservableObject {
 
         var title: String {
             switch self {
-            case .running: return String(localized: "执行中")
-            case .passed: return String(localized: "通过")
-            case .warning: return String(localized: "需留意")
-            case .failed: return String(localized: "失败")
-            case .cancelled: return String(localized: "已取消")
-            case .timedOut: return String(localized: "已超时")
-            case .skipped: return String(localized: "已跳过")
+            case .running: return AppLocalized("执行中")
+            case .passed: return AppLocalized("通过")
+            case .warning: return AppLocalized("需留意")
+            case .failed: return AppLocalized("失败")
+            case .cancelled: return AppLocalized("已取消")
+            case .timedOut: return AppLocalized("已超时")
+            case .skipped: return AppLocalized("已跳过")
             }
         }
     }
@@ -41,13 +41,13 @@ final class HelperExecutionLogStore: ObservableObject {
         var exportText: String {
             var lines = ["[\(date.formatted(date: .omitted, time: .standard))] \(title) · \(status.title)"]
             if !command.isEmpty { lines.append("$ \(command)") }
-            if let duration { lines.append(String(format: String(localized: "耗时 %.2f 秒"), duration)) }
-            if let code = result?.exitCode { lines.append(String(format: String(localized: "退出码：%d"), code)) }
+            if let duration { lines.append(String(format: AppLocalized("耗时 %.2f 秒"), duration)) }
+            if let code = result?.exitCode { lines.append(String(format: AppLocalized("退出码：%d"), code)) }
             if !detail.isEmpty { lines.append(detail) }
             if let diagnostic = result?.diagnostic {
                 if !diagnostic.standardOutput.isEmpty { lines.append("stdout:\n" + diagnostic.standardOutput) }
                 if !diagnostic.standardError.isEmpty { lines.append("stderr:\n" + diagnostic.standardError) }
-                if diagnostic.outputTruncated { lines.append(String(localized: "输出已截断：每个输出通道最多保留前 128 KiB。")) }
+                if diagnostic.outputTruncated { lines.append(AppLocalized("输出已截断：每个输出通道最多保留前 128 KiB。")) }
             } else if let result, !result.output.isEmpty {
                 lines.append(result.output)
             }
@@ -86,7 +86,7 @@ final class HelperExecutionLogStore: ObservableObject {
 
     func exportText() -> String {
         let notice = discardedCount > 0
-            ? String(format: String(localized: "较早的 %d 条记录已移出本次会话。"), discardedCount) + "\n\n" : ""
+            ? String(format: AppLocalized("较早的 %d 条记录已移出本次会话。"), discardedCount) + "\n\n" : ""
         return notice + entries.map(\.exportText).joined(separator: "\n\n")
     }
 }

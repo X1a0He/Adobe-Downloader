@@ -1,15 +1,17 @@
 import SwiftUI
 
 struct BeautifulSearchField: View {
+    @StorageValue(\.interfaceLanguage) private var interfaceLanguage
     @Binding var text: String
     
     var body: some View {
+        let _ = interfaceLanguage
         HStack(spacing: 8) {
             Image(systemName: "magnifyingglass")
                 .font(.system(size: 13))
                 .foregroundColor(.secondary.opacity(0.7))
             
-            TextField("搜索应用", text: $text)
+            TextField(AppLocalized("搜索应用"), text: $text)
                 .textFieldStyle(PlainTextFieldStyle())
                 .font(.system(size: 13))
             
@@ -85,6 +87,7 @@ struct FlatSegmentedPickerStyle: ViewModifier {
 }
 
 struct ToolbarView: ToolbarContent {
+    @StorageValue(\.interfaceLanguage) private var interfaceLanguage
     @Binding var currentApiVersion: String
     @Binding var showDownloadManager: Bool
     let isRefreshing: Bool
@@ -93,9 +96,10 @@ struct ToolbarView: ToolbarContent {
     let openSettings: () -> Void
     
     var body: some ToolbarContent {
+        let _ = interfaceLanguage
         ToolbarItemGroup(placement: .navigation) {
             ToolbarAPIVersionPicker(currentApiVersion: $currentApiVersion)
-            .help("切换 API 版本")
+            .help(AppLocalized("切换 API 版本"))
             .disabled(isRefreshing)
         }
         
@@ -107,18 +111,18 @@ struct ToolbarView: ToolbarContent {
             Button(action: { showDownloadManager.toggle() }) {
                 ToolbarDownloadButtonLabel(downloadTasksCount: downloadTasksCount)
             }
-            .help(downloadTasksCount > 0 ? "打开下载管理（\(downloadTasksCount) 个任务）" : "打开下载管理")
+            .help(downloadTasksCount > 0 ? AppLocalized("打开下载管理（\(downloadTasksCount) 个任务）") : AppLocalized("打开下载管理"))
             
             Button(action: onRefresh) {
                 ToolbarRefreshButtonLabel(isRefreshing: isRefreshing)
             }
-            .help(isRefreshing ? "正在刷新产品列表" : "刷新产品列表")
+            .help(isRefreshing ? AppLocalized("正在刷新产品列表") : AppLocalized("刷新产品列表"))
             .disabled(isRefreshing)
             
             Button(action: openSettings) {
-                Label("设置", systemImage: "gearshape")
+                Label(AppLocalized("设置"), systemImage: "gearshape")
             }
-            .help("打开设置")
+            .help(AppLocalized("打开设置"))
         }
     }
 }
@@ -215,27 +219,31 @@ private struct ToolbarTitleView: View {
 }
 
 private struct ToolbarRefreshButtonLabel: View {
+    @StorageValue(\.interfaceLanguage) private var interfaceLanguage
     let isRefreshing: Bool
     
     var body: some View {
+        let _ = interfaceLanguage
         HStack(spacing: 6) {
             if isRefreshing {
                 ProgressView()
                     .controlSize(.small)
-                Text("刷新中")
+                Text(AppLocalized("刷新中"))
             } else {
-                Label("刷新", systemImage: "arrow.clockwise")
+                Label(AppLocalized("刷新"), systemImage: "arrow.clockwise")
             }
         }
     }
 }
 
 private struct ToolbarDownloadButtonLabel: View {
+    @StorageValue(\.interfaceLanguage) private var interfaceLanguage
     let downloadTasksCount: Int
     
     var body: some View {
+        let _ = interfaceLanguage
         HStack(spacing: 6) {
-            Label("下载管理", systemImage: downloadTasksCount > 0 ? "arrow.down.circle.fill" : "arrow.down.circle")
+            Label(AppLocalized("下载管理"), systemImage: downloadTasksCount > 0 ? "arrow.down.circle.fill" : "arrow.down.circle")
                 .foregroundStyle(downloadTasksCount > 0 ? Color.accentColor : Color.primary)
 
             if downloadTasksCount > 0 {

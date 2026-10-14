@@ -25,11 +25,11 @@ class PrivilegedHelperAdapter: NSObject, ObservableObject {
         var description: String {
             switch self {
             case .connected:
-                return String(localized: "已连接")
+                return AppLocalized("已连接")
             case .disconnected:
-                return String(localized: "未连接")
+                return AppLocalized("未连接")
             case .connecting:
-                return String(localized: "正在连接")
+                return AppLocalized("正在连接")
             }
         }
     }

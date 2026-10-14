@@ -7,11 +7,11 @@ private enum PackageListFilter: String, CaseIterable, Identifiable {
 
     var title: String {
         switch self {
-        case .all: return String(localized: "全部")
-        case .waiting: return String(localized: "等待")
-        case .downloading: return String(localized: "下载中")
-        case .completed: return String(localized: "已完成")
-        case .other: return String(localized: "其他")
+        case .all: return AppLocalized("全部")
+        case .waiting: return AppLocalized("等待")
+        case .downloading: return AppLocalized("下载中")
+        case .completed: return AppLocalized("已完成")
+        case .other: return AppLocalized("其他")
         }
     }
 
@@ -27,6 +27,7 @@ private enum PackageListFilter: String, CaseIterable, Identifiable {
 }
 
 struct TaskCardPackageList: View {
+    @StorageValue(\.interfaceLanguage) private var interfaceLanguage
     let task: NewDownloadTask
     let onRemovePackage: (String, UUID) -> Void
     let onRemoveDependency: (String) -> Void
@@ -42,6 +43,7 @@ struct TaskCardPackageList: View {
     }
 
     var body: some View {
+        let _ = interfaceLanguage
         VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 8) {
                 if hasLotsOfPackages {
@@ -62,9 +64,9 @@ struct TaskCardPackageList: View {
             VStack(alignment: .leading, spacing: 8) {
                 if isFilteringActive && !task.dependenciesToDownload.contains(where: { !visiblePackages(in: $0).isEmpty }) {
                     VStack(spacing: 8) {
-                        Text(String(localized: "没有匹配的包"))
+                        Text(AppLocalized("没有匹配的包"))
                             .foregroundColor(.secondary)
-                        Button(String(localized: "重置筛选")) {
+                        Button(AppLocalized("重置筛选")) {
                             searchText = ""
                             activeFilter = .all
                         }
@@ -163,7 +165,7 @@ struct TaskCardPackageList: View {
         HStack(spacing: 6) {
             Image(systemName: "magnifyingglass")
                 .foregroundColor(.secondary)
-            TextField(String(localized: "搜索包名、版本、类型"), text: $searchText)
+            TextField(AppLocalized("搜索包名、版本、类型"), text: $searchText)
                 .textFieldStyle(.plain)
             if !searchText.isEmpty {
                 Button(action: { searchText = "" }) {
@@ -171,7 +173,7 @@ struct TaskCardPackageList: View {
                         .foregroundColor(.secondary)
                 }
                 .buttonStyle(.plain)
-                .help(String(localized: "清空搜索"))
+                .help(AppLocalized("清空搜索"))
             }
         }
         .font(.system(size: 11))
@@ -202,15 +204,15 @@ struct TaskCardPackageList: View {
         Button(action: {
             NSPasteboard.general.clearContents()
             NSPasteboard.general.setString(generateAllProductsInfo(), forType: .string)
-            showCopyToast(String(localized: "已复制所有信息"))
+            showCopyToast(AppLocalized("已复制所有信息"))
         }) {
-            Label(String(localized: "复制清单"), systemImage: "doc.on.clipboard")
+            Label(AppLocalized("复制清单"), systemImage: "doc.on.clipboard")
                 .font(.system(size: 11, weight: .medium))
                 .fixedSize()
         }
         .buttonStyle(.bordered)
         .controlSize(.small)
-        .help(String(localized: "复制所有信息"))
+        .help(AppLocalized("复制所有信息"))
     }
 
     private func showCopyToast(_ message: String) {
@@ -239,7 +241,7 @@ struct TaskCardPackageList: View {
                 NSWorkspace.shared.selectFile(fileURL.path, inFileViewerRootedAtPath: tasksDirectory.path)
             }
         }) {
-            Label(String(localized: "持久化文件"), systemImage: "doc.text.magnifyingglass")
+            Label(AppLocalized("持久化文件"), systemImage: "doc.text.magnifyingglass")
                 .font(.system(size: 11, weight: .medium))
                 .fixedSize()
         }
@@ -272,11 +274,13 @@ struct TaskCardPackageList: View {
 }
 
 private struct PackageFilterChip: View {
+    @StorageValue(\.interfaceLanguage) private var interfaceLanguage
     let filter: PackageListFilter
     let isActive: Bool
     let onTap: () -> Void
 
     var body: some View {
+        let _ = interfaceLanguage
         Button(action: onTap) {
             HStack(spacing: 3) {
                 Image(systemName: filter.icon)
@@ -301,6 +305,7 @@ private struct PackageFilterChip: View {
 }
 
 private struct PackageProductRow: View {
+    @StorageValue(\.interfaceLanguage) private var interfaceLanguage
     let task: NewDownloadTask
     @ObservedObject var product: DependenciesToDownload
     let visiblePackages: [Package]
@@ -329,13 +334,14 @@ private struct PackageProductRow: View {
     private var platformName: String {
         switch product.platform {
         case "macarm64": return "Apple Silicon"
-        case "macuniversal": return String(localized: "通用")
+        case "macuniversal": return AppLocalized("通用")
         case "osx10", "osx10-64": return "Intel"
         default: return product.platform
         }
     }
 
     var body: some View {
+        let _ = interfaceLanguage
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 8) {
                 Button(action: onToggle) {
@@ -343,7 +349,7 @@ private struct PackageProductRow: View {
                 }
                 .buttonStyle(.plain)
                 .disabled(isForceExpanded)
-                .accessibilityValue(effectivelyExpanded ? String(localized: "已展开") : String(localized: "已收起"))
+                .accessibilityValue(effectivelyExpanded ? AppLocalized("已展开") : AppLocalized("已收起"))
 
                 if canRemove {
                     Button(action: { showRemoveConfirm = true }) {
@@ -354,7 +360,7 @@ private struct PackageProductRow: View {
                             .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
-                    .help(String(localized: "移除本次增量依赖"))
+                    .help(AppLocalized("移除本次增量依赖"))
                 }
             }
             .padding(10)
@@ -387,13 +393,13 @@ private struct PackageProductRow: View {
             RoundedRectangle(cornerRadius: 10)
                 .strokeBorder(isMainProduct ? Color.blue.opacity(0.25) : Color.secondary.opacity(0.15), lineWidth: 1)
         )
-        .alert(String(localized: "确认移除"), isPresented: $showRemoveConfirm) {
-            Button(String(localized: "取消"), role: .cancel) { }
-            Button(String(localized: "移除"), role: .destructive) {
+        .alert(AppLocalized("确认移除"), isPresented: $showRemoveConfirm) {
+            Button(AppLocalized("取消"), role: .cancel) { }
+            Button(AppLocalized("移除"), role: .destructive) {
                 onRemove()
             }
         } message: {
-            Text(String(localized: "移除该依赖中本次增量新增的包吗？已存在的包会保留。"))
+            Text(AppLocalized("移除该依赖中本次增量新增的包吗？已存在的包会保留。"))
         }
     }
 
@@ -418,7 +424,7 @@ private struct PackageProductRow: View {
                         .monospacedDigit()
                 }
                 HStack(spacing: 6) {
-                    Text(isMainProduct ? String(localized: "主产品") : String(localized: "依赖组件"))
+                    Text(isMainProduct ? AppLocalized("主产品") : AppLocalized("依赖组件"))
                         .foregroundColor(isMainProduct ? .blue : .secondary)
                     if !platformName.isEmpty {
                         Text("·")
@@ -435,7 +441,7 @@ private struct PackageProductRow: View {
             VStack(alignment: .trailing, spacing: 4) {
                 Text(aggregatedSizeText)
                     .font(.system(size: 12, weight: .medium))
-                Text(String(localized: "已完成 \(product.completedPackages) / \(product.totalPackages)"))
+                Text(AppLocalized("已完成 \(product.completedPackages) / \(product.totalPackages)"))
                     .font(.system(size: 10))
                     .foregroundColor(.secondary)
             }
@@ -452,7 +458,7 @@ private struct PackageProductRow: View {
         Button(action: {
             NSPasteboard.general.clearContents()
             NSPasteboard.general.setString(product.buildGuid, forType: .string)
-            onCopyFeedback(String(localized: "已复制 buildGuid"))
+            onCopyFeedback(AppLocalized("已复制 buildGuid"))
         }) {
             HStack(spacing: 8) {
                 Text("BuildGuid")
@@ -472,12 +478,13 @@ private struct PackageProductRow: View {
         }
         .buttonStyle(.plain)
         .help(product.buildGuid)
-        .accessibilityLabel(String(localized: "复制 buildGuid"))
+        .accessibilityLabel(AppLocalized("复制 buildGuid"))
         .accessibilityValue(product.buildGuid)
     }
 }
 
 private struct PackageItemRow: View {
+    @StorageValue(\.interfaceLanguage) private var interfaceLanguage
     @ObservedObject var package: Package
     let canRemove: Bool
     let onRemove: () -> Void
@@ -489,6 +496,7 @@ private struct PackageItemRow: View {
     }
 
     var body: some View {
+        let _ = interfaceLanguage
         VStack(alignment: .leading, spacing: 6) {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
                 Text(package.fullPackageName)
@@ -512,7 +520,7 @@ private struct PackageItemRow: View {
                             .contentShape(Rectangle())
                     }
                     .buttonStyle(.plain)
-                    .help(String(localized: "移除本次增量包"))
+                    .help(AppLocalized("移除本次增量包"))
                 }
             }
             .frame(minHeight: 20)
@@ -521,14 +529,14 @@ private struct PackageItemRow: View {
                 if !package.type.isEmpty {
                     let isCore = package.type.lowercased() == "core"
                     DownloadPackageBadge(
-                        title: isCore ? String(localized: "核心包") : String(localized: "非核心包"),
+                        title: isCore ? AppLocalized("核心包") : AppLocalized("非核心包"),
                         icon: isCore ? "cube.fill" : "cube.transparent",
                         tint: isCore ? .purple : .teal
                     )
                     .help(package.type)
                 }
                 DownloadPackageBadge(
-                    title: package.isRequired ? String(localized: "必需") : String(localized: "可选"),
+                    title: package.isRequired ? AppLocalized("必需") : AppLocalized("可选"),
                     icon: package.isRequired ? "lock.fill" : "slider.horizontal.3",
                     tint: package.isRequired ? .orange : .blue
                 )
@@ -574,12 +582,12 @@ private struct PackageItemRow: View {
                         .help(message)
                     Spacer(minLength: 0)
                     Button(action: { copyPackageFailureInfo(message) }) {
-                        Label(String(localized: "复制错误"), systemImage: "doc.on.doc")
+                        Label(AppLocalized("复制错误"), systemImage: "doc.on.doc")
                             .font(.system(size: 10))
                     }
                     .buttonStyle(.borderless)
                     .fixedSize()
-                    .help(String(localized: "复制错误信息"))
+                    .help(AppLocalized("复制错误信息"))
                 }
                 .foregroundColor(.red)
             }
@@ -587,13 +595,13 @@ private struct PackageItemRow: View {
         .padding(.horizontal, 12)
         .padding(.vertical, 8)
         .background(package.status == .downloading ? Color.blue.opacity(0.04) : Color.clear)
-        .alert(String(localized: "确认移除"), isPresented: $showRemoveConfirm) {
-            Button(String(localized: "取消"), role: .cancel) { }
-            Button(String(localized: "移除"), role: .destructive) {
+        .alert(AppLocalized("确认移除"), isPresented: $showRemoveConfirm) {
+            Button(AppLocalized("取消"), role: .cancel) { }
+            Button(AppLocalized("移除"), role: .destructive) {
                 onRemove()
             }
         } message: {
-            Text(String(localized: "移除该增量包并重新计算任务进度吗？"))
+            Text(AppLocalized("移除该增量包并重新计算任务进度吗？"))
         }
     }
 
@@ -601,26 +609,26 @@ private struct PackageItemRow: View {
     private var packageStatusView: some View {
         switch package.status {
         case .waiting:
-            Label(String(localized: "等待中"), systemImage: "hourglass")
+            Label(AppLocalized("等待中"), systemImage: "hourglass")
                 .font(.system(size: 10))
                 .foregroundColor(.secondary)
         case .downloading:
-            Label(package.downloadPhase == .validating ? String(localized: "正在校验下载文件")
-                    : (package.hasUnknownDownloadSize ? String(localized: "未知") : "\(Int(clampedProgress * 100))%"),
+            Label(package.downloadPhase == .validating ? AppLocalized("正在校验下载文件")
+                    : (package.hasUnknownDownloadSize ? AppLocalized("未知") : "\(Int(clampedProgress * 100))%"),
                   systemImage: package.downloadPhase == .validating ? "checkmark.shield" : "arrow.down.circle.fill")
                 .font(.system(size: 10, weight: .semibold))
                 .foregroundColor(.blue)
                 .monospacedDigit()
         case .completed:
-            Label(String(localized: "已完成"), systemImage: "checkmark.circle.fill")
+            Label(AppLocalized("已完成"), systemImage: "checkmark.circle.fill")
                 .font(.system(size: 10))
                 .foregroundColor(.green)
         case .failed:
-            Label(String(localized: "失败"), systemImage: "xmark.circle.fill")
+            Label(AppLocalized("失败"), systemImage: "xmark.circle.fill")
                 .font(.system(size: 10, weight: .medium))
                 .foregroundColor(.red)
         case .paused:
-            Label(String(localized: "已暂停"), systemImage: "pause.circle.fill")
+            Label(AppLocalized("已暂停"), systemImage: "pause.circle.fill")
                 .font(.system(size: 10))
                 .foregroundColor(.orange)
         }
@@ -628,22 +636,22 @@ private struct PackageItemRow: View {
 
     private func copyPackageFailureInfo(_ message: String) {
         var lines: [String] = []
-        lines.append("包名: \(package.fullPackageName)")
-        lines.append("版本: \(package.packageVersion)")
-        lines.append("类型: \(package.type)")
-        lines.append("大小: \(package.formattedSize)")
-        lines.append("下载地址: \(package.downloadURL)")
+        lines.append(AppLocalized("包名: \(package.fullPackageName)"))
+        lines.append(AppLocalized("版本: \(package.packageVersion)"))
+        lines.append(AppLocalized("类型: \(package.type)"))
+        lines.append(AppLocalized("大小: \(package.formattedSize)"))
+        lines.append(AppLocalized("下载地址: \(package.downloadURL)"))
         if !package.manifestURL.isEmpty {
             lines.append("Manifest: \(package.manifestURL)")
         }
-        lines.append("错误: \(message)")
+        lines.append(AppLocalized("错误: \(message)"))
         if let error = package.lastError {
-            lines.append("错误详情: \(error.localizedDescription)")
+            lines.append(AppLocalized("错误详情: \(error.localizedDescription)"))
         }
 
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(lines.joined(separator: "\n"), forType: .string)
-        onCopyFeedback(String(localized: "已复制错误信息"))
+        onCopyFeedback(AppLocalized("已复制错误信息"))
     }
 }
 

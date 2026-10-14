@@ -1,20 +1,22 @@
 import SwiftUI
 
 struct BannerView: View {
+    @StorageValue(\.interfaceLanguage) private var interfaceLanguage
     var body: some View {
+        let _ = interfaceLanguage
         HStack {
             Spacer()
             
             ViewThatFits(in: .horizontal) {
                 HStack(spacing: 6) {
                     Image(systemName: "checkmark.seal")
-                    Text("Adobe Downloader 完全开源免费")
+                    Text(AppLocalized("Adobe Downloader 完全开源免费"))
                     Link("GitHub", destination: URL(string: "https://github.com/X1a0He/Adobe-Downloader")!)
                 }
                 
                 HStack(spacing: 6) {
                     Image(systemName: "seal")
-                    Text("开源免费")
+                    Text(AppLocalized("开源免费"))
                     Link("GitHub", destination: URL(string: "https://github.com/X1a0He/Adobe-Downloader")!)
                 }
                 

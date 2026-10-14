@@ -10,6 +10,13 @@ import SwiftUI
 final class StorageData: ObservableObject {
     static let shared = StorageData()
 
+    @Published var interfaceLanguage: String {
+        didSet {
+            UserDefaults.standard.set(interfaceLanguage, forKey: "interfaceLanguage")
+            NotificationCenter.default.post(name: .storageDidChange, object: nil)
+        }
+    }
+
     @Published var installedHelperBuild: String {
         didSet {
             UserDefaults.standard.set(installedHelperBuild, forKey: "InstalledHelperBuild")
@@ -120,6 +127,7 @@ final class StorageData: ObservableObject {
             self.isFirstLaunch = UserDefaults.standard.bool(forKey: isFirstLaunchKey)
         }
         
+        self.interfaceLanguage = UserDefaults.standard.string(forKey: "interfaceLanguage") ?? AppInterfaceLanguage.system.rawValue
         self.installedHelperBuild = UserDefaults.standard.string(forKey: "InstalledHelperBuild") ?? "0"
         self.downloadAppleSilicon = UserDefaults.standard.bool(forKey: "downloadAppleSilicon")
         self.useDefaultLanguage = UserDefaults.standard.bool(forKey: "useDefaultLanguage")

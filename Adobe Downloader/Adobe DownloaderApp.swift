@@ -8,10 +8,11 @@ struct Adobe_DownloaderApp: App {
     @State private var showLanguagePicker = false
     @State private var showSettingsView = false
 
-    private var storage: StorageData { StorageData.shared }
+    @StateObject private var storage = StorageData.shared
     private let updaterController: SPUStandardUpdaterController
 
     init() {
+        let storage = StorageData.shared
         AppDebugMode.consumeLaunchFlag()
         HDPIMHeadlessInstallRunner.runIfNeeded()
 
@@ -29,7 +30,7 @@ struct Adobe_DownloaderApp: App {
         }
 
         if storage.isFirstLaunch {
-            initializeFirstLaunch()
+            initializeFirstLaunch(storage: storage)
         }
 
         if storage.apiVersion == "6" {
@@ -37,7 +38,7 @@ struct Adobe_DownloaderApp: App {
         }
     }
     
-    private func initializeFirstLaunch() {
+    private func initializeFirstLaunch(storage: StorageData) {
         storage.downloadAppleSilicon = AppStatics.isAppleSilicon
         storage.confirmRedownload = true
         
@@ -82,19 +83,22 @@ struct Adobe_DownloaderApp: App {
                     }
                     .sheet(isPresented: $showSettingsView) {
                         CustomSettingsView(updater: updaterController.updater)
+                            .environment(\.locale, storage.interfaceLocale)
                             .interactiveDismissDisabled(false)
                     }
             }
+            .environment(\.locale, storage.interfaceLocale)
         }
         .windowStyle(.hiddenTitleBar)
         .windowResizabilityContentSize()
         .commands {
             CommandGroup(after: .appInfo) {
                 CheckForUpdatesView(updater: updaterController.updater)
+                    .environment(\.locale, storage.interfaceLocale)
                 
                 Divider()
                 
-                Button("设置...") {
+                Button(AppLocalized("设置...")) {
                     showSettingsView = true
                 }
                 .keyboardShortcut(",", modifiers: .command)

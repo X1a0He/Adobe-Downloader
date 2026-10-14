@@ -6,15 +6,17 @@
 import SwiftUI
 
 struct BeautifulLanguageSearchField: View {
+    @StorageValue(\.interfaceLanguage) private var interfaceLanguage
     @Binding var text: String
     
     var body: some View {
+        let _ = interfaceLanguage
         HStack(spacing: 8) {
             Image(systemName: "magnifyingglass")
                 .font(.system(size: 13))
                 .foregroundColor(.secondary.opacity(0.7))
             
-            TextField("搜索语言", text: $text)
+            TextField(AppLocalized("搜索语言"), text: $text)
                 .textFieldStyle(PlainTextFieldStyle())
                 .font(.system(size: 13))
             
@@ -41,6 +43,7 @@ struct BeautifulLanguageSearchField: View {
 }
 
 struct LanguagePickerView: View {
+    @StorageValue(\.interfaceLanguage) private var interfaceLanguage
     let languages: [(code: String, name: String)]
     let onLanguageSelected: (String) -> Void
     @Environment(\.dismiss) private var dismiss
@@ -60,13 +63,14 @@ struct LanguagePickerView: View {
     }
     
     var body: some View {
+        let _ = interfaceLanguage
         VStack(spacing: 0) {
             HStack {
-                Text("选择安装语言")
+                Text(AppLocalized("选择安装语言"))
                     .font(.system(size: 16, weight: .medium))
                     .foregroundColor(.primary.opacity(0.9))
                 Spacer()
-                Button("取消") {
+                Button(AppLocalized("取消")) {
                     dismiss()
                 }
                 .font(.system(size: 14))
@@ -132,10 +136,10 @@ struct LanguagePickerView: View {
                     }
                     
                     VStack(spacing: 8) {
-                        Text("未找到语言")
+                        Text(AppLocalized("未找到语言"))
                             .font(.system(size: 16, weight: .medium))
                         
-                        Text("尝试其他搜索关键词")
+                        Text(AppLocalized("尝试其他搜索关键词"))
                             .font(.system(size: 14))
                             .foregroundColor(.secondary)
                     }

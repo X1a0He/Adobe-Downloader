@@ -136,13 +136,13 @@ class HDPIMInstallPipeline {
         backedUpPaths.removeAll()
         defer { cleanupTemporaryExtractDirectories() }
 
-        progressHandler(0.0, String(localized: "正在解析 driver.xml..."))
+        progressHandler(0.0, AppLocalized("正在解析 driver.xml..."))
         let (productInfo, requestInfo): (ProductInfoFromDriver, [String: String])
         do {
             (productInfo, requestInfo) = try parseDriverXML(at: productDir)
-            log(String(format: String(localized: "[HDPIM Pipeline] driver.xml 解析成功: sapCode=%@, deps=%d"), productInfo.sapCode, productInfo.dependencies.count))
+            log(String(format: AppLocalized("[HDPIM Pipeline] driver.xml 解析成功: sapCode=%@, deps=%d"), productInfo.sapCode, productInfo.dependencies.count))
         } catch {
-            log(String(format: String(localized: "[HDPIM Pipeline] driver.xml 解析失败: %@"), String(describing: error)))
+            log(String(format: AppLocalized("[HDPIM Pipeline] driver.xml 解析失败: %@"), String(describing: error)))
             throw error
         }
 
@@ -155,7 +155,7 @@ class HDPIMInstallPipeline {
         propertyTable.mergeFromRequestInfo(requestInfo)
         propertyTable.setProperty("workflowType", "install")
 
-        progressHandler(0.05, String(localized: "正在收集包信息..."))
+        progressHandler(0.05, AppLocalized("正在收集包信息..."))
         try HDPIMDatabase.shared.open()
         let databaseAvailable = true
         defer { HDPIMDatabase.shared.close() }
@@ -172,11 +172,11 @@ class HDPIMInstallPipeline {
         )
 
         guard !collectedPackages.isEmpty else {
-            progressHandler(1.0, String(localized: "没有需要安装的包"))
+            progressHandler(1.0, AppLocalized("没有需要安装的包"))
             return
         }
 
-        log(String(format: String(localized: "[HDPIM Pipeline] 收集到 %d 个候选包: %@"), collectedPackages.count, String(describing: collectedPackages.map { $0.packageName })))
+        log(String(format: AppLocalized("[HDPIM Pipeline] 收集到 %d 个候选包: %@"), collectedPackages.count, String(describing: collectedPackages.map { $0.packageName })))
 
         let installedProductIdentities = HDPIMDatabase.shared.getInstalledProductIdentitySet()
 
@@ -205,7 +205,7 @@ class HDPIMInstallPipeline {
         )
 
         guard !selectedPackages.isEmpty else {
-            progressHandler(1.0, String(localized: "当前状态已满足安装要求"))
+            progressHandler(1.0, AppLocalized("当前状态已满足安装要求"))
             return
         }
 
@@ -233,9 +233,9 @@ class HDPIMInstallPipeline {
                 }
             }
         }
-        log(String(format: String(localized: "[HDPIM Pipeline] 本次实际需要安装 %d 个包: %@"), packagesToInstall.count, String(describing: packagesToInstall.map { $0.packageName })))
+        log(String(format: AppLocalized("[HDPIM Pipeline] 本次实际需要安装 %d 个包: %@"), packagesToInstall.count, String(describing: packagesToInstall.map { $0.packageName })))
 
-        progressHandler(0.075, String(localized: "正在校验安装包完整性..."))
+        progressHandler(0.075, AppLocalized("正在校验安装包完整性..."))
         try validatePackageArchives(plans.filter { $0.mode.requiresExtraction }.map(\.package), cancellationCheck: cancellationCheck)
         metrics.finishStage("材料补齐与完整性校验")
 
@@ -245,10 +245,10 @@ class HDPIMInstallPipeline {
             return try preparePreviousCommands(for: plan, context: context)
         }
 
-        progressHandler(0.08, String(localized: "正在检查冲突进程..."))
+        progressHandler(0.08, AppLocalized("正在检查冲突进程..."))
         try checkConflictingProcesses(packages: packagesToInstall)
 
-        progressHandler(0.1, String(localized: "正在分析安装状态..."))
+        progressHandler(0.1, AppLocalized("正在分析安装状态..."))
         let preparedPackages = try await preparePackages(
             plans, propertyTable: propertyTable, requestInfo: requestInfo,
             allowNetwork: allowNetwork, packageProgress: packageProgress, progressHandler: progressHandler
@@ -357,8 +357,8 @@ class HDPIMInstallPipeline {
 
                 switch executionMode {
                 case .databaseOnly(let installedPackage):
-                    log(String(format: String(localized: "[HDPIM Pipeline] 包 %@ 已存在相同版本 %@，按官方链路仅补数据库记录"), pkg.packageName, installedPackage.packageVersion))
-                    progressHandler(baseProgress + packageSpan, String(format: String(localized: "正在复用 %@ 的已安装包信息..."), pkg.packageName))
+                    log(String(format: AppLocalized("[HDPIM Pipeline] 包 %@ 已存在相同版本 %@，按官方链路仅补数据库记录"), pkg.packageName, installedPackage.packageVersion))
+                    progressHandler(baseProgress + packageSpan, String(format: AppLocalized("正在复用 %@ 的已安装包信息..."), pkg.packageName))
                     persistenceArtifacts = makePersistenceArtifacts(from: installedPackage)
 
                 case .full(_), .delta(_, _):
@@ -384,7 +384,7 @@ class HDPIMInstallPipeline {
 
                     switch executionMode {
                     case .full(_):
-                        progressHandler(baseProgress, String(format: String(localized: "正在全量安装 %@..."), pkg.packageName))
+                        progressHandler(baseProgress, String(format: AppLocalized("正在全量安装 %@..."), pkg.packageName))
                         let commandState = CommandProgressState()
 
                         let result = try await helper.installPackage(
@@ -414,16 +414,18 @@ class HDPIMInstallPipeline {
                                 let percent = Int(ratio * 100)
                                 let coarseStep = percent / 2
 
+                                let isProcessingCommand = cmdName.contains("正在处理:") ||
+                                    cmdName.localizedCaseInsensitiveContains("processing:")
                                 let status: String
-                                if cmdName.contains("正在处理:") {
+                                if isProcessingCommand {
                                     status = "[\(pkg.packageName)] \(cmdName)"
                                 } else {
-                                    status = String(format: String(localized: "正在安装 %@... %d%%"), pkg.packageName, percent)
+                                    status = String(format: AppLocalized("正在安装 %@... %d%%"), pkg.packageName, percent)
                                 }
 
                                 guard commandState.lastReportedStatus != status
                                         || commandState.lastReportedStep != coarseStep
-                                        || cmdName.contains("正在处理:")
+                                        || isProcessingCommand
                                         || percent == 100 else {
                                     return
                                 }
@@ -456,7 +458,7 @@ class HDPIMInstallPipeline {
                                 let coarseStep = percent / 2
                                 let status = message.contains(pkg.packageName)
                                     ? message
-                                    : String(format: String(localized: "正在增量更新 %@... %d%%"), pkg.packageName, percent)
+                                    : String(format: AppLocalized("正在增量更新 %@... %d%%"), pkg.packageName, percent)
 
                                 guard deltaProgressState.lastReportedStatus != status
                                         || deltaProgressState.lastReportedStep != coarseStep
@@ -553,7 +555,7 @@ class HDPIMInstallPipeline {
                 try HDPIMDatabase.shared.recordInstalledProducts(productContexts)
             }
 
-            progressHandler(0.93, String(localized: "正在注册卸载条目..."))
+            progressHandler(0.93, AppLocalized("正在注册卸载条目..."))
             HDPIMARPCompletion.createARPEntries(
                 for: productContexts,
                 progressHandler: progressHandler,
@@ -573,20 +575,20 @@ class HDPIMInstallPipeline {
             transactionOpen = false
             metrics.finishStage("数据库提交与注册")
 
-            progressHandler(0.95, String(localized: "正在清理临时文件..."))
+            progressHandler(0.95, AppLocalized("正在清理临时文件..."))
             do {
                 try await backup.cleanup()
             } catch {
-                log(String(format: String(localized: "[HDPIM Pipeline] 清理备份目录失败: %@"), error.localizedDescription))
+                log(String(format: AppLocalized("[HDPIM Pipeline] 清理备份目录失败: %@"), error.localizedDescription))
             }
 
             metrics.finishStage("清理恢复备份")
 
-            progressHandler(1.0, String(localized: "安装完成"))
+            progressHandler(1.0, AppLocalized("安装完成"))
 
         } catch {
             let errorDetail = "[\(packagesToInstall[min(installedCount, packagesToInstall.count - 1)].packageName)] \(error.localizedDescription)"
-            progressHandler(0.0, String(format: String(localized: "安装失败: %@，正在回滚..."), errorDetail))
+            progressHandler(0.0, String(format: AppLocalized("安装失败: %@，正在回滚..."), errorDetail))
 
             var recoveryErrors: [String] = []
             var filesRestored = !startedSystemWrites
@@ -633,7 +635,7 @@ class HDPIMInstallPipeline {
         let driverPath = productDir.appendingPathComponent("driver.xml")
 
         guard FileManager.default.fileExists(atPath: driverPath.path) else {
-            throw HDPIMInstallError.pimxNotFound(String(format: String(localized: "driver.xml 不存在: %@"), driverPath.path))
+            throw HDPIMInstallError.pimxNotFound(String(format: AppLocalized("driver.xml 不存在: %@"), driverPath.path))
         }
 
         let xmlData = try Data(contentsOf: driverPath)
@@ -782,10 +784,10 @@ class HDPIMInstallPipeline {
             let productInstallDir: String
             if !appInfo.installDir.isEmpty {
                 productInstallDir = try propertyTable.expandPathForInstallation(appInfo.installDir)
-                log(String(format: String(localized: "[HDPIM Pipeline] 产品 %@ InstallDir: %@ → %@"), sapCode, appInfo.installDir, productInstallDir))
+                log(String(format: AppLocalized("[HDPIM Pipeline] 产品 %@ InstallDir: %@ → %@"), sapCode, appInfo.installDir, productInstallDir))
             } else {
                 productInstallDir = propertyTable.getProperty("INSTALLDIR") ?? "/Applications"
-                log(String(format: String(localized: "[HDPIM Pipeline] 产品 %@ 无 InstallDir，使用默认: %@"), sapCode, productInstallDir))
+                log(String(format: AppLocalized("[HDPIM Pipeline] 产品 %@ 无 InstallDir，使用默认: %@"), sapCode, productInstallDir))
             }
 
             guard productInstallDir.hasPrefix("/"), !productInstallDir.contains("\0"),
@@ -892,11 +894,11 @@ class HDPIMInstallPipeline {
                 throw HDPIMInstallError.cancelled
             }
             throw HDPIMInstallError.extractionFailed(
-                String(format: String(localized: "安装包完整性校验失败: %@。%@。请返回下载管理继续下载或重新校验后再安装"), package.packageName, error.localizedDescription)
+                String(format: AppLocalized("安装包完整性校验失败: %@。%@。请返回下载管理继续下载或重新校验后再安装"), package.packageName, error.localizedDescription)
             )
         }
 
-        log(String(format: String(localized: "[HDPIM Pipeline] 安装包完整性校验通过: %@"), package.packageName))
+        log(String(format: AppLocalized("[HDPIM Pipeline] 安装包完整性校验通过: %@"), package.packageName))
     }
 
     private func makeInstallPlan(for package: PackageToInstall, requestInfo: [String: String]) throws -> HDPIMPlannedPackage {
@@ -1025,7 +1027,7 @@ class HDPIMInstallPipeline {
         } catch {
             try HDPIMOperationContext.checkCancellation()
             guard !modifiersOnly else { throw error }
-            let warning = String(format: String(localized: "[HDPIM Pipeline] Warning: 旧卸载材料不可用，跳过旧清理并继续全量安装，可能保留旧文件。产品=%@ %@，包=%@，旧材料=%@，安装源=%@"),
+            let warning = String(format: AppLocalized("[HDPIM Pipeline] Warning: 旧卸载材料不可用，跳过旧清理并继续全量安装，可能保留旧文件。产品=%@ %@，包=%@，旧材料=%@，安装源=%@"),
                                  snapshot.sapCode, snapshot.productVersion, snapshot.packageName,
                                  snapshot.uninstallPIMXPath ?? "", plan.package.zipPath.path)
             if let logHandler { logHandler(warning) } else { print(warning) }
@@ -1058,7 +1060,7 @@ class HDPIMInstallPipeline {
         } catch let error as HDPIMRepairResources.MissingStoredProgram {
             try HDPIMOperationContext.checkCancellation()
             guard !modifiersOnly else { throw error }
-            let warning = String(format: String(localized: "[HDPIM Pipeline] Warning: 旧卸载或恢复程序不存在，跳过该包旧动作并继续全量安装，可能保留旧文件或注册信息。产品=%@ %@，包=%@，缺失程序=%@，安装源=%@"),
+            let warning = String(format: AppLocalized("[HDPIM Pipeline] Warning: 旧卸载或恢复程序不存在，跳过该包旧动作并继续全量安装，可能保留旧文件或注册信息。产品=%@ %@，包=%@，缺失程序=%@，安装源=%@"),
                                  snapshot.sapCode, snapshot.productVersion, snapshot.packageName,
                                  error.path, plan.package.zipPath.path)
             if let logHandler { logHandler(warning) } else { print(warning) }
@@ -1321,7 +1323,7 @@ class HDPIMInstallPipeline {
             cancellationCheck: cancellationCheck
         )
         guard !extractionResult.pimxURLs.isEmpty else {
-            throw HDPIMInstallError.pimxNotFound(String(format: String(localized: "包 %@ 解压后未找到 .pimx"), pkg.packageName))
+            throw HDPIMInstallError.pimxNotFound(String(format: AppLocalized("包 %@ 解压后未找到 .pimx"), pkg.packageName))
         }
         let validation = try HDPIMInstallHelper.validateExtractedPackage(
             parsedPackage: pkg.parsed,
@@ -1358,7 +1360,7 @@ class HDPIMInstallPipeline {
             ),
             progressHandler: progressHandler,
             retryHandler: { [weak self] attempt, maxRetryCount, error in
-                self?.log(String(format: String(localized: "[HDPIM Pipeline] 解压重试 %d/%d: %@, reason=%@"), attempt, maxRetryCount, pkg.packageName, error.localizedDescription))
+                self?.log(String(format: AppLocalized("[HDPIM Pipeline] 解压重试 %d/%d: %@, reason=%@"), attempt, maxRetryCount, pkg.packageName, error.localizedDescription))
             },
             cancellationCheck: { [weak self] in
                 (self?.isCancelled ?? false) || (cancellationCheck?() ?? false)
@@ -1366,7 +1368,7 @@ class HDPIMInstallPipeline {
         )
 
         if result.usedRetryCount > 0 {
-            log(String(format: String(localized: "[HDPIM Pipeline] 解压重试完成: %@, retries=%d"), pkg.packageName, result.usedRetryCount))
+            log(String(format: AppLocalized("[HDPIM Pipeline] 解压重试完成: %@, retries=%d"), pkg.packageName, result.usedRetryCount))
         }
 
         return result
@@ -1389,7 +1391,7 @@ class HDPIMInstallPipeline {
         }
 
         let fallbackURL = fileManager.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
-        log(String(format: String(localized: "[HDPIM Pipeline] 无法在目标卷创建 .adobeTemp，回退到系统临时目录: %@"), fallbackURL.path))
+        log(String(format: AppLocalized("[HDPIM Pipeline] 无法在目标卷创建 .adobeTemp，回退到系统临时目录: %@"), fallbackURL.path))
         try fileManager.createDirectory(at: fallbackURL, withIntermediateDirectories: true)
         return fallbackURL
     }
@@ -1497,7 +1499,7 @@ class HDPIMInstallPipeline {
 
         guard !conflicting.isEmpty else { return }
 
-        log(String(format: String(localized: "[HDPIM Pipeline] 检测到冲突进程: %@"), conflicting.joined(separator: ", ")))
+        log(String(format: AppLocalized("[HDPIM Pipeline] 检测到冲突进程: %@"), conflicting.joined(separator: ", ")))
         throw HDPIMInstallError.conflictingProcessDetected(conflicting)
     }
 
@@ -1521,7 +1523,7 @@ class HDPIMInstallPipeline {
             return
         }
 
-        log(String(format: String(localized: "[HDPIM Pipeline] 包 %@ 需要备份 %d 个目录"), package.packageName, backupDirs.count))
+        log(String(format: AppLocalized("[HDPIM Pipeline] 包 %@ 需要备份 %d 个目录"), package.packageName, backupDirs.count))
         var lastBackupPercent = -1
         try await backup.backupDirectories(
             backupDirs,
@@ -1529,7 +1531,7 @@ class HDPIMInstallPipeline {
                 let percent = total > 0 ? (index + 1) * 100 / total : 100
                 guard percent != lastBackupPercent else { return }
                 lastBackupPercent = percent
-                progressHandler(progress, String(format: String(localized: "正在备份 %@ 的现有文件... %d%%"), package.packageName, percent))
+                progressHandler(progress, String(format: AppLocalized("正在备份 %@ 的现有文件... %d%%"), package.packageName, percent))
             }
         )
     }

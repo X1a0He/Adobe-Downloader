@@ -252,7 +252,7 @@ final class AppCardViewModel: ObservableObject {
         return try await withCheckedThrowingContinuation { continuation in
             DispatchQueue.main.async {
                 let panel = NSOpenPanel()
-                panel.title = "选择保存位置"
+                panel.title = AppLocalized("选择保存位置")
                 panel.canCreateDirectories = true
                 panel.canChooseDirectories = true
                 panel.canChooseFiles = false
@@ -346,7 +346,7 @@ final class AppCardViewModel: ObservableObject {
     func checkAndStartDownload(version: String, language: String) async {
         if isProductInstalled(version: version) {
             await MainActor.run {
-                errorMessage = "该产品版本已安装"
+                errorMessage = AppLocalized("该产品版本已安装")
                 showError = true
             }
             return
@@ -450,12 +450,12 @@ final class AppCardViewModel: ObservableObject {
 
     var downloadButtonTitle: String {
         if isDownloading {
-            return String(localized: "下载中")
+            return AppLocalized("下载中")
         }
         if isInstalled {
-            return String(localized: "管理")
+            return AppLocalized("管理")
         }
-        return String(localized: "下载")
+        return AppLocalized("下载")
     }
 
     var downloadButtonIcon: String {
@@ -626,9 +626,11 @@ private struct CardIconView: View {
 }
 
 private struct DotBadgeRow: View {
+    @StorageValue(\.interfaceLanguage) private var interfaceLanguage
     @ObservedObject var viewModel: AppCardViewModel
 
     var body: some View {
+        let _ = interfaceLanguage
         let badges = makeBadges()
         if badges.isEmpty {
             Text(fallbackText)
@@ -646,31 +648,31 @@ private struct DotBadgeRow: View {
 
     private var fallbackText: String {
         if viewModel.latestDependenciesCount > 0 {
-            return String(format: String(localized: "%d 个依赖组件"), viewModel.latestDependenciesCount)
+            return String(format: AppLocalized("%d 个依赖组件"), viewModel.latestDependenciesCount)
         }
-        return String(localized: "最新版本可用")
+        return AppLocalized("最新版本可用")
     }
 
     private func makeBadges() -> [AnyView] {
         var list: [AnyView] = []
         if viewModel.isInstalled {
             let text = viewModel.installedVersionCount > 1
-                ? String(format: String(localized: "已安装 %d 版本"), viewModel.installedVersionCount)
-                : String(localized: "已安装")
+                ? String(format: AppLocalized("已安装 %d 版本"), viewModel.installedVersionCount)
+                : AppLocalized("已安装")
             list.append(AnyView(DotBadge(text: text, tint: .green)))
         }
         if viewModel.isAnyVersionDownloaded && list.count < 2 {
-            list.append(AnyView(DotBadge(text: String(localized: "已下载"), tint: .green)))
+            list.append(AnyView(DotBadge(text: AppLocalized("已下载"), tint: .green)))
         }
         if !viewModel.isArchitectureCompatible && list.count < 2 {
-            list.append(AnyView(DotBadge(text: "需切架构", tint: .orange)))
+            list.append(AnyView(DotBadge(text: AppLocalized("需切架构"), tint: .orange)))
         }
         if viewModel.uniqueVersionCount > 1 && list.count < 2 {
-            list.append(AnyView(DotBadge(text: String(format: String(localized: "%d 版本"), viewModel.uniqueVersionCount), tint: .secondary)))
+            list.append(AnyView(DotBadge(text: String(format: AppLocalized("%d 版本"), viewModel.uniqueVersionCount), tint: .secondary)))
         }
         if viewModel.requiresHighOS && list.count < 2 {
             let label = viewModel.minOSDisplayFormatted.isEmpty
-                ? String(localized: "高系统需求")
+                ? AppLocalized("高系统需求")
                 : "macOS \(viewModel.minOSDisplayFormatted)+"
             list.append(AnyView(DotBadge(text: label, tint: .yellow)))
         }
@@ -742,9 +744,11 @@ private struct ActiveDownloadBar: View {
 }
 
 private struct DownloadActionButton: View {
+    @StorageValue(\.interfaceLanguage) private var interfaceLanguage
     @ObservedObject var viewModel: AppCardViewModel
 
     var body: some View {
+        let _ = interfaceLanguage
         Button(action: { viewModel.showVersionPicker = true }) {
             HStack(spacing: 4) {
                 Image(systemName: viewModel.downloadButtonIcon)
@@ -773,12 +777,12 @@ private struct DownloadActionButton: View {
 
     private var helpText: String {
         if viewModel.isDownloading {
-            return String(localized: "已有下载任务进行中，可在下载管理查看进度")
+            return AppLocalized("已有下载任务进行中，可在下载管理查看进度")
         }
         if viewModel.isInstalled {
-            return String(localized: "管理已安装版本或卸载")
+            return AppLocalized("管理已安装版本或卸载")
         }
-        return String(localized: "选择版本并下载")
+        return AppLocalized("选择版本并下载")
     }
 }
 
@@ -818,10 +822,12 @@ struct SheetModifier: ViewModifier {
 }
 
 struct AlertModifier: ViewModifier {
+    @StorageValue(\.interfaceLanguage) private var interfaceLanguage
     @ObservedObject var viewModel: AppCardViewModel
     let confirmRedownload: Bool
 
     func body(content: Content) -> some View {
+        let _ = interfaceLanguage
         content
             .sheet(isPresented: $viewModel.showExistingFileAlert) {
                 if let path = viewModel.existingFilePath {
@@ -860,19 +866,19 @@ struct AlertModifier: ViewModifier {
                     )
                 }
             }
-            .alert("确认重新下载", isPresented: $viewModel.showRedownloadConfirm) {
-                Button("取消", role: .cancel) { }
-                Button("确认") {
+            .alert(AppLocalized("确认重新下载"), isPresented: $viewModel.showRedownloadConfirm) {
+                Button(AppLocalized("取消"), role: .cancel) { }
+                Button(AppLocalized("确认")) {
                     Task {
                         await startRedownload()
                     }
                 }
             } message: {
-                Text("是否确认重新下载？这将覆盖现有的安装程序。")
+                Text(AppLocalized("是否确认重新下载？这将覆盖现有的安装程序。"))
             }
-            .alert("下载错误", isPresented: $viewModel.showError) {
-                Button("确定", role: .cancel) { }
-                Button("重试") {
+            .alert(AppLocalized("下载错误"), isPresented: $viewModel.showError) {
+                Button(AppLocalized("确定"), role: .cancel) { }
+                Button(AppLocalized("重试")) {
                     if !viewModel.selectedVersion.isEmpty {
                         Task {
                             await viewModel.checkAndStartDownload(

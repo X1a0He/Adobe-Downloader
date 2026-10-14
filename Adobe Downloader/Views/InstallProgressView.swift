@@ -18,108 +18,108 @@ enum InstallProgressOperation: Equatable {
     var actionName: String {
         switch self {
         case .install:
-            return String(localized: "安装")
+            return AppLocalized("安装")
         case .uninstall:
-            return String(localized: "卸载")
+            return AppLocalized("卸载")
         }
     }
 
     var runningBadge: String {
         switch self {
         case .install:
-            return String(localized: "安装中")
+            return AppLocalized("安装中")
         case .uninstall:
-            return String(localized: "卸载中")
+            return AppLocalized("卸载中")
         }
     }
 
     var completedBadge: String {
         switch self {
         case .install:
-            return String(localized: "安装完成")
+            return AppLocalized("安装完成")
         case .uninstall:
-            return String(localized: "卸载完成")
+            return AppLocalized("卸载完成")
         }
     }
 
     var failedBadge: String {
         switch self {
         case .install:
-            return String(localized: "安装失败")
+            return AppLocalized("安装失败")
         case .uninstall:
-            return String(localized: "卸载失败")
+            return AppLocalized("卸载失败")
         }
     }
 
     var completedStatusText: String {
         switch self {
         case .install:
-            return String(localized: "安装已完成")
+            return AppLocalized("安装已完成")
         case .uninstall:
-            return String(localized: "卸载已完成")
+            return AppLocalized("卸载已完成")
         }
     }
 
     var phaseSectionTitle: String {
         switch self {
         case .install:
-            return String(localized: "安装阶段")
+            return AppLocalized("安装阶段")
         case .uninstall:
-            return String(localized: "卸载阶段")
+            return AppLocalized("卸载阶段")
         }
     }
 
     var infoSectionTitle: String {
         switch self {
         case .install:
-            return String(localized: "安装信息")
+            return AppLocalized("安装信息")
         case .uninstall:
-            return String(localized: "卸载信息")
+            return AppLocalized("卸载信息")
         }
     }
 
     var logPanelTitle: String {
         switch self {
         case .install:
-            return String(localized: "安装日志")
+            return AppLocalized("安装日志")
         case .uninstall:
-            return String(localized: "卸载日志")
+            return AppLocalized("卸载日志")
         }
     }
 
     var emptyLogTitle: String {
         switch self {
         case .install:
-            return String(localized: "暂无安装日志")
+            return AppLocalized("暂无安装日志")
         case .uninstall:
-            return String(localized: "暂无卸载日志")
+            return AppLocalized("暂无卸载日志")
         }
     }
 
     var emptyLogMessage: String {
         switch self {
         case .install:
-            return String(localized: "安装进行后，这里会实时展示输出内容。")
+            return AppLocalized("安装进行后，这里会实时展示输出内容。")
         case .uninstall:
-            return String(localized: "卸载进行后，这里会实时展示输出内容。")
+            return AppLocalized("卸载进行后，这里会实时展示输出内容。")
         }
     }
 
     var copiedLogsMessage: String {
         switch self {
         case .install:
-            return String(localized: "安装日志已复制到剪贴板")
+            return AppLocalized("安装日志已复制到剪贴板")
         case .uninstall:
-            return String(localized: "卸载日志已复制到剪贴板")
+            return AppLocalized("卸载日志已复制到剪贴板")
         }
     }
 
     var commandTitle: String {
         switch self {
         case .install:
-            return String(localized: "安装命令")
+            return AppLocalized("安装命令")
         case .uninstall:
-            return String(localized: "卸载命令")
+            return AppLocalized("卸载命令")
         }
     }
 }
@@ -135,26 +135,26 @@ enum InstallProgressPhase: Int, CaseIterable {
     var title: String {
         switch self {
         case .preparing:
-            return String(localized: "准备")
+            return AppLocalized("准备")
         case .parsing:
-            return String(localized: "解析")
+            return AppLocalized("解析")
         case .backingUp:
-            return String(localized: "备份")
+            return AppLocalized("备份")
         case .extracting:
-            return String(localized: "解压")
+            return AppLocalized("解压")
         case .installing:
-            return String(localized: "安装")
+            return AppLocalized("安装")
         case .finishing:
-            return String(localized: "收尾")
+            return AppLocalized("收尾")
         }
     }
 
     func title(for operation: InstallProgressOperation) -> String {
         switch (self, operation) {
         case (.parsing, .uninstall):
-            return String(localized: "分析")
+            return AppLocalized("分析")
         case (.installing, .uninstall):
-            return String(localized: "卸载")
+            return AppLocalized("卸载")
         default:
             return title
         }
@@ -279,33 +279,33 @@ struct InstallProgressViewData {
         switch outcome {
         case .completed:
             if !warnings.isEmpty {
-                return String(format: String(localized: "%@ 已完成，请查看警告"), productName)
+                return String(format: AppLocalized("%@ 已完成，请查看警告"), productName)
             }
             switch operation {
             case .install:
-                return String(format: String(localized: "%@ 安装完成"), productName)
+                return String(format: AppLocalized("%@ 安装完成"), productName)
             case .uninstall:
-                return String(format: String(localized: "%@ 卸载完成"), productName)
+                return String(format: AppLocalized("%@ 卸载完成"), productName)
             }
         case .failed:
             if isPartialFailure {
-                return String(format: String(localized: "%@ 卸载部分失败"), productName)
+                return String(format: AppLocalized("%@ 卸载部分失败"), productName)
             }
             if isUserCancelled {
-                return String(format: String(localized: "%@ 已取消"), productName)
+                return String(format: AppLocalized("%@ 已取消"), productName)
             }
             switch operation {
             case .install:
-                return String(format: String(localized: "%@ 安装失败"), productName)
+                return String(format: AppLocalized("%@ 安装失败"), productName)
             case .uninstall:
-                return String(format: String(localized: "%@ 卸载失败"), productName)
+                return String(format: AppLocalized("%@ 卸载失败"), productName)
             }
         case .running:
             switch operation {
             case .install:
-                return String(format: String(localized: "正在安装 %@"), productName)
+                return String(format: AppLocalized("正在安装 %@"), productName)
             case .uninstall:
-                return String(format: String(localized: "正在卸载 %@"), productName)
+                return String(format: AppLocalized("正在卸载 %@"), productName)
             }
         }
     }
@@ -335,13 +335,13 @@ struct InstallProgressViewData {
     }
 
     var statusBadge: String {
-        if isPartialFailure { return String(localized: "部分失败") }
-        if !warnings.isEmpty && isCompleted { return String(localized: "有警告") }
+        if isPartialFailure { return AppLocalized("部分失败") }
+        if !warnings.isEmpty && isCompleted { return AppLocalized("有警告") }
         switch outcome {
         case .completed:
             return operation.completedBadge
         case .failed:
-            return isUserCancelled ? String(localized: "已取消") : operation.failedBadge
+            return isUserCancelled ? AppLocalized("已取消") : operation.failedBadge
         case .running:
             return "\(Int(normalizedProgress * 100))%"
         }
@@ -355,29 +355,35 @@ struct InstallProgressViewData {
 enum InstallProgressTextParser {
     static func phase(from status: String, logs: [String], outcome: InstallProgressOutcome) -> InstallProgressPhase {
         let source = phaseSource(from: status, logs: logs, outcome: outcome)
+        let englishSource = source.lowercased()
 
-        if outcome == .completed || source.contains("安装完成") || source.contains("卸载完成") || source.contains("Install completed") || source.contains("Uninstall completed") || source.contains("No packages need to be installed") {
+        if outcome == .completed || source.contains("安装完成") || source.contains("卸载完成") || englishSource.contains("install completed") || englishSource.contains("installation completed") || englishSource.contains("uninstall completed") || englishSource.contains("no packages need to be installed") {
             return .finishing
         }
-        if source.contains("回滚") || source.contains("清理") || source.contains("rollback") || source.contains("clean") {
+        if isRollbackStatus(source) || source.contains("清理") || englishSource.contains("clean") {
             return .finishing
         }
-        if source.contains("正在全量安装") || source.contains("正在增量更新") || source.contains("正在安装") || source.contains("正在卸载") || source.contains("正在处理:") || source.contains("Installing ") || source.contains("Uninstalling ") || source.contains("Processing:") {
+        if source.contains("正在全量安装") || source.contains("正在增量更新") || source.contains("正在安装") || source.contains("正在卸载") || source.contains("正在处理:") || englishSource.contains("installing") || englishSource.contains("uninstalling") || englishSource.contains("processing:") || englishSource.contains("performing a full installation") || englishSource.contains("applying delta update") {
             return .installing
         }
-        if source.contains("解压") || source.contains("Extracting ") {
+        if source.contains("解压") || englishSource.contains("extracting ") {
             return .extracting
         }
-        if source.contains("备份") || source.contains("恢复记录") || source.contains("Backing up ") {
+        if source.contains("备份") || source.contains("恢复记录") || englishSource.contains("backing up ") {
             return .backingUp
         }
-        if source.contains("解析 driver.xml") || source.contains("收集包信息") {
+        if source.contains("解析 driver.xml") || source.contains("收集包信息") || englishSource.contains("parsing driver.xml") || englishSource.contains("collecting package information") {
             return .parsing
         }
-        if source.contains("分析 HDPIM 卸载") || source.contains("准备安装") || source.contains("准备卸载") || source.contains("重试安装") || source.contains("临时安装目录") || source.contains("Analyzing HDPIM uninstall") || source.contains("Preparing install") || source.contains("Preparing uninstall") || source.contains("Retrying install") || source.contains("temporary install") {
+        if source.contains("分析 HDPIM 卸载") || source.contains("准备安装") || source.contains("准备卸载") || source.contains("重试安装") || source.contains("临时安装目录") || englishSource.contains("analyzing hdpim uninstall") || englishSource.contains("preparing install") || englishSource.contains("preparing uninstall") || englishSource.contains("preparing to install") || englishSource.contains("preparing to uninstall") || englishSource.contains("retrying install") || englishSource.contains("temporary install") {
             return .preparing
         }
         return .preparing
+    }
+
+    static func isRollbackStatus(_ text: String) -> Bool {
+        text.contains("回滚") || text.localizedCaseInsensitiveContains("rollback") ||
+            text.localizedCaseInsensitiveContains("rolling back")
     }
 
     static func currentPackageName(from status: String, logs: [String]) -> String? {
@@ -397,8 +403,8 @@ enum InstallProgressTextParser {
     }
 
     private static func hasPhaseKeyword(_ text: String) -> Bool {
-        let keywords = ["准备安装", "准备卸载", "重试安装", "解析 driver.xml", "收集包信息", "分析 HDPIM 卸载", "备份", "恢复记录", "解压", "正在全量安装", "正在增量更新", "正在安装", "正在卸载", "正在处理:", "清理", "回滚", "安装完成", "卸载完成", "Preparing install", "Preparing uninstall", "Retrying install", "Analyzing HDPIM uninstall", "Backing up", "Extracting", "Installing", "Uninstalling", "Processing:", "clean", "rollback", "Install completed", "Uninstall completed"]
-        return keywords.contains { text.contains($0) }
+        let keywords = ["准备安装", "准备卸载", "重试安装", "解析 driver.xml", "收集包信息", "分析 HDPIM 卸载", "备份", "恢复记录", "解压", "正在全量安装", "正在增量更新", "正在安装", "正在卸载", "正在处理:", "清理", "回滚", "安装完成", "卸载完成", "Preparing install", "Preparing uninstall", "Retrying install", "Analyzing HDPIM uninstall", "Backing up", "Extracting", "Installing", "Uninstalling", "Processing:", "clean", "rollback", "rolling back", "Install completed", "Installation completed", "Uninstall completed", "Preparing to install", "Preparing to uninstall", "Performing a full installation", "Applying delta update", "Parsing driver.xml", "Collecting package information"]
+        return keywords.contains { text.localizedCaseInsensitiveContains($0) }
     }
 
     private static func extractPackageName(from text: String) -> String? {
@@ -466,6 +472,7 @@ private enum InstallProgressPanel: String, CaseIterable {
 }
 
 struct InstallProgressView: View {
+    @StorageValue(\.interfaceLanguage) private var interfaceLanguage
     let data: InstallProgressViewData
     let onCancel: () -> Void
     let onRetry: (() -> Void)?
@@ -487,6 +494,7 @@ struct InstallProgressView: View {
     }
 
     var body: some View {
+        let _ = interfaceLanguage
         VStack(spacing: 0) {
             ScrollView {
                 VStack(spacing: 18) {
@@ -559,9 +567,11 @@ struct InstallProgressView: View {
 }
 
 private struct InstallSummarySection: View {
+    @StorageValue(\.interfaceLanguage) private var interfaceLanguage
     let data: InstallProgressViewData
 
     var body: some View {
+        let _ = interfaceLanguage
         HStack(alignment: .top, spacing: 16) {
             ZStack {
                 Circle()
@@ -665,9 +675,11 @@ private struct ProgressSection: View {
 }
 
 private struct InstallPhaseSection: View {
+    @StorageValue(\.interfaceLanguage) private var interfaceLanguage
     let data: InstallProgressViewData
 
     var body: some View {
+        let _ = interfaceLanguage
         VStack(alignment: .leading, spacing: 12) {
             HStack(alignment: .center) {
                 Label(data.operation.phaseSectionTitle, systemImage: "point.3.connected.trianglepath.dotted")
@@ -776,11 +788,13 @@ private enum InstallPhaseItemState {
 }
 
 private struct InstallPhaseItem: View {
+    @StorageValue(\.interfaceLanguage) private var interfaceLanguage
     let phase: InstallProgressPhase
     let operation: InstallProgressOperation
     let state: InstallPhaseItemState
 
     var body: some View {
+        let _ = interfaceLanguage
         VStack(spacing: 10) {
             ZStack {
                 RoundedRectangle(cornerRadius: 10)
@@ -809,16 +823,18 @@ private struct InstallPhaseItem: View {
 }
 
 private struct CurrentPackageSection: View {
+    @StorageValue(\.interfaceLanguage) private var interfaceLanguage
     let packageName: String
     let phase: InstallProgressPhase
     let operation: InstallProgressOperation
 
     var body: some View {
+        let _ = interfaceLanguage
         HStack(spacing: 10) {
             Image(systemName: "shippingbox.fill")
                 .foregroundColor(.blue)
 
-            Text("当前包")
+            Text(AppLocalized("当前包"))
                 .font(.system(size: 12, weight: .semibold))
                 .foregroundColor(.secondary)
 
@@ -851,9 +867,11 @@ private struct CurrentPackageSection: View {
 }
 
 private struct InstallOverviewPanel: View {
+    @StorageValue(\.interfaceLanguage) private var interfaceLanguage
     let data: InstallProgressViewData
 
     var body: some View {
+        let _ = interfaceLanguage
         VStack(alignment: .leading, spacing: 16) {
             if data.packages.isEmpty {
                 VStack(alignment: .leading, spacing: 12) {
@@ -865,7 +883,7 @@ private struct InstallOverviewPanel: View {
                             .font(.system(size: 13))
                             .foregroundColor(data.statusColor)
                     } else {
-                        InstallInfoRow(title: data.isFailed ? String(localized: "最后状态") : String(localized: "当前状态"),
+                        InstallInfoRow(title: data.isFailed ? AppLocalized("最后状态") : AppLocalized("当前状态"),
                                        value: data.phaseStatus)
                     }
                 }
@@ -875,7 +893,7 @@ private struct InstallOverviewPanel: View {
 
             if !data.warnings.isEmpty {
                 BeautifulGroupBox(label: {
-                    Label("警告事项", systemImage: "exclamationmark.triangle.fill")
+                    Label(AppLocalized("警告事项"), systemImage: "exclamationmark.triangle.fill")
                         .foregroundColor(.orange)
                 }) {
                     VStack(alignment: .leading, spacing: 8) {
@@ -891,10 +909,10 @@ private struct InstallOverviewPanel: View {
 
             if let directory = data.recoveryDirectory {
                 BeautifulGroupBox(label: {
-                    Label("恢复目录", systemImage: "folder")
+                    Label(AppLocalized("恢复目录"), systemImage: "folder")
                 }) {
                     VStack(alignment: .leading, spacing: 8) {
-                        Text("请保留此目录，以便检查和恢复未完成的卸载操作。")
+                        Text(AppLocalized("请保留此目录，以便检查和恢复未完成的卸载操作。"))
                             .font(.system(size: 12))
                         Text(directory)
                             .font(.system(size: 11, design: .monospaced))
@@ -906,7 +924,7 @@ private struct InstallOverviewPanel: View {
 
             if data.isFailed {
                 BeautifulGroupBox(label: {
-                    Label("错误摘要", systemImage: "exclamationmark.triangle.fill")
+                    Label(AppLocalized("错误摘要"), systemImage: "exclamationmark.triangle.fill")
                 }) {
                     VStack(alignment: .leading, spacing: 10) {
                         Text(data.status)
@@ -936,23 +954,25 @@ private struct InstallOverviewPanel: View {
 }
 
 private struct InstallPackageList: View {
+    @StorageValue(\.interfaceLanguage) private var interfaceLanguage
     let data: InstallProgressViewData
 
     private var summary: String {
         if data.isCompleted {
-            return String(format: String(localized: "%d 个包已完成"), data.packages.count)
+            return String(format: AppLocalized("%d 个包已完成"), data.packages.count)
         }
         if data.isFailed {
-            return data.isUserCancelled ? String(localized: "安装已取消") : String(localized: "安装未完成")
+            return data.isUserCancelled ? AppLocalized("安装已取消") : AppLocalized("安装未完成")
         }
         let processed = data.packages.filter { $0.stage == .awaitingCompletion }.count
-        return String(format: String(localized: "已处理 %d / %d"), processed, data.packages.count)
+        return String(format: AppLocalized("已处理 %d / %d"), processed, data.packages.count)
     }
 
     var body: some View {
+        let _ = interfaceLanguage
         VStack(alignment: .leading, spacing: 16) {
             HStack {
-                Label("安装包", systemImage: "shippingbox")
+                Label(AppLocalized("安装包"), systemImage: "shippingbox")
                     .font(.system(size: 14, weight: .semibold))
                 Spacer()
                 Text(summary)
@@ -961,7 +981,7 @@ private struct InstallPackageList: View {
             }
 
             if data.isRunning {
-                Text("显示各包当前阶段的进度，全部处理后统一完成安装。")
+                Text(AppLocalized("显示各包当前阶段的进度，全部处理后统一完成安装。"))
                     .font(.system(size: 11))
                     .foregroundColor(.secondary)
             }
@@ -978,6 +998,7 @@ private struct InstallPackageList: View {
 }
 
 private struct InstallPackageProgressRow: View {
+    @StorageValue(\.interfaceLanguage) private var interfaceLanguage
     let package: HDPIMPackageProgress
     let outcome: InstallProgressOutcome
     let isCancelled: Bool
@@ -989,19 +1010,19 @@ private struct InstallPackageProgressRow: View {
     }
 
     private var stageTitle: String {
-        if outcome == .completed { return String(localized: "已完成") }
+        if outcome == .completed { return AppLocalized("已完成") }
         if outcome == .failed {
-            if package.stage == .waiting { return String(localized: "未开始") }
-            return isCancelled ? String(localized: "已停止") : String(localized: "未完成")
+            if package.stage == .waiting { return AppLocalized("未开始") }
+            return isCancelled ? AppLocalized("已停止") : AppLocalized("未完成")
         }
         switch package.stage {
-        case .waiting: return String(localized: "等待准备")
-        case .preparing: return String(localized: "解压与校验")
-        case .prepared: return String(localized: "已就绪")
-        case .updatingFiles: return String(localized: "更新文件")
-        case .installing: return String(localized: "安装中")
-        case .registering: return String(localized: "登记信息")
-        case .awaitingCompletion: return String(localized: "等待收尾")
+        case .waiting: return AppLocalized("等待准备")
+        case .preparing: return AppLocalized("解压与校验")
+        case .prepared: return AppLocalized("已就绪")
+        case .updatingFiles: return AppLocalized("更新文件")
+        case .installing: return AppLocalized("安装中")
+        case .registering: return AppLocalized("登记信息")
+        case .awaitingCompletion: return AppLocalized("等待收尾")
         }
     }
 
@@ -1011,6 +1032,7 @@ private struct InstallPackageProgressRow: View {
     }
 
     var body: some View {
+        let _ = interfaceLanguage
         VStack(alignment: .leading, spacing: 9) {
             HStack(alignment: .top, spacing: 12) {
                 Image(systemName: outcome == .completed ? "checkmark.circle.fill" : "shippingbox")
@@ -1069,15 +1091,17 @@ private struct InstallInfoRow: View {
 }
 
 private struct InstallLogPanel: View {
+    @StorageValue(\.interfaceLanguage) private var interfaceLanguage
     let data: InstallProgressViewData
 
     @State private var showCopiedAlert = false
 
     var body: some View {
+        let _ = interfaceLanguage
         VStack(alignment: .leading, spacing: 16) {
             if let errorDetails = data.errorDetails, !errorDetails.isEmpty {
                 BeautifulGroupBox(label: {
-                    Label("错误详情", systemImage: "exclamationmark.triangle.fill")
+                    Label(AppLocalized("错误详情"), systemImage: "exclamationmark.triangle.fill")
                 }) {
                     Text(errorDetails)
                         .font(.system(size: 11, design: .monospaced))
@@ -1102,7 +1126,7 @@ private struct InstallLogPanel: View {
                     Spacer()
 
                     Button(action: copyLogs) {
-                        Label("复制日志", systemImage: "doc.on.doc")
+                        Label(AppLocalized("复制日志"), systemImage: "doc.on.doc")
                             .font(.system(size: 12, weight: .medium))
                             .foregroundColor(.white)
                     }
@@ -1193,6 +1217,7 @@ private struct InstallLogPanel: View {
 }
 
 private struct InstallActionSection: View {
+    @StorageValue(\.interfaceLanguage) private var interfaceLanguage
     let data: InstallProgressViewData
     let onCancel: () -> Void
     let onRetry: (() -> Void)?
@@ -1200,17 +1225,18 @@ private struct InstallActionSection: View {
     @State private var copiedMessage: String?
 
     var body: some View {
+        let _ = interfaceLanguage
         HStack(spacing: 12) {
             if data.isFailed {
                 Button(action: copyErrorDetails) {
-                    Label("复制错误", systemImage: "doc.on.doc")
+                    Label(AppLocalized("复制错误"), systemImage: "doc.on.doc")
                         .font(.system(size: 13, weight: .medium))
                         .foregroundColor(.white)
                 }
                 .buttonStyle(BeautifulButtonStyle(baseColor: .orange))
 
                 Button(action: copyLogs) {
-                    Label("复制日志", systemImage: "text.append")
+                    Label(AppLocalized("复制日志"), systemImage: "text.append")
                         .font(.system(size: 13, weight: .medium))
                         .foregroundColor(.white)
                 }
@@ -1219,7 +1245,7 @@ private struct InstallActionSection: View {
 
                 if let onRetry = onRetry {
                     Button(action: onRetry) {
-                        Label("重试", systemImage: "arrow.clockwise")
+                        Label(AppLocalized("重试"), systemImage: "arrow.clockwise")
                             .font(.system(size: 13, weight: .medium))
                             .foregroundColor(.white)
                     }
@@ -1227,26 +1253,27 @@ private struct InstallActionSection: View {
                 }
 
                 Button(action: onCancel) {
-                    Label("关闭", systemImage: "xmark")
+                    Label(AppLocalized("关闭"), systemImage: "xmark")
                         .font(.system(size: 13, weight: .medium))
                         .foregroundColor(.white)
                 }
                 .buttonStyle(BeautifulButtonStyle(baseColor: .red))
             } else if data.isCompleted {
                 Button(action: onCancel) {
-                    Label("关闭", systemImage: "xmark")
+                    Label(AppLocalized("关闭"), systemImage: "xmark")
                         .font(.system(size: 13, weight: .medium))
                         .foregroundColor(.white)
                 }
                 .buttonStyle(BeautifulButtonStyle(baseColor: data.statusColor))
             } else {
                 Button(action: onCancel) {
-                    Label(data.isCancellationPending ? "正在取消…" : "取消", systemImage: "xmark")
+                    Label(data.isCancellationPending ? AppLocalized("正在取消…") : AppLocalized("取消"), systemImage: "xmark")
                         .font(.system(size: 13, weight: .medium))
                         .foregroundColor(.white)
                 }
                 .buttonStyle(BeautifulButtonStyle(baseColor: .red))
-                .disabled(data.isCancellationPending || data.status.contains("回滚") || data.logs.last?.contains("回滚") == true)
+                .disabled(data.isCancellationPending || InstallProgressTextParser.isRollbackStatus(data.status) ||
+                    data.logs.last.map { InstallProgressTextParser.isRollbackStatus($0) } == true)
             }
 
             Spacer()
@@ -1270,7 +1297,7 @@ private struct InstallActionSection: View {
     private func copyErrorDetails() {
         let content = data.errorDetails?.isEmpty == false ? data.errorDetails! : data.status
         copyText(content)
-        showCopiedMessage("错误详情已复制到剪贴板")
+        showCopiedMessage(AppLocalized("错误详情已复制到剪贴板"))
     }
 
     private func copyLogs() {

@@ -378,7 +378,7 @@ class Package: Identifiable, ObservableObject, Codable {
     var hasUnknownDownloadSize: Bool { !downloaded && downloadSize <= 0 }
 
     var formattedSize: String {
-        hasUnknownDownloadSize ? String(localized: "未知")
+        hasUnknownDownloadSize ? AppLocalized("未知")
             : ByteCountFormatter.string(fromByteCount: downloadSize, countStyle: .file)
     }
 

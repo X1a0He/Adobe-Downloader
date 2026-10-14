@@ -7,6 +7,7 @@
 import SwiftUI
 
 struct DownloadManagerView: View {
+    @StorageValue(\.interfaceLanguage) private var interfaceLanguage
     @Environment(\.dismiss) private var dismiss
 
     @ObservedObject private var networkManager = globalNetworkManager
@@ -23,12 +24,12 @@ struct DownloadManagerView: View {
 
         var label: String {
             switch self {
-            case .addTime:   return String(localized: "按添加时间")
-            case .name:      return String(localized: "按名称")
-            case .status:    return String(localized: "按状态")
-            case .size:      return String(localized: "按大小")
-            case .progress:  return String(localized: "按进度")
-            case .remaining: return String(localized: "按剩余时间")
+            case .addTime:   return AppLocalized("按添加时间")
+            case .name:      return AppLocalized("按名称")
+            case .status:    return AppLocalized("按状态")
+            case .size:      return AppLocalized("按大小")
+            case .progress:  return AppLocalized("按进度")
+            case .remaining: return AppLocalized("按剩余时间")
             }
         }
 
@@ -51,12 +52,12 @@ struct DownloadManagerView: View {
 
         var title: String {
             switch self {
-            case .downloading: return String(localized: "下载中")
-            case .waiting:     return String(localized: "等待中")
-            case .paused:      return String(localized: "已暂停")
-            case .retrying:    return String(localized: "重试中")
-            case .completed:   return String(localized: "已完成")
-            case .failed:      return String(localized: "失败")
+            case .downloading: return AppLocalized("下载中")
+            case .waiting:     return AppLocalized("等待中")
+            case .paused:      return AppLocalized("已暂停")
+            case .retrying:    return AppLocalized("重试中")
+            case .completed:   return AppLocalized("已完成")
+            case .failed:      return AppLocalized("失败")
             }
         }
 
@@ -84,6 +85,7 @@ struct DownloadManagerView: View {
     }
 
     var body: some View {
+        let _ = interfaceLanguage
         VStack(spacing: 0) {
             DownloadManagerHeaderView(
                 sortOrder: $sortOrder,
@@ -127,14 +129,14 @@ struct DownloadManagerView: View {
             idealHeight: 620,
             maxHeight: 900
         )
-        .alert(String(localized: "确认删除"), isPresented: $showClearConfirmation) {
-            Button(String(localized: "取消"), role: .cancel) { }
-            Button(String(localized: "确认"), role: .destructive) { clearFinishedTasks() }
+        .alert(AppLocalized("确认删除"), isPresented: $showClearConfirmation) {
+            Button(AppLocalized("取消"), role: .cancel) { }
+            Button(AppLocalized("确认"), role: .destructive) { clearFinishedTasks() }
         } message: {
             if StorageData.shared.deleteCompletedTasksWithFiles {
-                Text("确定要删除所有已完成和失败的下载任务吗？\n\n• 所有任务：将删除任务记录和本地文件")
+                Text(AppLocalized("确定要删除所有已完成和失败的下载任务吗？\n\n• 所有任务：将删除任务记录和本地文件"))
             } else {
-                Text("确定要删除所有已完成和失败的下载任务吗？\n\n• 所有任务：仅删除任务记录，保留本地文件")
+                Text(AppLocalized("确定要删除所有已完成和失败的下载任务吗？\n\n• 所有任务：仅删除任务记录，保留本地文件"))
             }
         }
     }
@@ -333,6 +335,7 @@ struct DownloadManagerView: View {
 }
 
 private struct DownloadManagerHeaderView: View {
+    @StorageValue(\.interfaceLanguage) private var interfaceLanguage
     @Binding var sortOrder: DownloadManagerView.SortOrder
     let canPauseAll: Bool
     let canResumeAll: Bool
@@ -343,9 +346,10 @@ private struct DownloadManagerHeaderView: View {
     let onClose: () -> Void
 
     var body: some View {
+        let _ = interfaceLanguage
         VStack(spacing: 0) {
             HStack(spacing: 10) {
-                Text(String(localized: "下载管理"))
+                Text(AppLocalized("下载管理"))
                     .font(.system(size: 20, weight: .bold))
                     .foregroundColor(.primary)
 
@@ -354,21 +358,21 @@ private struct DownloadManagerHeaderView: View {
                 sortMenu
 
                 batchButton(
-                    label: String(localized: "全部暂停"),
+                    label: AppLocalized("全部暂停"),
                     icon: "pause.fill",
                     color: .orange,
                     enabled: canPauseAll,
                     action: onPauseAll
                 )
                 batchButton(
-                    label: String(localized: "全部继续"),
+                    label: AppLocalized("全部继续"),
                     icon: "play.fill",
                     color: .blue,
                     enabled: canResumeAll,
                     action: onResumeAll
                 )
                 batchButton(
-                    label: String(localized: "清除已完成"),
+                    label: AppLocalized("清除已完成"),
                     icon: "trash",
                     color: .red,
                     enabled: canClearFinished,
@@ -379,7 +383,7 @@ private struct DownloadManagerHeaderView: View {
                     Image(systemName: "xmark")
                 }
                 .buttonStyle(GlassIconButtonStyle(tint: .secondary))
-                .help(String(localized: "关闭"))
+                .help(AppLocalized("关闭"))
             }
             .padding(.horizontal, 18)
             .padding(.vertical, 14)
@@ -445,6 +449,7 @@ private struct DownloadManagerHeaderView: View {
 }
 
 private struct DownloadManagerStatsBar: View {
+    @StorageValue(\.interfaceLanguage) private var interfaceLanguage
     let tasks: [NewDownloadTask]
 
     private var stats: AggregatedStats {
@@ -476,14 +481,15 @@ private struct DownloadManagerStatsBar: View {
     }
 
     var body: some View {
+        let _ = interfaceLanguage
         if tasks.isEmpty {
             EmptyView()
         } else {
             HStack(spacing: 10) {
-                StatPill(icon: "arrow.down.circle.fill", label: String(localized: "运行中"), value: "\(stats.running)", tint: .blue)
-                StatPill(icon: "clock.fill", label: String(localized: "等待"), value: "\(stats.waiting)", tint: .gray)
-                StatPill(icon: "checkmark.circle.fill", label: String(localized: "已完成"), value: "\(stats.completed)", tint: .green)
-                StatPill(icon: "xmark.circle.fill", label: String(localized: "失败"), value: "\(stats.failed)", tint: .red)
+                StatPill(icon: "arrow.down.circle.fill", label: AppLocalized("运行中"), value: "\(stats.running)", tint: .blue)
+                StatPill(icon: "clock.fill", label: AppLocalized("等待"), value: "\(stats.waiting)", tint: .gray)
+                StatPill(icon: "checkmark.circle.fill", label: AppLocalized("已完成"), value: "\(stats.completed)", tint: .green)
+                StatPill(icon: "xmark.circle.fill", label: AppLocalized("失败"), value: "\(stats.failed)", tint: .red)
 
                 Spacer()
 
@@ -506,7 +512,7 @@ private struct DownloadManagerStatsBar: View {
                                 HStack(spacing: 3) {
                                     Image(systemName: "clock")
                                         .font(.system(size: 10))
-                                    Text(String(format: String(localized: "下载剩余 %@"), remaining))
+                                    Text(String(format: AppLocalized("下载剩余 %@"), remaining))
                                         .font(.system(size: 12))
                                         .monospacedDigit()
                                 }
@@ -575,6 +581,7 @@ private struct StatPill: View {
 }
 
 private struct DownloadManagerFilterBar: View {
+    @StorageValue(\.interfaceLanguage) private var interfaceLanguage
     @Binding var searchText: String
     @Binding var activeFilters: Set<DownloadManagerView.StatusFilterChip>
     @Binding var showAdvanced: Bool
@@ -583,6 +590,7 @@ private struct DownloadManagerFilterBar: View {
     let statusCounts: [DownloadManagerView.StatusFilterChip: Int]
 
     var body: some View {
+        let _ = interfaceLanguage
         VStack(spacing: 8) {
             HStack(spacing: 8) {
                 searchField
@@ -619,7 +627,7 @@ private struct DownloadManagerFilterBar: View {
             Image(systemName: "magnifyingglass")
                 .font(.system(size: 12))
                 .foregroundColor(.secondary.opacity(0.7))
-            TextField(String(localized: "搜索产品名 / 版本 / productId"), text: $searchText)
+            TextField(AppLocalized("搜索产品名 / 版本 / productId"), text: $searchText)
                 .textFieldStyle(PlainTextFieldStyle())
                 .font(.system(size: 12))
             if !searchText.isEmpty {
@@ -643,24 +651,24 @@ private struct DownloadManagerFilterBar: View {
 
     private var advancedMenu: some View {
         Menu {
-            Section(String(localized: "进阶过滤")) {
+            Section(AppLocalized("进阶过滤")) {
                 EmptyView()
             }
-            TextFieldMenuItem(title: String(localized: "sapCode 包含"), placeholder: "PHSP", text: $sapCodeFilter)
-            TextFieldMenuItem(title: String(localized: "路径包含"), placeholder: "/Downloads", text: $pathFilter)
+            TextFieldMenuItem(title: AppLocalized("sapCode 包含"), placeholder: "PHSP", text: $sapCodeFilter)
+            TextFieldMenuItem(title: AppLocalized("路径包含"), placeholder: "/Downloads", text: $pathFilter)
             Divider()
             Button(action: {
                 sapCodeFilter = ""
                 pathFilter = ""
             }) {
-                Label(String(localized: "重置进阶过滤"), systemImage: "arrow.counterclockwise")
+                Label(AppLocalized("重置进阶过滤"), systemImage: "arrow.counterclockwise")
             }
             .disabled(sapCodeFilter.isEmpty && pathFilter.isEmpty)
         } label: {
             HStack(spacing: 4) {
                 Image(systemName: "slider.horizontal.3")
                     .font(.system(size: 10))
-                Text(String(localized: "进阶"))
+                Text(AppLocalized("进阶"))
                     .font(.system(size: 11, weight: .medium))
                 if !sapCodeFilter.isEmpty || !pathFilter.isEmpty {
                     Circle()
@@ -701,12 +709,14 @@ private struct TextFieldMenuItem: View {
 }
 
 private struct DMFilterChip: View {
+    @StorageValue(\.interfaceLanguage) private var interfaceLanguage
     let chip: DownloadManagerView.StatusFilterChip
     let count: Int
     let isActive: Bool
     let onTap: () -> Void
 
     var body: some View {
+        let _ = interfaceLanguage
         Button(action: onTap) {
             HStack(spacing: 4) {
                 Image(systemName: chip.icon)
@@ -737,10 +747,12 @@ private struct DMFilterChip: View {
 }
 
 private struct DownloadManagerEmptyView: View {
+    @StorageValue(\.interfaceLanguage) private var interfaceLanguage
     let hasRawTasks: Bool
     let onClearFilters: () -> Void
 
     var body: some View {
+        let _ = interfaceLanguage
         VStack(spacing: 14) {
             ZStack {
                 Circle()
@@ -752,11 +764,11 @@ private struct DownloadManagerEmptyView: View {
             }
 
             VStack(spacing: 6) {
-                Text(hasRawTasks ? String(localized: "没有匹配的任务") : String(localized: "暂无下载任务"))
+                Text(hasRawTasks ? AppLocalized("没有匹配的任务") : AppLocalized("暂无下载任务"))
                     .font(.system(size: 15, weight: .semibold))
                 Text(hasRawTasks
-                     ? String(localized: "尝试调整筛选条件或清空筛选")
-                     : String(localized: "从产品列表选择一个产品以开始下载"))
+                     ? AppLocalized("尝试调整筛选条件或清空筛选")
+                     : AppLocalized("从产品列表选择一个产品以开始下载"))
                     .font(.system(size: 12))
                     .foregroundColor(.secondary)
                     .multilineTextAlignment(.center)
@@ -767,7 +779,7 @@ private struct DownloadManagerEmptyView: View {
                     HStack(spacing: 4) {
                         Image(systemName: "xmark.circle.fill")
                             .font(.system(size: 11))
-                        Text(String(localized: "清空筛选"))
+                        Text(AppLocalized("清空筛选"))
                             .font(.system(size: 12, weight: .medium))
                     }
                     .foregroundColor(.white)

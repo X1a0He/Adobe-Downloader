@@ -113,7 +113,7 @@ final class CleanupViewModel: ObservableObject {
         let options = selectedOptions
         isPreparingPlan = true
         prepareProgress = 0
-        prepareMessage = String(localized: "正在生成清理计划…")
+        prepareMessage = AppLocalized("正在生成清理计划…")
 
         Task.detached(priority: .userInitiated) { [planner] in
             let plan = planner.makePlan(for: options) { progress in
@@ -126,7 +126,7 @@ final class CleanupViewModel: ObservableObject {
             await MainActor.run {
                 self.isPreparingPlan = false
                 self.prepareProgress = 1
-                self.prepareMessage = String(localized: "清理计划生成完成")
+                self.prepareMessage = AppLocalized("清理计划生成完成")
                 #if DEBUG
                 self.cleanupPlan = plan
                 self.planItems = plan.items
@@ -171,12 +171,12 @@ final class CleanupViewModel: ObservableObject {
             timestamp: Date(),
             command: "[Cleanup][Context] userHome=\(plan.context.userHome) uid=\(plan.context.userUID) loginKeychain=\(plan.context.loginKeychain)",
             status: .success,
-            message: String(localized: "清理计划已生成")
+            message: AppLocalized("清理计划已生成")
         ))
         #endif
 
         guard !planItems.isEmpty else {
-            finishCleanup(message: String(localized: "未发现可清理项目"))
+            finishCleanup(message: AppLocalized("未发现可清理项目"))
             return
         }
 
@@ -195,7 +195,7 @@ final class CleanupViewModel: ObservableObject {
         let estimatedText = ByteCountFormatter.string(fromByteCount: estimatedCleanupSize, countStyle: .file)
         let releasedText = ByteCountFormatter.string(fromByteCount: releasedCleanupSize, countStyle: .file)
         if estimatedCleanupSize > 0 || releasedCleanupSize > 0 {
-            alertMessage = "\(message)\n预计可清理：\(estimatedText)\n实际释放：\(releasedText)"
+            alertMessage = AppLocalized("\(message)\n预计可清理：\(estimatedText)\n实际释放：\(releasedText)")
         } else {
             alertMessage = message
         }
@@ -207,13 +207,13 @@ final class CleanupViewModel: ObservableObject {
     private func executeNextCommand() {
         guard currentCommandIndex < planItems.count else {
             DispatchQueue.main.async {
-                self.finishCleanup(message: self.isCancelled ? String(localized: "清理已取消") : String(localized: "清理完成"))
+                self.finishCleanup(message: self.isCancelled ? AppLocalized("清理已取消") : AppLocalized("清理完成"))
             }
             return
         }
 
         if isCancelled {
-            DispatchQueue.main.async { self.finishCleanup(message: String(localized: "清理已取消")) }
+            DispatchQueue.main.async { self.finishCleanup(message: AppLocalized("清理已取消")) }
             return
         }
 
@@ -232,7 +232,7 @@ final class CleanupViewModel: ObservableObject {
             guard let self else { return }
             if let index = self.cleanupLogs.lastIndex(where: { $0.id == runningLog.id }) {
                 DispatchQueue.main.async {
-                    self.cleanupLogs[index] = CleanupLog(timestamp: Date(), command: item.debugSummary, status: .error, message: self.failureMessage(for: item, output: String(localized: "执行超时")))
+                    self.cleanupLogs[index] = CleanupLog(timestamp: Date(), command: item.debugSummary, status: .error, message: self.failureMessage(for: item, output: AppLocalized("执行超时")))
                     self.currentCommandIndex += 1
                     self.executeNextCommand()
                 }
@@ -246,7 +246,7 @@ final class CleanupViewModel: ObservableObject {
             DispatchQueue.main.async {
                 if let index = self.cleanupLogs.lastIndex(where: { $0.id == runningLog.id }) {
                     if self.isCancelled {
-                        self.cleanupLogs[index] = CleanupLog(timestamp: Date(), command: item.debugSummary, status: .cancelled, message: String(localized: "已取消"))
+                        self.cleanupLogs[index] = CleanupLog(timestamp: Date(), command: item.debugSummary, status: .cancelled, message: AppLocalized("已取消"))
                     } else {
                         let isSuccess = self.isExecutionSuccess(output)
                         let message: String
@@ -255,7 +255,7 @@ final class CleanupViewModel: ObservableObject {
                         } else if item.kind == .hosts {
                             message = output.trimmingCharacters(in: .whitespacesAndNewlines)
                         } else {
-                            message = String(localized: "执行成功")
+                            message = AppLocalized("执行成功")
                         }
                         self.cleanupLogs[index] = CleanupLog(timestamp: Date(), command: item.debugSummary, status: isSuccess ? .success : .error, message: message)
                     }
@@ -299,10 +299,10 @@ final class CleanupViewModel: ObservableObject {
 
     private func failureMessage(for item: CleanupPlanItem, output: String) -> String {
         #if DEBUG
-        return String(localized: "执行结果：\(output)\n执行命令：\(item.command)")
+        return AppLocalized("执行结果：\(output)\n执行命令：\(item.command)")
         #else
         let title = CleanupLog.getCleanupDescription(for: item.debugSummary)
-        return String(localized: "执行失败：\(title)\n执行结果：\(output)\n执行命令：\(item.command)")
+        return AppLocalized("执行失败：\(title)\n执行结果：\(output)\n执行命令：\(item.command)")
         #endif
     }
 
@@ -315,6 +315,7 @@ final class CleanupViewModel: ObservableObject {
 }
 
 struct CleanupView: View {
+    @StorageValue(\.interfaceLanguage) private var interfaceLanguage
     @ObservedObject var viewModel: CleanupViewModel
 
     init() {
@@ -341,6 +342,7 @@ struct CleanupView: View {
     }
 
     var body: some View {
+        let _ = interfaceLanguage
         VStack(alignment: .leading, spacing: 20) {
             optionsSection
             if viewModel.isPreparingPlan { preparePlanSection }
@@ -348,22 +350,22 @@ struct CleanupView: View {
             logSection
             actionBar
         }
-        .alert("确认清理", isPresented: $viewModel.showConfirmation) {
-            Button("取消", role: .cancel) { }
-            Button("确定", role: .destructive) { viewModel.prepareCleanup() }
+        .alert(AppLocalized("确认清理"), isPresented: $viewModel.showConfirmation) {
+            Button(AppLocalized("取消"), role: .cancel) { }
+            Button(AppLocalized("确定"), role: .destructive) { viewModel.prepareCleanup() }
         } message: {
-            Text("这将删除所选的 Adobe 相关文件，该操作不可撤销。清理过程不会影响 Adobe Downloader 的文件和下载数据。是否继续？")
+            Text(AppLocalized("这将删除所选的 Adobe 相关文件，该操作不可撤销。清理过程不会影响 Adobe Downloader 的文件和下载数据。是否继续？"))
         }
-        .alert("需要全磁盘访问权限", isPresented: $viewModel.showFullDiskAccessAlert) {
-            Button("打开设置") {
+        .alert(AppLocalized("需要全磁盘访问权限"), isPresented: $viewModel.showFullDiskAccessAlert) {
+            Button(AppLocalized("打开设置")) {
                 FullDiskAccessPermission.openSettings()
             }
-            Button("继续清理", role: .destructive) {
+            Button(AppLocalized("继续清理"), role: .destructive) {
                 viewModel.continueCleanupWithoutFullDiskAccess()
             }
-            Button("取消", role: .cancel) { }
+            Button(AppLocalized("取消"), role: .cancel) { }
         } message: {
-            Text("未授权时，Containers、Group Containers、Documents 等用户受保护目录可能清理失败。请将 Adobe Downloader 与 Helper 加入全磁盘访问，授权后重新启动 Adobe Downloader 或重新启用 Helper。")
+            Text(AppLocalized("未授权时，Containers、Group Containers、Documents 等用户受保护目录可能清理失败。请将 Adobe Downloader 与 Helper 加入全磁盘访问，授权后重新启动 Adobe Downloader 或重新启用 Helper。"))
         }
         #if DEBUG
         .sheet(isPresented: $viewModel.showDebugPlanConfirmation) {
@@ -381,14 +383,14 @@ struct CleanupView: View {
         }
         #endif
         .alert(isPresented: $viewModel.showAlert) {
-            Alert(title: Text("清理结果"), message: Text(viewModel.alertMessage), dismissButton: .default(Text("确定")))
+            Alert(title: Text(AppLocalized("清理结果")), message: Text(viewModel.alertMessage), dismissButton: .default(Text(AppLocalized("确定"))))
         }
     }
 
     private var preparePlanSection: some View {
-        SettingSection(String(localized: "生成清理计划")) {
+        SettingSection(AppLocalized("生成清理计划")) {
             VStack(spacing: 0) {
-                SettingRow(title: String(localized: "正在扫描残留"), icon: "magnifyingglass", iconTint: .blue) {
+                SettingRow(title: AppLocalized("正在扫描残留"), icon: "magnifyingglass", iconTint: .blue) {
                     HStack(spacing: 8) {
                         ProgressView()
                             .scaleEffect(0.7)
@@ -432,8 +434,8 @@ struct CleanupView: View {
 
     private var optionsSection: some View {
         SettingSection(
-            String(localized: "选择清理内容"),
-            footer: String(localized: "清理过程不会影响 Adobe Downloader 的文件和下载数据")
+            AppLocalized("选择清理内容"),
+            footer: AppLocalized("清理过程不会影响 Adobe Downloader 的文件和下载数据")
         ) {
             ForEach(Array(CleanupOption.allCases.enumerated()), id: \.element.id) { index, option in
                 CleanupOptionRow(
@@ -451,9 +453,9 @@ struct CleanupView: View {
     }
 
     private var progressSection: some View {
-        SettingSection(String(localized: "清理进度")) {
+        SettingSection(AppLocalized("清理进度")) {
             VStack(spacing: 0) {
-                SettingRow(title: String(localized: "当前进度"), icon: "arrow.triangle.2.circlepath", iconTint: .blue) {
+                SettingRow(title: AppLocalized("当前进度"), icon: "arrow.triangle.2.circlepath", iconTint: .blue) {
                     HStack(spacing: 8) {
                         Text("\(viewModel.currentCommandIndex)/\(viewModel.totalCommands)")
                             .font(.system(size: 12, weight: .semibold)).monospacedDigit().foregroundColor(.secondary)
@@ -488,7 +490,7 @@ struct CleanupView: View {
                     Button(action: { viewModel.cancelCleanup() }) {
                         HStack(spacing: 4) {
                             Image(systemName: "xmark.circle").font(.system(size: 10))
-                            Text("取消清理").font(.system(size: 12))
+                            Text(AppLocalized("取消清理")).font(.system(size: 12))
                         }
                         .foregroundColor(.white)
                     }
@@ -502,7 +504,7 @@ struct CleanupView: View {
     }
 
     private var logSection: some View {
-        SettingSection(String(localized: "执行日志")) {
+        SettingSection(AppLocalized("执行日志")) {
             VStack(spacing: 0) {
                 Button(action: { withAnimation(.easeInOut(duration: 0.2)) { viewModel.isLogExpanded.toggle() } }) {
                     HStack(spacing: 8) {
@@ -510,15 +512,15 @@ struct CleanupView: View {
                             RoundedRectangle(cornerRadius: 5).fill(Color.indigo.opacity(0.14)).frame(width: 22, height: 22)
                             Image(systemName: "terminal.fill").font(.system(size: 11, weight: .medium)).foregroundColor(.indigo)
                         }
-                        Text("最近日志").font(.system(size: 13)).foregroundColor(.primary.opacity(0.9))
+                        Text(AppLocalized("最近日志")).font(.system(size: 13)).foregroundColor(.primary.opacity(0.9))
                         if viewModel.isPreparingPlan {
-                            SettingsStatusChip(icon: "circle.fill", text: String(localized: "生成中"), tint: .blue)
+                            SettingsStatusChip(icon: "circle.fill", text: AppLocalized("生成中"), tint: .blue)
                         }
                         if viewModel.isProcessing {
-                            SettingsStatusChip(icon: "circle.fill", text: String(localized: "执行中"), tint: .green)
+                            SettingsStatusChip(icon: "circle.fill", text: AppLocalized("执行中"), tint: .green)
                         }
                         Spacer()
-                        Text(viewModel.isLogExpanded ? String(localized: "收起") : String(localized: "展开"))
+                        Text(viewModel.isLogExpanded ? AppLocalized("收起") : AppLocalized("展开"))
                             .font(.system(size: 11)).foregroundColor(.blue)
                         Image(systemName: viewModel.isLogExpanded ? "chevron.down" : "chevron.right")
                             .font(.system(size: 10)).foregroundColor(.secondary)
@@ -536,7 +538,7 @@ struct CleanupView: View {
                             HStack(spacing: 4) {
                                 Image(systemName: "doc.on.doc")
                                     .font(.system(size: 10))
-                                Text("复制全部错误日志")
+                                Text(AppLocalized("复制全部错误日志"))
                                     .font(.system(size: 12))
                             }
                             .foregroundColor(.white)
@@ -569,7 +571,7 @@ struct CleanupView: View {
             Button(action: { viewModel.selectDefaultOptions() }) {
                 HStack(spacing: 4) {
                     Image(systemName: "checkmark.square").font(.system(size: 10))
-                    Text("全选").font(.system(size: 12))
+                    Text(AppLocalized("全选")).font(.system(size: 12))
                 }
                 .foregroundColor(.white)
             }
@@ -579,7 +581,7 @@ struct CleanupView: View {
             Button(action: { viewModel.selectedOptions.removeAll() }) {
                 HStack(spacing: 4) {
                     Image(systemName: "square").font(.system(size: 10))
-                    Text("取消全选").font(.system(size: 12))
+                    Text(AppLocalized("取消全选")).font(.system(size: 12))
                 }
                 .foregroundColor(.primary.opacity(0.85))
             }
@@ -595,7 +597,7 @@ struct CleanupView: View {
                 }
             }) {
                 Text(viewModel.expandedOptions.count == CleanupOption.allCases.count
-                     ? String(localized: "折叠全部") : String(localized: "展开全部"))
+                     ? AppLocalized("折叠全部") : AppLocalized("展开全部"))
                     .font(.system(size: 12)).foregroundColor(.white)
             }
             .buttonStyle(BeautifulButtonStyle(baseColor: Color.purple))
@@ -607,7 +609,7 @@ struct CleanupView: View {
             Button(action: { if !viewModel.selectedOptions.isEmpty { viewModel.showConfirmation = true } }) {
                 HStack(spacing: 4) {
                     Image(systemName: "trash.fill").font(.system(size: 10))
-                    Text("开始清理").font(.system(size: 12, weight: .semibold))
+                    Text(AppLocalized("开始清理")).font(.system(size: 12, weight: .semibold))
                 }
                 .foregroundColor(.white)
             }
@@ -620,6 +622,7 @@ struct CleanupView: View {
 
 #if DEBUG
 private struct DebugCleanupPlanSheet: View {
+    @StorageValue(\.interfaceLanguage) private var interfaceLanguage
     let items: [CleanupPlanItem]
     let estimatedBytes: Int64
     let onCancel: () -> Void
@@ -630,12 +633,13 @@ private struct DebugCleanupPlanSheet: View {
     }
 
     var body: some View {
+        let _ = interfaceLanguage
         VStack(alignment: .leading, spacing: 14) {
             HStack {
                 VStack(alignment: .leading, spacing: 4) {
-                    Text("确认清理计划")
+                    Text(AppLocalized("确认清理计划"))
                         .font(.system(size: 16, weight: .semibold))
-                    Text("将执行 \(items.count) 项，预计可清理 \(estimatedText)")
+                    Text(AppLocalized("将执行 \(items.count) 项，预计可清理 \(estimatedText)"))
                         .font(.system(size: 12))
                         .foregroundColor(.secondary)
                 }
@@ -645,7 +649,7 @@ private struct DebugCleanupPlanSheet: View {
             ScrollView {
                 LazyVStack(alignment: .leading, spacing: 8) {
                     if items.isEmpty {
-                        Text("未扫描到当前存在的路径；动态命令会在执行时处理。")
+                        Text(AppLocalized("未扫描到当前存在的路径；动态命令会在执行时处理。"))
                             .font(.system(size: 12))
                             .foregroundColor(.secondary)
                             .frame(maxWidth: .infinity, alignment: .leading)
@@ -678,9 +682,9 @@ private struct DebugCleanupPlanSheet: View {
 
             HStack {
                 Spacer()
-                Button("取消", action: onCancel)
+                Button(AppLocalized("取消"), action: onCancel)
                     .keyboardShortcut(.cancelAction)
-                Button("确认清理", role: .destructive, action: onConfirm)
+                Button(AppLocalized("确认清理"), role: .destructive, action: onConfirm)
                     .keyboardShortcut(.defaultAction)
                     .disabled(items.isEmpty)
             }
@@ -692,6 +696,7 @@ private struct DebugCleanupPlanSheet: View {
 #endif
 
 private struct CleanupOptionRow: View {
+    @StorageValue(\.interfaceLanguage) private var interfaceLanguage
     let option: CleanupOption
     let isProcessing: Bool
     let previewItems: [CleanupPlanItem]
@@ -699,6 +704,7 @@ private struct CleanupOptionRow: View {
     @Binding var expandedOptions: Set<CleanupOption>
 
     var body: some View {
+        let _ = interfaceLanguage
         VStack(spacing: 0) {
             SettingRow(title: option.localizedName, subtitle: option.description, icon: option.icon, iconTint: option.tint) {
                 HStack(spacing: 8) {
@@ -734,12 +740,14 @@ private struct CleanupOptionRow: View {
 }
 
 struct CommandListView: View {
+    @StorageValue(\.interfaceLanguage) private var interfaceLanguage
     let option: CleanupOption
     let previewItems: [CleanupPlanItem]
 
     var body: some View {
+        let _ = interfaceLanguage
         VStack(alignment: .leading, spacing: 8) {
-            Text("将执行的清理计划：")
+            Text(AppLocalized("将执行的清理计划："))
                 .font(.system(size: 12, weight: .medium)).foregroundColor(.secondary)
                 .padding(.top, 2).padding(.horizontal, 12)
 
@@ -754,7 +762,7 @@ struct CommandListView: View {
                         .cornerRadius(6)
                 }
                 if previewItems.isEmpty {
-                    Text("未扫描到当前存在的路径；动态命令会在执行时处理。")
+                    Text(AppLocalized("未扫描到当前存在的路径；动态命令会在执行时处理。"))
                         .font(.system(size: 11))
                         .foregroundColor(.secondary)
                         .padding(.horizontal, 12)
@@ -768,14 +776,16 @@ struct CommandListView: View {
 }
 
 struct CurrentLogView: View {
+    @StorageValue(\.interfaceLanguage) private var interfaceLanguage
     let lastLog: CleanupLog
 
     var body: some View {
+        let _ = interfaceLanguage
         VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: 8) {
                 Image(systemName: "arrow.triangle.turn.up.right.circle.fill")
                     .foregroundColor(.blue.opacity(0.8)).font(.system(size: 14))
-                Text("当前执行：").font(.system(size: 12, weight: .medium)).foregroundColor(.secondary)
+                Text(AppLocalized("当前执行：")).font(.system(size: 12, weight: .medium)).foregroundColor(.secondary)
             }
 
             Group {
@@ -798,12 +808,14 @@ struct CurrentLogView: View {
 }
 
 struct EmptyLogView: View {
+    @StorageValue(\.interfaceLanguage) private var interfaceLanguage
     var body: some View {
+        let _ = interfaceLanguage
         HStack {
             Spacer()
             VStack(spacing: 6) {
                 Image(systemName: "doc.text.magnifyingglass").font(.system(size: 20)).foregroundColor(.secondary.opacity(0.6))
-                Text("暂无清理记录").font(.system(size: 11)).foregroundColor(.secondary)
+                Text(AppLocalized("暂无清理记录")).font(.system(size: 11)).foregroundColor(.secondary)
             }
             .padding(.vertical, 16)
             Spacer()

@@ -28,14 +28,14 @@ class NetworkManager: ObservableObject {
 	private let installManager = InstallManager()
     private var hasLoadedSavedTasks = false
 	private var lastInstallationProgress = 0.0
-	private var lastInstallationStatus = String(localized: "准备安装...")
+	private var lastInstallationStatus = AppLocalized("准备安装...")
 	private var lastInstallationPhase: InstallProgressPhase = .preparing
 	private var installationCancelledByUser = false
 	private var installationSessionID = UUID()
     private var installationSessionFinished = false
     @Published private var installationPackages: [HDPIMPackageProgress] = []
 	private var lastUninstallProgress = 0.0
-	private var lastUninstallStatus = String(localized: "准备卸载...")
+	private var lastUninstallStatus = AppLocalized("准备卸载...")
 	private var lastUninstallPhase: InstallProgressPhase = .preparing
     private var uninstallSessionID = UUID()
     private var uninstallSessionFinished = true
@@ -248,7 +248,7 @@ class NetworkManager: ObservableObject {
                await globalNewDownloadUtils.stopActiveDownloads(for: task)
                if task.status.isActive {
                    task.setStatus(.failed(DownloadStatus.FailureInfo(
-                       message: String(localized: "下载已取消"),
+                       message: AppLocalized("下载已取消"),
                        error: NetworkError.downloadCancelled,
                        timestamp: Date(),
                        recoverable: false
@@ -312,12 +312,12 @@ class NetworkManager: ObservableObject {
             installationSessionID = sessionID
             installationSessionFinished = false
             installationCancelledByUser = false
-            installationState = .installing(progress: 0, status: String(localized: "准备安装..."))
+            installationState = .installing(progress: 0, status: AppLocalized("准备安装..."))
             installLogs = []
             installationPackages = []
             installCommand = ""
             lastInstallationPhase = .preparing
-            updateInstallationSnapshot(progress: 0, status: String(localized: "准备安装..."))
+            updateInstallationSnapshot(progress: 0, status: AppLocalized("准备安装..."))
         }
 
         do {
@@ -342,7 +342,7 @@ class NetworkManager: ObservableObject {
             
             await MainActor.run {
                 guard installationSessionID == sessionID else { return }
-                updateInstallationSnapshot(progress: 1.0, status: String(localized: "安装完成"))
+                updateInstallationSnapshot(progress: 1.0, status: AppLocalized("安装完成"))
 				completeInstallation()
             }
         } catch {
@@ -395,7 +395,7 @@ class NetworkManager: ObservableObject {
         installationPackages = []
         installCommand = ""
         lastInstallationProgress = 0
-        lastInstallationStatus = String(localized: "准备安装...")
+        lastInstallationStatus = AppLocalized("准备安装...")
         lastInstallationPhase = .preparing
         installationCancelledByUser = false
     }
@@ -406,12 +406,12 @@ class NetworkManager: ObservableObject {
             installationSessionID = sessionID
             installationSessionFinished = false
             installationCancelledByUser = false
-            installationState = .installing(progress: 0, status: String(localized: "正在重试安装..."))
+            installationState = .installing(progress: 0, status: AppLocalized("正在重试安装..."))
             installLogs = []
             installationPackages = []
             installCommand = ""
             lastInstallationPhase = .preparing
-            updateInstallationSnapshot(progress: 0, status: String(localized: "正在重试安装..."))
+            updateInstallationSnapshot(progress: 0, status: AppLocalized("正在重试安装..."))
         }
         
         do {
@@ -436,7 +436,7 @@ class NetworkManager: ObservableObject {
             
             await MainActor.run {
                 guard installationSessionID == sessionID else { return }
-                updateInstallationSnapshot(progress: 1.0, status: String(localized: "安装完成"))
+                updateInstallationSnapshot(progress: 1.0, status: AppLocalized("安装完成"))
                 completeInstallation()
             }
         } catch {
@@ -468,7 +468,7 @@ class NetworkManager: ObservableObject {
             return InstallProgressViewData(
                 productName: productName,
                 progress: 0,
-                status: String(localized: "准备安装..."),
+                status: AppLocalized("准备安装..."),
                 logs: installLogs,
                 installCommand: installCommand,
                 errorDetails: nil,
@@ -492,7 +492,7 @@ class NetworkManager: ObservableObject {
             return InstallProgressViewData(
                 productName: productName,
                 progress: 1.0,
-                status: String(localized: "安装完成"),
+                status: AppLocalized("安装完成"),
                 logs: installLogs,
                 installCommand: installCommand,
                 errorDetails: nil,
@@ -506,7 +506,7 @@ class NetworkManager: ObservableObject {
             return InstallProgressViewData(
                 productName: productName,
                 progress: lastInstallationProgress,
-                status: cancelledByUser ? String(localized: "安装已取消") : normalizedInstallFailureStatus(from: error),
+                status: cancelledByUser ? AppLocalized("安装已取消") : normalizedInstallFailureStatus(from: error),
                 logs: installLogs,
                 installCommand: installCommand,
                 errorDetails: cancelledByUser ? nil : errorDetails,
@@ -610,7 +610,7 @@ class NetworkManager: ObservableObject {
         let details: String?
         switch uninstallState {
         case .idle:
-            status = String(localized: "准备卸载...")
+            status = AppLocalized("准备卸载...")
             progress = 0
             outcome = .running
             details = nil
@@ -621,16 +621,16 @@ class NetworkManager: ObservableObject {
             details = nil
         case .completed:
             status = uninstallResult?.outcome == .warnings
-                ? String(localized: "卸载已完成，请查看警告事项") : String(localized: "卸载完成")
+                ? AppLocalized("卸载已完成，请查看警告事项") : AppLocalized("卸载完成")
             progress = 1
             outcome = .completed
             details = nil
         case .failed(let error, let errorDetails):
             switch uninstallResult?.outcome {
             case .cancelled:
-                status = String(localized: "卸载已取消")
+                status = AppLocalized("卸载已取消")
             case .partial:
-                status = String(localized: "卸载部分失败，请保留恢复目录并查看详细信息")
+                status = AppLocalized("卸载部分失败，请保留恢复目录并查看详细信息")
             default:
                 status = normalizedUninstallFailureStatus(from: error)
             }
@@ -643,7 +643,7 @@ class NetworkManager: ObservableObject {
             progress: progress,
             status: status,
             logs: uninstallLogs,
-            installCommand: String(localized: "HDPIM Engine (内置卸载引擎)"),
+            installCommand: AppLocalized("HDPIM Engine (内置卸载引擎)"),
             errorDetails: details,
             phase: lastUninstallPhase,
             outcome: outcome,
@@ -662,14 +662,14 @@ class NetworkManager: ObservableObject {
               !uninstallCancellationRequested else { return }
         uninstallCancellationRequested = true
         cancellation.cancel()
-        let status = String(localized: "正在取消卸载，等待恢复和收尾...")
+        let status = AppLocalized("正在取消卸载，等待恢复和收尾...")
         uninstallState = .installing(progress: lastUninstallProgress, status: status)
         appendUninstallLog(status)
     }
 
     private func runUninstall(productName: String, request: HDPIMUninstallHelperRequest) async {
         guard uninstallCancellation == nil else {
-            appendUninstallLog(String(localized: "上一卸载操作仍在运行或恢复，请等待收尾完成"))
+            appendUninstallLog(AppLocalized("上一卸载操作仍在运行或恢复，请等待收尾完成"))
             return
         }
         let sessionID = UUID()
@@ -681,10 +681,10 @@ class NetworkManager: ObservableObject {
         uninstallResult = nil
         uninstallLogs = []
         lastUninstallProgress = 0
-        lastUninstallStatus = String(localized: "准备卸载...")
+        lastUninstallStatus = AppLocalized("准备卸载...")
         lastUninstallPhase = .preparing
         uninstallState = .installing(progress: 0, status: lastUninstallStatus)
-        appendUninstallLog(String(format: String(localized: "准备卸载 %@"), productName))
+        appendUninstallLog(String(format: AppLocalized("准备卸载 %@"), productName))
         defer {
             cancellation.stopMonitoring()
             if uninstallSessionID == sessionID { uninstallCancellation = nil }
@@ -827,8 +827,11 @@ class NetworkManager: ObservableObject {
                 #if DEBUG
                 appendUninstallLog(message)
                 #else
-                if message.contains("警告") || message.contains("Warning") || message.contains("失败") ||
-                    message.contains("恢复") || message.contains("耗时") {
+                if message.contains("警告") || message.localizedCaseInsensitiveContains("warning") || message.contains("失败") ||
+                    message.contains("恢复") || message.contains("耗时") ||
+                    message.localizedCaseInsensitiveContains("failed") ||
+                    message.localizedCaseInsensitiveContains("recovery") ||
+                    message.localizedCaseInsensitiveContains("elapsed") {
                     appendUninstallLog(message)
                 }
                 #endif
@@ -867,18 +870,18 @@ class NetworkManager: ObservableObject {
 
 	private func normalizedUninstallFailureStatus(from error: Error) -> String {
 		let message = error.localizedDescription.trimmingCharacters(in: .whitespacesAndNewlines)
-		let prefix = String(localized: "卸载失败")
-		if message.hasPrefix(prefix) || message.hasPrefix("卸载失败") {
+		let prefix = AppLocalized("卸载失败")
+		if message.hasPrefix(prefix) || message.hasPrefix("卸载失败") || message.hasPrefix("Uninstall failed") {
 			return message
 		}
-		return String(format: String(localized: "卸载失败: %@"), message)
+		return String(format: AppLocalized("卸载失败: %@"), message)
 	}
 
 	private func updateInstallationSnapshot(progress: Double, status: String) {
         lastInstallationProgress = progress
         lastInstallationStatus = status
 
-        if status == String(localized: "安装完成") || status == "安装完成" {
+        if status == AppLocalized("安装完成") || status == "安装完成" || status == "Installation completed" {
             lastInstallationPhase = .finishing
             return
         }
@@ -891,11 +894,11 @@ class NetworkManager: ObservableObject {
 
     private func normalizedInstallFailureStatus(from error: Error) -> String {
         let message = error.localizedDescription.trimmingCharacters(in: .whitespacesAndNewlines)
-        let failurePrefix = String(localized: "安装失败")
-        if message.hasPrefix(failurePrefix) || message.hasPrefix("安装失败") {
+        let failurePrefix = AppLocalized("安装失败")
+        if message.hasPrefix(failurePrefix) || message.hasPrefix("安装失败") || message.hasPrefix("Install failed") {
             return message
         }
-        return String(format: String(localized: "安装失败: %@"), message)
+        return String(format: AppLocalized("安装失败: %@"), message)
     }
 
     private func consumePackageProgress(_ message: String) -> Bool {
@@ -936,7 +939,8 @@ class NetworkManager: ObservableObject {
             return false
         }
 
-        if message.contains("正在解压 ") || message.contains("正在安装 ") {
+        if message.contains("正在解压 ") || message.contains("正在安装 ") ||
+            message.contains("Extracting ") || message.contains("Installing ") {
             return true
         }
 
@@ -944,7 +948,7 @@ class NetworkManager: ObservableObject {
     }
 
     private func isProcessingInstallLog(_ message: String) -> Bool {
-        message.contains("正在处理:")
+        message.contains("正在处理:") || message.localizedCaseInsensitiveContains("processing:")
     }
 
     func getApplicationInfo(buildGuid: String) async throws -> String {

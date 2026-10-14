@@ -349,7 +349,7 @@ class TaskPersistenceManager: @unchecked Sendable {
         let initialStatus: DownloadStatus
         if isImportedDirectory && !importedDirectoryIsPresent {
             initialStatus = .failed(DownloadStatus.FailureInfo(
-                message: String(localized: "导入目录缺少 driver.xml，请重新选择完整安装目录"),
+                message: AppLocalized("导入目录缺少 driver.xml，请重新选择完整安装目录"),
                 error: nil, timestamp: Date(), recoverable: false
             ))
         } else if importedDirectoryIsPresent || (!allPackages.isEmpty && !hasPendingPackages) {
@@ -371,7 +371,7 @@ class TaskPersistenceManager: @unchecked Sendable {
             switch taskData.totalStatus {
             case .completed:
                 initialStatus = .paused(DownloadStatus.PauseInfo(
-                    reason: .other(String(localized: "下载包完整性校验未通过")),
+                    reason: .other(AppLocalized("下载包完整性校验未通过")),
                     timestamp: Date(),
                     resumable: true
                 ))
@@ -379,13 +379,13 @@ class TaskPersistenceManager: @unchecked Sendable {
                 initialStatus = .failed(info)
             case .downloading:
                 initialStatus = .paused(DownloadStatus.PauseInfo(
-                    reason: .other(String(localized: "程序退出")),
+                    reason: .other(AppLocalized("程序退出")),
                     timestamp: Date(),
                     resumable: true
                 ))
             default:
                 initialStatus = .paused(DownloadStatus.PauseInfo(
-                    reason: .other(String(localized: "程序重启后自动暂停")),
+                    reason: .other(AppLocalized("程序重启后自动暂停")),
                     timestamp: Date(),
                     resumable: true
                 ))

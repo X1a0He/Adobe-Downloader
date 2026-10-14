@@ -62,16 +62,16 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         Task { @MainActor in
             for task in activeTasks {
                 await globalNewDownloadUtils.pauseDownloadTask(
-                    taskId: task.id, reason: .other(String(localized: "程序即将退出"))
+                    taskId: task.id, reason: .other(AppLocalized("程序即将退出"))
                 )
                 await globalNetworkManager.saveTask(task)
             }
             let alert = NSAlert()
-            alert.messageText = String(localized: "确认退出")
-            alert.informativeText = String(localized: "有正在进行的下载任务，确定要退出吗？\n所有下载任务的进度已保存，下次启动可以继续下载")
+            alert.messageText = AppLocalized("确认退出")
+            alert.informativeText = AppLocalized("有正在进行的下载任务，确定要退出吗？\n所有下载任务的进度已保存，下次启动可以继续下载")
             alert.alertStyle = .warning
-            alert.addButton(withTitle: String(localized: "退出"))
-            alert.addButton(withTitle: String(localized: "取消"))
+            alert.addButton(withTitle: AppLocalized("退出"))
+            alert.addButton(withTitle: AppLocalized("取消"))
             let shouldExit = alert.runModal() != .alertSecondButtonReturn
             isPreparingTermination = false
             sender.reply(toApplicationShouldTerminate: shouldExit)

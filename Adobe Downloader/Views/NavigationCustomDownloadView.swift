@@ -30,7 +30,7 @@ private enum CustomDownloadPackageInfoLoader {
     ) async throws -> ([Package], [DependenciesToDownload]) {
         guard let snapshot = CatalogStore.shared.snapshot,
               let product = snapshot.product(id: productId, version: version) else {
-            throw NetworkError.invalidData("找不到产品信息")
+            throw NetworkError.invalidData(AppLocalized("找不到产品信息"))
         }
 
         if isManifestInstallerProduct(productId) {
@@ -100,6 +100,7 @@ private enum CustomDownloadPackageInfoLoader {
 }
 
 struct NavigationCustomDownloadView: View {
+    @StorageValue(\.interfaceLanguage) private var interfaceLanguage
     @StateObject private var loadingState = CustomDownloadLoadingState()
     @State private var allPackages: [Package] = []
     @State private var dependenciesToDownload: [DependenciesToDownload] = []
@@ -124,6 +125,7 @@ struct NavigationCustomDownloadView: View {
     }
 
     var body: some View {
+        let _ = interfaceLanguage
         Group {
             if loadingState.isLoading {
                 NavigationCustomDownloadLoadingView(
@@ -195,10 +197,10 @@ struct NavigationCustomDownloadView: View {
                 )
             }
         }
-        .alert("提示", isPresented: $showInstalledAlert) {
-            Button("确定", role: .cancel) { }
+        .alert(AppLocalized("提示"), isPresented: $showInstalledAlert) {
+            Button(AppLocalized("确定"), role: .cancel) { }
         } message: {
-            Text("该产品版本已安装")
+            Text(AppLocalized("该产品版本已安装"))
         }
     }
 
@@ -358,7 +360,7 @@ struct NavigationCustomDownloadView: View {
         return try await withCheckedThrowingContinuation { continuation in
             DispatchQueue.main.async {
                 let panel = NSOpenPanel()
-                panel.title = "选择保存位置"
+                panel.title = AppLocalized("选择保存位置")
                 panel.canCreateDirectories = true
                 panel.canChooseDirectories = true
                 panel.canChooseFiles = false
@@ -416,6 +418,7 @@ private struct CustomDownloadPageConstants {
 }
 
 private struct CustomDownloadHeaderView: View {
+    @StorageValue(\.interfaceLanguage) private var interfaceLanguage
     let productId: String
     let version: String
     let productIcon: NSImage?
@@ -425,6 +428,7 @@ private struct CustomDownloadHeaderView: View {
     @StorageValue(\.downloadAppleSilicon) private var downloadAppleSilicon
 
     var body: some View {
+        let _ = interfaceLanguage
         HStack(spacing: 12) {
             productIconView
                 .frame(width: 36, height: 36)
@@ -450,16 +454,16 @@ private struct CustomDownloadHeaderView: View {
 
             if let onCopyAll {
                 Button(action: onCopyAll) {
-                    Label("复制清单", systemImage: "doc.on.doc")
+                    Label(AppLocalized("复制清单"), systemImage: "doc.on.doc")
                         .font(.system(size: 12))
                 }
                 .buttonStyle(.bordered)
                 .controlSize(.regular)
-                .help("复制所有包信息")
+                .help(AppLocalized("复制所有包信息"))
             }
 
             if let onCancel {
-                Button("取消", action: onCancel)
+                Button(AppLocalized("取消"), action: onCancel)
                     .buttonStyle(.bordered)
                     .controlSize(.regular)
             }
@@ -510,6 +514,7 @@ private struct CustomDownloadHeaderView: View {
 }
 
 private struct NavigationCustomDownloadLoadingView: View {
+    @StorageValue(\.interfaceLanguage) private var interfaceLanguage
     @ObservedObject var loadingState: CustomDownloadLoadingState
 
     let productId: String
@@ -518,6 +523,7 @@ private struct NavigationCustomDownloadLoadingView: View {
     let onCancel: () -> Void
 
     var body: some View {
+        let _ = interfaceLanguage
         VStack(spacing: 0) {
             CustomDownloadHeaderView(
                 productId: productId,
@@ -537,7 +543,7 @@ private struct NavigationCustomDownloadLoadingView: View {
                 }
 
                 VStack(spacing: 6) {
-                    Text("正在获取包信息")
+                    Text(AppLocalized("正在获取包信息"))
                         .font(.system(size: 15, weight: .semibold))
                         .foregroundColor(.primary.opacity(0.9))
 
@@ -548,16 +554,16 @@ private struct NavigationCustomDownloadLoadingView: View {
                             .multilineTextAlignment(.center)
                             .lineLimit(2)
                     } else {
-                        Text("正在解析依赖与包清单…")
+                        Text(AppLocalized("正在解析依赖与包清单…"))
                             .font(.system(size: 12))
                             .foregroundColor(.secondary.opacity(0.8))
                     }
                 }
 
                 VStack(alignment: .leading, spacing: 6) {
-                    LoadingStageRow(title: "解析版本信息")
-                    LoadingStageRow(title: "下载产品清单")
-                    LoadingStageRow(title: "展开依赖与可选模块")
+                    LoadingStageRow(title: AppLocalized("解析版本信息"))
+                    LoadingStageRow(title: AppLocalized("下载产品清单"))
+                    LoadingStageRow(title: AppLocalized("展开依赖与可选模块"))
                 }
                 .padding(.horizontal, 20)
                 .padding(.vertical, 10)
@@ -571,7 +577,7 @@ private struct NavigationCustomDownloadLoadingView: View {
 
             HStack {
                 Spacer()
-                Button("取消") {
+                Button(AppLocalized("取消")) {
                     onCancel()
                 }
                 .buttonStyle(BeautifulButtonStyle(baseColor: Color.gray.opacity(0.2)))
@@ -586,7 +592,7 @@ private struct NavigationCustomDownloadLoadingView: View {
             idealHeight: CustomDownloadPageConstants.idealHeight,
             maxHeight: CustomDownloadPageConstants.maxHeight
         )
-        .navigationTitle("自定义下载")
+        .navigationTitle(AppLocalized("自定义下载"))
     }
 }
 
@@ -607,6 +613,7 @@ private struct LoadingStageRow: View {
 }
 
 private struct NavigationCustomDownloadErrorView: View {
+    @StorageValue(\.interfaceLanguage) private var interfaceLanguage
     let productId: String
     let version: String
     let productIcon: NSImage?
@@ -615,6 +622,7 @@ private struct NavigationCustomDownloadErrorView: View {
     let onBack: () -> Void
 
     var body: some View {
+        let _ = interfaceLanguage
         VStack(spacing: 0) {
             CustomDownloadHeaderView(
                 productId: productId,
@@ -634,7 +642,7 @@ private struct NavigationCustomDownloadErrorView: View {
                 }
 
                 VStack(spacing: 8) {
-                    Text("加载失败")
+                    Text(AppLocalized("加载失败"))
                         .font(.system(size: 16, weight: .semibold))
 
                     Text(errorMessage)
@@ -644,7 +652,7 @@ private struct NavigationCustomDownloadErrorView: View {
                         .frame(maxWidth: 420)
                         .textSelection(.enabled)
 
-                    Text("提示：请检查网络连接或尝试返回重新选择版本")
+                    Text(AppLocalized("提示：请检查网络连接或尝试返回重新选择版本"))
                         .font(.system(size: 11))
                         .foregroundColor(.secondary.opacity(0.7))
                         .multilineTextAlignment(.center)
@@ -655,7 +663,7 @@ private struct NavigationCustomDownloadErrorView: View {
                         HStack(spacing: 4) {
                             Image(systemName: "chevron.left")
                                 .font(.system(size: 11))
-                            Text("返回选择版本")
+                            Text(AppLocalized("返回选择版本"))
                         }
                     }
                     .buttonStyle(BeautifulButtonStyle(baseColor: Color.gray.opacity(0.2)))
@@ -664,7 +672,7 @@ private struct NavigationCustomDownloadErrorView: View {
                         HStack(spacing: 4) {
                             Image(systemName: "arrow.clockwise")
                                 .font(.system(size: 11))
-                            Text("重试")
+                            Text(AppLocalized("重试"))
                         }
                         .foregroundColor(.white)
                     }
@@ -683,7 +691,7 @@ private struct NavigationCustomDownloadErrorView: View {
             idealHeight: CustomDownloadPageConstants.idealHeight,
             maxHeight: CustomDownloadPageConstants.maxHeight
         )
-        .navigationTitle("自定义下载")
+        .navigationTitle(AppLocalized("自定义下载"))
     }
 }
 
@@ -698,11 +706,11 @@ private enum CustomPackageFilter: String, CaseIterable, Identifiable {
 
     var title: String {
         switch self {
-        case .required: return String(localized: "必需")
-        case .optional: return String(localized: "可选")
-        case .core: return String(localized: "核心包")
-        case .nonCore: return String(localized: "非核心包")
-        case .selectedOnly: return String(localized: "仅已选")
+        case .required: return AppLocalized("必需")
+        case .optional: return AppLocalized("可选")
+        case .core: return AppLocalized("核心包")
+        case .nonCore: return AppLocalized("非核心包")
+        case .selectedOnly: return AppLocalized("仅已选")
         }
     }
 
@@ -761,6 +769,7 @@ private struct CustomFilterChip: View {
 }
 
 private struct CustomDownloadFilterBar: View {
+    @StorageValue(\.interfaceLanguage) private var interfaceLanguage
     @Binding var searchText: String
     @Binding var activeFilters: Set<CustomPackageFilter>
     let visibleCount: Int
@@ -773,13 +782,14 @@ private struct CustomDownloadFilterBar: View {
     }
 
     var body: some View {
+        let _ = interfaceLanguage
         VStack(spacing: 10) {
             HStack(spacing: 8) {
                 Image(systemName: "magnifyingglass")
                     .font(.system(size: 13))
                     .foregroundColor(.secondary)
 
-                TextField(String(localized: "搜索包名、版本、类型"), text: $searchText)
+                TextField(AppLocalized("搜索包名、版本、类型"), text: $searchText)
                     .textFieldStyle(.plain)
                     .font(.system(size: 13))
 
@@ -789,7 +799,7 @@ private struct CustomDownloadFilterBar: View {
                             .foregroundColor(.secondary)
                     }
                     .buttonStyle(.plain)
-                    .accessibilityLabel(String(localized: "清除搜索"))
+                    .accessibilityLabel(AppLocalized("清除搜索"))
                 }
             }
             .padding(.horizontal, 10)
@@ -805,7 +815,7 @@ private struct CustomDownloadFilterBar: View {
 
             HStack(spacing: 4) {
                 CustomFilterChip(
-                    title: String(localized: "全部"),
+                    title: AppLocalized("全部"),
                     icon: "square.grid.2x2",
                     isActive: activeFilters.isEmpty,
                     onTap: {
@@ -828,7 +838,7 @@ private struct CustomDownloadFilterBar: View {
                 Spacer(minLength: 8)
 
                 if hasFilters {
-                    Button(String(localized: "清除筛选")) {
+                    Button(AppLocalized("清除筛选")) {
                         withAnimation(.easeInOut(duration: 0.15)) {
                             searchText = ""
                             activeFilters.removeAll()
@@ -840,21 +850,21 @@ private struct CustomDownloadFilterBar: View {
             }
 
             HStack(spacing: 12) {
-                Text("显示 \(visibleCount) / \(totalCount) 个包")
+                Text(AppLocalized("显示 \(visibleCount) / \(totalCount) 个包"))
                     .foregroundColor(.secondary)
                     .monospacedDigit()
 
                 Spacer(minLength: 12)
 
-                Button(String(localized: "全选当前"), action: onSelectAllVisible)
+                Button(AppLocalized("全选当前"), action: onSelectAllVisible)
                     .buttonStyle(.borderless)
                     .disabled(visibleCount == 0)
-                    .help(String(localized: "选中当前筛选下可见的全部包"))
+                    .help(AppLocalized("选中当前筛选下可见的全部包"))
 
-                Button(String(localized: "取消可选"), action: onClearAllSelection)
+                Button(AppLocalized("取消可选"), action: onClearAllSelection)
                     .buttonStyle(.borderless)
                     .foregroundColor(.secondary)
-                    .help(String(localized: "保留必需包和已下载包"))
+                    .help(AppLocalized("保留必需包和已下载包"))
             }
             .font(.system(size: 11))
         }
@@ -888,6 +898,7 @@ private struct CustomDownloadFilterBar: View {
 }
 
 private struct NavigationCustomPackageSelectorView: View {
+    @StorageValue(\.interfaceLanguage) private var interfaceLanguage
     @State private var selectedPackages: Set<UUID> = []
     @State private var showCopiedAlert = false
     @State private var isDownloading = false
@@ -912,6 +923,7 @@ private struct NavigationCustomPackageSelectorView: View {
     let onInstalledProduct: () -> Void
 
     var body: some View {
+        let _ = interfaceLanguage
         let grouped = filteredDependencies
         let selectedStats = selectedStatsByDependency
 
@@ -1001,7 +1013,7 @@ private struct NavigationCustomPackageSelectorView: View {
             idealHeight: CustomDownloadPageConstants.idealHeight,
             maxHeight: CustomDownloadPageConstants.maxHeight
         )
-        .navigationTitle("自定义下载")
+        .navigationTitle(AppLocalized("自定义下载"))
         .onAppear {
             initializeSelectionIfNeeded()
             scanDownloadedPackagesIfNeeded()
@@ -1016,7 +1028,7 @@ private struct NavigationCustomPackageSelectorView: View {
                 HStack(spacing: 6) {
                     Image(systemName: "checkmark.circle.fill")
                         .foregroundColor(.green)
-                    Text("已复制")
+                    Text(AppLocalized("已复制"))
                         .font(.system(size: 13, weight: .medium))
                         .foregroundColor(.primary)
                 }
@@ -1358,6 +1370,7 @@ private struct NavigationCustomPackageSelectorView: View {
 }
 
 private struct DependencySection: View {
+    @StorageValue(\.interfaceLanguage) private var interfaceLanguage
     let productId: String
     let dependency: DependenciesToDownload
     let visiblePackages: [Package]
@@ -1387,14 +1400,15 @@ private struct DependencySection: View {
 
     private var platformTitle: String {
         switch dependency.platform.lowercased() {
-        case "macarm64": return String(localized: "Apple Silicon")
-        case "macuniversal": return String(localized: "通用")
-        case "osx10", "osx10-64": return String(localized: "Intel")
+        case "macarm64": return AppLocalized("Apple Silicon")
+        case "macuniversal": return AppLocalized("通用")
+        case "osx10", "osx10-64": return AppLocalized("Intel")
         default: return dependency.platform
         }
     }
 
     var body: some View {
+        let _ = interfaceLanguage
         VStack(alignment: .leading, spacing: 0) {
             header
 
@@ -1405,23 +1419,23 @@ private struct DependencySection: View {
                     }
 
                     HStack(spacing: 12) {
-                        Text("包清单")
+                        Text(AppLocalized("包清单"))
                             .foregroundColor(.secondary)
 
                         Spacer(minLength: 8)
 
-                        Button(String(localized: "全选此组")) {
+                        Button(AppLocalized("全选此组")) {
                             onSelectGroup(dependency.sapCode)
                         }
                         .buttonStyle(.borderless)
-                        .help(String(localized: "选中该依赖下所有包"))
+                        .help(AppLocalized("选中该依赖下所有包"))
 
-                        Button(String(localized: "取消可选")) {
+                        Button(AppLocalized("取消可选")) {
                             onClearGroup(dependency.sapCode)
                         }
                         .buttonStyle(.borderless)
                         .foregroundColor(.secondary)
-                        .help(String(localized: "保留此组的必需包和已下载包"))
+                        .help(AppLocalized("保留此组的必需包和已下载包"))
                     }
                     .font(.system(size: 11))
                 }
@@ -1491,7 +1505,7 @@ private struct DependencySection: View {
                     }
 
                     HStack(spacing: 8) {
-                        Text(isMainProduct ? String(localized: "主产品") : String(localized: "依赖组件"))
+                        Text(isMainProduct ? AppLocalized("主产品") : AppLocalized("依赖组件"))
                             .foregroundColor(isMainProduct ? .accentColor : .secondary)
 
                         if !platformTitle.isEmpty {
@@ -1508,12 +1522,12 @@ private struct DependencySection: View {
                 Spacer(minLength: 12)
 
                 VStack(alignment: .trailing, spacing: 6) {
-                    Text("已选 \(selectedCount) / \(dependency.packages.count) 个包")
+                    Text(AppLocalized("已选 \(selectedCount) / \(dependency.packages.count) 个包"))
                         .font(.system(size: 11))
                         .foregroundColor(.secondary)
 
                     HStack(alignment: .firstTextBaseline, spacing: 6) {
-                        Text("需下载")
+                        Text(AppLocalized("需下载"))
                             .font(.system(size: 10))
                             .foregroundColor(.secondary)
                         Text(groupSizeText)
@@ -1531,8 +1545,8 @@ private struct DependencySection: View {
         }
         .buttonStyle(.plain)
         .disabled(isForceExpanded)
-        .help(isForceExpanded ? "筛选激活时无法折叠" : (effectiveCollapsed ? "展开" : "折叠"))
-        .accessibilityValue(effectiveCollapsed ? String(localized: "已收起") : String(localized: "已展开"))
+        .help(isForceExpanded ? AppLocalized("筛选激活时无法折叠") : (effectiveCollapsed ? AppLocalized("展开") : AppLocalized("折叠")))
+        .accessibilityValue(effectiveCollapsed ? AppLocalized("已收起") : AppLocalized("已展开"))
     }
 
     private var buildGuidButton: some View {
@@ -1556,8 +1570,8 @@ private struct DependencySection: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .help(String(format: String(localized: "复制 buildGuid: %@"), dependency.buildGuid))
-        .accessibilityLabel(String(localized: "复制 buildGuid"))
+        .help(String(format: AppLocalized("复制 buildGuid: %@"), dependency.buildGuid))
+        .accessibilityLabel(AppLocalized("复制 buildGuid"))
         .accessibilityValue(dependency.buildGuid)
     }
 
@@ -1568,6 +1582,7 @@ private struct DependencySection: View {
 }
 
 private struct CustomDownloadActionBar: View {
+    @StorageValue(\.interfaceLanguage) private var interfaceLanguage
     let selectedCount: Int
     let totalCount: Int
     let downloadCount: Int
@@ -1579,22 +1594,23 @@ private struct CustomDownloadActionBar: View {
     let onStartDownload: () -> Void
 
     var body: some View {
+        let _ = interfaceLanguage
         HStack(spacing: 16) {
             VStack(alignment: .leading, spacing: 5) {
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
                     Text(totalSizeText)
                         .font(.system(size: 20, weight: .semibold))
                         .foregroundColor(.primary)
-                    Text("需下载 \(downloadCount) 个包")
+                    Text(AppLocalized("需下载 \(downloadCount) 个包"))
                         .font(.system(size: 11))
                         .foregroundColor(.secondary)
                 }
 
                 HStack(spacing: 8) {
-                    Text("已选 \(selectedCount) / \(totalCount) 个包")
+                    Text(AppLocalized("已选 \(selectedCount) / \(totalCount) 个包"))
                     if downloadedCount > 0 {
                         Text("·")
-                        Text("已下载 \(downloadedCount) 个包")
+                        Text(AppLocalized("已下载 \(downloadedCount) 个包"))
                     }
                 }
                 .font(.system(size: 11))
@@ -1604,7 +1620,7 @@ private struct CustomDownloadActionBar: View {
 
             Spacer(minLength: 12)
 
-            Button("取消", action: onCancel)
+            Button(AppLocalized("取消"), action: onCancel)
                 .buttonStyle(.bordered)
                 .controlSize(.large)
 
@@ -1616,7 +1632,7 @@ private struct CustomDownloadActionBar: View {
                     } else {
                         Image(systemName: "arrow.down")
                     }
-                    Text(isDownloading ? "正在下载..." : "开始下载")
+                    Text(isDownloading ? AppLocalized("正在下载...") : AppLocalized("开始下载"))
                 }
                 .font(.system(size: 12, weight: .semibold))
                 .frame(minWidth: 100)
@@ -1635,11 +1651,13 @@ private struct CustomDownloadActionBar: View {
 }
 
 private struct CustomPackageEmptyView: View {
+    @StorageValue(\.interfaceLanguage) private var interfaceLanguage
     let hasFilters: Bool
     let totalCount: Int
     let onClearFilters: () -> Void
 
     var body: some View {
+        let _ = interfaceLanguage
         VStack(spacing: 14) {
             ZStack {
                 Circle()
@@ -1651,10 +1669,10 @@ private struct CustomPackageEmptyView: View {
             }
 
             VStack(spacing: 4) {
-                Text(hasFilters ? "没有匹配的包" : "暂无可下载的包")
+                Text(hasFilters ? AppLocalized("没有匹配的包") : AppLocalized("暂无可下载的包"))
                     .font(.system(size: 14, weight: .semibold))
                 if hasFilters {
-                    Text("当前筛选下隐藏了 \(totalCount) 个包")
+                    Text(AppLocalized("当前筛选下隐藏了 \(totalCount) 个包"))
                         .font(.system(size: 12))
                         .foregroundColor(.secondary)
                 }
@@ -1662,7 +1680,7 @@ private struct CustomPackageEmptyView: View {
 
             if hasFilters {
                 Button(action: onClearFilters) {
-                    Text("清空筛选")
+                    Text(AppLocalized("清空筛选"))
                         .font(.system(size: 12, weight: .medium))
                         .foregroundColor(.white)
                 }
@@ -1675,6 +1693,7 @@ private struct CustomPackageEmptyView: View {
 }
 
 private struct NavigationEnhancedPackageRow: View {
+    @StorageValue(\.interfaceLanguage) private var interfaceLanguage
     let package: Package
     let isSelected: Bool
     let isDownloaded: Bool
@@ -1689,6 +1708,7 @@ private struct NavigationEnhancedPackageRow: View {
     }
 
     var body: some View {
+        let _ = interfaceLanguage
         HStack(alignment: .top, spacing: 10) {
             Button(action: {
                 guard !isLocked else { return }
@@ -1704,7 +1724,7 @@ private struct NavigationEnhancedPackageRow: View {
             .disabled(isLocked)
             .help(checkboxHelp)
             .accessibilityLabel(package.fullPackageName)
-            .accessibilityValue(isSelected ? String(localized: "已选择") : String(localized: "未选择"))
+            .accessibilityValue(isSelected ? AppLocalized("已选择") : AppLocalized("未选择"))
 
             VStack(alignment: .leading, spacing: 4) {
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
@@ -1730,7 +1750,7 @@ private struct NavigationEnhancedPackageRow: View {
 
                 #if DEBUG
                 if !package.condition.isEmpty {
-                    Text(String(format: String(localized: "条件: %@"), package.condition))
+                    Text(String(format: AppLocalized("条件: %@"), package.condition))
                         .font(.system(size: 10))
                         .foregroundColor(.secondary.opacity(0.8))
                         .textSelection(.enabled)
@@ -1758,8 +1778,8 @@ private struct NavigationEnhancedPackageRow: View {
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .help("复制包信息")
-            .accessibilityLabel(String(localized: "复制包信息"))
+            .help(AppLocalized("复制包信息"))
+            .accessibilityLabel(AppLocalized("复制包信息"))
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 6)
@@ -1832,15 +1852,15 @@ private struct NavigationEnhancedPackageRow: View {
             }
 
             if isDownloaded {
-                Label(String(localized: "已下载"), systemImage: "checkmark.circle")
+                Label(AppLocalized("已下载"), systemImage: "checkmark.circle")
                     .foregroundColor(.green)
             }
 
             if !isRequiredPackage {
                 if package.isAdobeDownloaderPreselected {
-                    Text(String(localized: "Adobe Downloader 预选"))
+                    Text(AppLocalized("Adobe Downloader 预选"))
                 } else if package.isDefaultSelected {
-                    Text(String(localized: "默认选择"))
+                    Text(AppLocalized("默认选择"))
                 }
             }
         }
@@ -1860,11 +1880,11 @@ private struct NavigationEnhancedPackageRow: View {
 
     private var checkboxHelp: String {
         if isDownloaded {
-            return String(localized: "此包已存在于离线源目录，无法取消选择")
+            return AppLocalized("此包已存在于离线源目录，无法取消选择")
         }
         if isRequiredPackage {
-            return String(localized: "此包为必需包，无法取消选择")
+            return AppLocalized("此包为必需包，无法取消选择")
         }
-        return String(localized: "点击切换选择状态")
+        return AppLocalized("点击切换选择状态")
     }
 }

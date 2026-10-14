@@ -57,31 +57,31 @@ enum HDPIMCommandError: Int, Error, LocalizedError {
     case backupFailed = 198
 
     var errorDescription: String? {
-        String(format: String(localized: "HDPIM 命令错误 (%d): %@"), rawValue, description)
+        String(format: AppLocalized("HDPIM 命令错误 (%d): %@"), rawValue, description)
     }
 
     var description: String {
         switch self {
-        case .success: return String(localized: "成功")
-        case .pimxInvalid: return String(localized: "PIMX 无效/损坏")
-        case .fileNotFound: return String(localized: "文件未找到")
-        case .targetConflict: return String(localized: "目标路径冲突")
-        case .moveFileFailed: return String(localized: "无法移动文件")
-        case .copyFileFailed: return String(localized: "无法复制文件")
-        case .createDirectoryFailed: return String(localized: "创建目录失败")
-        case .getPermissionFailed: return String(localized: "无法获取权限")
-        case .setPermissionFailed: return String(localized: "无法设置权限")
-        case .getOwnerFailed: return String(localized: "无法获取所有者")
-        case .setOwnerFailed: return String(localized: "无法设置所有者")
-        case .createSymlinkFailed: return String(localized: "无法创建符号链接")
-        case .setDisplayAttributesFailed: return String(localized: "无法设置显示属性")
-        case .runProgramFailed: return String(localized: "程序运行失败")
-        case .fileLockedByProcess: return String(localized: "文件被进程锁定")
-        case .registerApplicationFailed: return String(localized: "注册应用失败")
-        case .patchFailed: return String(localized: "补丁应用失败")
-        case .conflictingProcess: return String(localized: "冲突进程运行中")
-        case .xmlHashMismatch: return String(localized: "XML 哈希校验失败")
-        case .backupFailed: return String(localized: "备份失败")
+        case .success: return AppLocalized("成功")
+        case .pimxInvalid: return AppLocalized("PIMX 无效/损坏")
+        case .fileNotFound: return AppLocalized("文件未找到")
+        case .targetConflict: return AppLocalized("目标路径冲突")
+        case .moveFileFailed: return AppLocalized("无法移动文件")
+        case .copyFileFailed: return AppLocalized("无法复制文件")
+        case .createDirectoryFailed: return AppLocalized("创建目录失败")
+        case .getPermissionFailed: return AppLocalized("无法获取权限")
+        case .setPermissionFailed: return AppLocalized("无法设置权限")
+        case .getOwnerFailed: return AppLocalized("无法获取所有者")
+        case .setOwnerFailed: return AppLocalized("无法设置所有者")
+        case .createSymlinkFailed: return AppLocalized("无法创建符号链接")
+        case .setDisplayAttributesFailed: return AppLocalized("无法设置显示属性")
+        case .runProgramFailed: return AppLocalized("程序运行失败")
+        case .fileLockedByProcess: return AppLocalized("文件被进程锁定")
+        case .registerApplicationFailed: return AppLocalized("注册应用失败")
+        case .patchFailed: return AppLocalized("补丁应用失败")
+        case .conflictingProcess: return AppLocalized("冲突进程运行中")
+        case .xmlHashMismatch: return AppLocalized("XML 哈希校验失败")
+        case .backupFailed: return AppLocalized("备份失败")
         }
     }
 
@@ -240,7 +240,7 @@ class HDPIMCommandEngine {
                     try? await Task.sleep(nanoseconds: 2_000_000_000)
                     if Task.isCancelled { break }
                     let detail = command.commandDetails ?? command.commandName
-                    progressHandler?(index, commands.count, String(format: String(localized: "%@ 正在处理: %@"), command.commandName, detail))
+                    progressHandler?(index, commands.count, String(format: AppLocalized("%@ 正在处理: %@"), command.commandName, detail))
                 }
             }
 
@@ -298,16 +298,16 @@ enum HDPIMInstallError: Error, LocalizedError {
     var errorDescription: String? {
         switch self {
         case .commandFailed(let cmd, let err, _, _, _):
-            return String(format: String(localized: "安装命令 '%@' 执行失败: %@"), cmd, err.localizedDescription)
-        case .extractionFailed(let msg): return String(format: String(localized: "解压失败: %@"), msg)
-        case .pimxNotFound(let path): return String(format: String(localized: "PIMX 文件不存在: %@"), path)
+            return String(format: AppLocalized("安装命令 '%@' 执行失败: %@"), cmd, err.localizedDescription)
+        case .extractionFailed(let msg): return String(format: AppLocalized("解压失败: %@"), msg)
+        case .pimxNotFound(let path): return String(format: AppLocalized("PIMX 文件不存在: %@"), path)
         case .packageNameMismatch(let expected, let actual):
-            return String(format: String(localized: "包名不匹配: 期望 %@, 实际 %@"), expected, actual)
-        case .rollbackFailed(let msg): return String(format: String(localized: "回滚失败: %@"), msg)
-        case .databaseError(let msg): return String(format: String(localized: "数据库错误: %@"), msg)
-        case .cancelled: return String(localized: "安装已取消")
+            return String(format: AppLocalized("包名不匹配: 期望 %@, 实际 %@"), expected, actual)
+        case .rollbackFailed(let msg): return String(format: AppLocalized("回滚失败: %@"), msg)
+        case .databaseError(let msg): return String(format: AppLocalized("数据库错误: %@"), msg)
+        case .cancelled: return AppLocalized("安装已取消")
         case .conflictingProcessDetected(let processes):
-            return String(format: String(localized: "检测到冲突进程正在运行: %@，请关闭后重试"), processes.joined(separator: ", "))
+            return String(format: AppLocalized("检测到冲突进程正在运行: %@，请关闭后重试"), processes.joined(separator: ", "))
         case .hostValidationFailed(let msg):
             return msg
         }

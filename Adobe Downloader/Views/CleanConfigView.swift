@@ -7,11 +7,31 @@
 import SwiftUI
 
 struct CleanConfigView: View {
+    @StorageValue(\.interfaceLanguage) private var interfaceLanguage
     @State private var showConfirmation = false
     @State private var showAlert = false
     @State private var alertMessage = ""
     @State private var chipInfo: String = ""
     @State private var helperStatus: PrivilegedHelperAdapter.HelperStatus = .noFound
+
+    private static let systemBuild: String = {
+        var size = 0
+        guard sysctlbyname("kern.osversion", nil, &size, nil, 0) == 0, size > 0 else {
+            return ""
+        }
+        var buffer = [CChar](repeating: 0, count: size)
+        guard sysctlbyname("kern.osversion", &buffer, &size, nil, 0) == 0 else {
+            return ""
+        }
+        return String(cString: buffer)
+    }()
+
+    private var systemVersionText: String {
+        let version = ProcessInfo.processInfo.operatingSystemVersion
+        let versionNumber = "\(version.majorVersion).\(version.minorVersion).\(version.patchVersion)"
+        guard !Self.systemBuild.isEmpty else { return "macOS \(versionNumber)" }
+        return AppLocalized("macOS \(versionNumber)（版号 \(Self.systemBuild)）")
+    }
 
     private func getChipInfo() -> String {
         var size = 0
@@ -28,13 +48,14 @@ struct CleanConfigView: View {
     }
 
     var body: some View {
+        let _ = interfaceLanguage
         HStack(spacing: 16) {
             BeautifulGroupBox(label: {
-                Text("重置程序")
+                Text(AppLocalized("重置程序"))
             }) {
                 VStack(alignment: .leading, spacing: 8) {
                     HStack(spacing: 8) {
-                        Button("重置程序") {
+                        Button(AppLocalized("重置程序")) {
                             showConfirmation = true
                         }
                         .buttonStyle(BeautifulButtonStyle(baseColor: .red.opacity(0.8)))
@@ -45,7 +66,7 @@ struct CleanConfigView: View {
             }
 
             BeautifulGroupBox(label: {
-                Text("系统信息")
+                Text(AppLocalized("系统信息"))
             }) {
                 VStack(alignment: .leading, spacing: 8) {
                     HStack(spacing: 8) {
@@ -56,10 +77,10 @@ struct CleanConfigView: View {
                             .background(Circle().fill(Color.blue.opacity(0.1)).frame(width: 28, height: 28))
 
                         VStack(alignment: .leading, spacing: 1) {
-                            Text("macOS \(ProcessInfo.processInfo.operatingSystemVersionString)")
+                            Text(systemVersionText)
                                 .fontWeight(.medium)
 
-                            Text("\(chipInfo.isEmpty ? "加载中..." : chipInfo)")
+                            Text(chipInfo.isEmpty ? AppLocalized("加载中...") : chipInfo)
                                 .foregroundColor(.secondary)
                                 .font(.system(size: 12))
                         }
@@ -68,16 +89,16 @@ struct CleanConfigView: View {
                 }
             }
         }
-        .alert("确认重置程序", isPresented: $showConfirmation) {
-            Button("取消", role: .cancel) { }
-            Button("确定", role: .destructive) {
+        .alert(AppLocalized("确认重置程序"), isPresented: $showConfirmation) {
+            Button(AppLocalized("取消"), role: .cancel) { }
+            Button(AppLocalized("确定"), role: .destructive) {
                 cleanConfig()
             }
         } message: {
-            Text("这将清空所有配置并结束应用程序，确定要继续吗？")
+            Text(AppLocalized("这将清空所有配置并结束应用程序，确定要继续吗？"))
         }
-        .alert("操作结果", isPresented: $showAlert) {
-            Button("确定") { }
+        .alert(AppLocalized("操作结果"), isPresented: $showAlert) {
+            Button(AppLocalized("确定")) { }
         } message: {
             Text(alertMessage)
         }
@@ -101,7 +122,7 @@ struct CleanConfigView: View {
 
             guard let scriptPath = Bundle.main.path(forResource: "clean-config", ofType: "sh"),
                   let scriptContent = try? String(contentsOfFile: scriptPath, encoding: .utf8) else {
-                throw NSError(domain: "ScriptError", code: 1, userInfo: [NSLocalizedDescriptionKey: "无法读取脚本文件"])
+                throw NSError(domain: "ScriptError", code: 1, userInfo: [NSLocalizedDescriptionKey: AppLocalized("无法读取脚本文件")])
             }
 
             try scriptContent.write(to: scriptURL, atomically: true, encoding: .utf8)
@@ -112,7 +133,7 @@ struct CleanConfigView: View {
             if helperStatus == .installed {
                 PrivilegedHelperAdapter.shared.executeCommand("open -a Terminal \(scriptURL.path)") { output in
                     if output.starts(with: "Error") {
-                        alertMessage = String(localized: "清空配置失败: \(output)")
+                        alertMessage = AppLocalized("清空配置失败: \(output)")
                         showAlert = true
                     } else {
                         DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
@@ -126,7 +147,7 @@ struct CleanConfigView: View {
                                         withApplicationAt: terminalURL,
                                            configuration: NSWorkspace.OpenConfiguration()) { _, error in
                     if let error = error {
-                        alertMessage = "打开终端失败: \(error.localizedDescription)"
+                        alertMessage = AppLocalized("打开终端失败: \(error.localizedDescription)")
                         showAlert = true
                         return
                     }
@@ -138,7 +159,7 @@ struct CleanConfigView: View {
             }
 
         } catch {
-            alertMessage = String(localized: "清空配置失败: \(error.localizedDescription)")
+            alertMessage = AppLocalized("清空配置失败: \(error.localizedDescription)")
             showAlert = true
         }
     }
@@ -167,36 +188,36 @@ struct CleanupLog: Identifiable {
 
         if command.contains("Library/Logs") || command.contains("DiagnosticReports") {
             if command.contains("Adobe Creative Cloud") {
-                return String(localized: "正在清理 Creative Cloud 日志文件...")
+                return AppLocalized("正在清理 Creative Cloud 日志文件...")
             } else if command.contains("CrashReporter") {
-                return String(localized: "正在清理崩溃报告日志...")
+                return AppLocalized("正在清理崩溃报告日志...")
             } else {
-                return String(localized: "正在清理应用程序日志文件...")
+                return AppLocalized("正在清理应用程序日志文件...")
             }
         } else if command.contains("Library/Caches") {
-            return String(localized: "正在清理缓存文件...")
+            return AppLocalized("正在清理缓存文件...")
         } else if command.contains("Library/Preferences") {
-            return String(localized: "正在清理偏好设置文件...")
+            return AppLocalized("正在清理偏好设置文件...")
         } else if command.contains("Applications") {
             if command.contains("Creative Cloud") {
-                return String(localized: "正在清理 Creative Cloud 应用...")
+                return AppLocalized("正在清理 Creative Cloud 应用...")
             } else {
-                return String(localized: "正在清理 Adobe 应用程序...")
+                return AppLocalized("正在清理 Adobe 应用程序...")
             }
         } else if command.contains("LaunchAgents") || command.contains("LaunchDaemons") {
-            return String(localized: "正在清理启动项服务...")
+            return AppLocalized("正在清理启动项服务...")
         } else if command.contains("security") {
-            return String(localized: "正在清理钥匙串数据...")
+            return AppLocalized("正在清理钥匙串数据...")
         } else if command.contains("AdobeGenuineClient") || command.contains("AdobeGCClient") {
-            return String(localized: "正在清理正版验证服务...")
+            return AppLocalized("正在清理正版验证服务...")
         } else if command.contains("hosts") {
-            return String(localized: "正在清理 hosts 文件...")
+            return AppLocalized("正在清理 hosts 文件...")
         } else if command.contains("kill") {
-            return String(localized: "正在停止 Adobe 相关进程...")
+            return AppLocalized("正在停止 Adobe 相关进程...")
         } else if command.contains("receipts") {
-            return String(localized: "正在清理安装记录...")
+            return AppLocalized("正在清理安装记录...")
         } else {
-            return String(localized: "正在清理其他文件...")
+            return AppLocalized("正在清理其他文件...")
         }
     }
 }

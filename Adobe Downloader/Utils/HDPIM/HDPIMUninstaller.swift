@@ -89,9 +89,9 @@ private final class HDPIMUninstallProgressReporter {
 	func reportPackageSelection(packageCount: Int) {
 		let status: String
 		if packageCount > 0 {
-			status = String(format: String(localized: "正在准备 %d 个 HDPIM 卸载包"), packageCount)
+			status = String(format: AppLocalized("正在准备 %d 个 HDPIM 卸载包"), packageCount)
 		} else {
-			status = String(localized: "未找到需要删除的包，正在更新 HDPIM 模块状态")
+			status = AppLocalized("未找到需要删除的包，正在更新 HDPIM 模块状态")
 		}
 		emit(0.055, status, force: true)
 	}
@@ -101,7 +101,7 @@ private final class HDPIMUninstallProgressReporter {
 		currentPackageWorkSize = 0
 		packageStartTime = ProcessInfo.processInfo.systemUptime
 		completedCommands = 0
-		emitPackageProgress(status: String(format: String(localized: "正在卸载 %@ (%d/%d)"), package.packageName, index, total), force: true)
+		emitPackageProgress(status: String(format: AppLocalized("正在卸载 %@ (%d/%d)"), package.packageName, index, total), force: true)
 	}
 
 	func packageWorkSize(for package: HDPIMNativePackageContext) -> Int64 {
@@ -117,7 +117,7 @@ private final class HDPIMUninstallProgressReporter {
 		self.completedCommands = completedCommands
 		let processedBytes = Int64(Double(size) * Double(completedCommands) / Double(max(totalCommands, 1)))
 		currentPackageWorkSize = min(max(processedBytes, currentPackageWorkSize), size)
-		emitPackageProgress(status: String(format: String(localized: "正在卸载 %@... %d/%d 步"),
+		emitPackageProgress(status: String(format: AppLocalized("正在卸载 %@... %d/%d 步"),
                                               package.packageName, completedCommands, totalCommands))
 	}
 
@@ -127,7 +127,7 @@ private final class HDPIMUninstallProgressReporter {
 		currentPackageId = nil
 		currentPackageWorkSize = 0
 		let elapsed = ProcessInfo.processInfo.systemUptime - packageStartTime
-		emitPackageProgress(status: String(format: String(localized: "已完成 %@ 卸载（%d 步，耗时 %.1f 秒）"),
+		emitPackageProgress(status: String(format: AppLocalized("已完成 %@ 卸载（%d 步，耗时 %.1f 秒）"),
                                               package.packageName, completedCommands, elapsed), force: true)
 	}
 
@@ -136,7 +136,7 @@ private final class HDPIMUninstallProgressReporter {
 	}
 
 	func reportFinished() {
-		emit(1.0, String(localized: "卸载完成"), force: true)
+		emit(1.0, AppLocalized("卸载完成"), force: true)
 	}
 
 	private func emitPackageProgress(status: String, force: Bool = false) {
@@ -756,17 +756,17 @@ enum UninstallError: Error, LocalizedError {
 	var errorDescription: String? {
 		switch self {
 		case .dependencyExists(let reason):
-			return reason.isEmpty ? String(localized: "该产品仍被其他产品引用，不能卸载") : reason
+			return reason.isEmpty ? AppLocalized("该产品仍被其他产品引用，不能卸载") : reason
 		case .uwpReferenceExists(let reason):
-			return reason.isEmpty ? String(localized: "该 UWP 产品仍被其他产品引用，不能卸载") : reason
+			return reason.isEmpty ? AppLocalized("该 UWP 产品仍被其他产品引用，不能卸载") : reason
 		case .noPackagesSelected:
-			return String(localized: "没有找到可卸载的包")
+			return AppLocalized("没有找到可卸载的包")
 		case .moduleNotInstalled:
-			return String(localized: "所选模块未安装或已被移除")
+			return AppLocalized("所选模块未安装或已被移除")
 		case .missingUninstallPIMX(let value):
-			return String(format: String(localized: "找不到卸载 PIMX: %@"), value)
+			return String(format: AppLocalized("找不到卸载 PIMX: %@"), value)
 		case .conflictingProcesses(let processes):
-			return String(format: String(localized: "检测到冲突进程，请先退出: %@"), processes.joined(separator: ", "))
+			return String(format: AppLocalized("检测到冲突进程，请先退出: %@"), processes.joined(separator: ", "))
 		}
 	}
 }

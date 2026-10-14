@@ -20,6 +20,7 @@ private func formatTaskDateLocal(_ date: Date) -> String {
 }
 
 struct TaskCard: View {
+    @StorageValue(\.interfaceLanguage) private var interfaceLanguage
     @ObservedObject var task: NewDownloadTask
     let onAction: (TaskAction) -> Void
 
@@ -28,7 +29,7 @@ struct TaskCard: View {
     @State private var isInstalling = false
     @State private var showHelperAlert = false
     @State private var showCopiedToast = false
-    @State private var copiedToastText = "已复制任务信息"
+    @State private var copiedToastText = ""
     @StateObject private var iconLoader = AsyncImageLoader()
 
     private var clampedTotalProgress: Double {
@@ -36,6 +37,7 @@ struct TaskCard: View {
     }
 
     var body: some View {
+        let _ = interfaceLanguage
         VStack(alignment: .leading, spacing: 0) {
             CardHeaderView(
                 task: task,
@@ -116,8 +118,8 @@ struct TaskCard: View {
                 set: { if !$0 { confirmAction = nil } }
             )
         ) {
-            Button(String(localized: "返回"), role: .cancel) { confirmAction = nil }
-            Button(String(localized: "确认"), role: .destructive) {
+            Button(AppLocalized("返回"), role: .cancel) { confirmAction = nil }
+            Button(AppLocalized("确认"), role: .destructive) {
                 if let action = confirmAction {
                     onAction(action)
                     confirmAction = nil
@@ -126,8 +128,8 @@ struct TaskCard: View {
         } message: {
             Text(confirmAction?.confirmMessage(for: task.displayName) ?? "")
         }
-        .alert(String(localized: "Helper 未连接"), isPresented: $showHelperAlert) {
-            Button(String(localized: "确定")) { }
+        .alert(AppLocalized("Helper 未连接"), isPresented: $showHelperAlert) {
+            Button(AppLocalized("确定")) { }
         } message: {
             Text(HelperManager.shared.status)
         }
@@ -172,11 +174,11 @@ struct TaskCard: View {
     }
 
     private var statusTitle: String {
-        if task.isValidatingDownload { return String(localized: "正在校验下载文件") }
+        if task.isValidatingDownload { return AppLocalized("正在校验下载文件") }
         switch task.status {
-        case .preparing: return String(localized: "准备中")
-        case .paused: return String(localized: "已暂停")
-        case .retrying: return String(localized: "重试中")
+        case .preparing: return AppLocalized("准备中")
+        case .paused: return AppLocalized("已暂停")
+        case .retrying: return AppLocalized("重试中")
         default: return task.status.compactDescription
         }
     }
@@ -299,10 +301,10 @@ struct TaskCard: View {
             HStack(spacing: 6) {
                 Image(systemName: "shippingbox")
                     .foregroundColor(.secondary)
-                Text(String(localized: "包详情"))
+                Text(AppLocalized("包详情"))
                     .fontWeight(.medium)
                 Spacer()
-                Text(String(localized: "已完成 \(task.completedPackages) / \(task.totalPackages)"))
+                Text(AppLocalized("已完成 \(task.completedPackages) / \(task.totalPackages)"))
                     .foregroundColor(.secondary)
                     .monospacedDigit()
                 Image(systemName: isExpanded ? "chevron.down" : "chevron.right")
@@ -315,27 +317,27 @@ struct TaskCard: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .accessibilityValue(isExpanded ? String(localized: "已展开") : String(localized: "已收起"))
+        .accessibilityValue(isExpanded ? AppLocalized("已展开") : AppLocalized("已收起"))
     }
 
     @ViewBuilder
     private var contextMenuItems: some View {
         Button(action: openInFinder) {
-            Label(String(localized: "在 Finder 中显示"), systemImage: "folder")
+            Label(AppLocalized("在 Finder 中显示"), systemImage: "folder")
         }
         Button(action: copyTaskInfo) {
-            Label(String(localized: "复制任务信息"), systemImage: "doc.on.doc")
+            Label(AppLocalized("复制任务信息"), systemImage: "doc.on.doc")
         }
         if case .completed = task.status {
             Button(action: openProduct) {
-                Label(String(localized: "打开产品"), systemImage: "arrow.up.forward.app")
+                Label(AppLocalized("打开产品"), systemImage: "arrow.up.forward.app")
             }
         }
         Divider()
         Button(role: .destructive, action: {
             confirmAction = .remove
         }) {
-            Label(String(localized: "删除任务"), systemImage: "trash")
+            Label(AppLocalized("删除任务"), systemImage: "trash")
         }
     }
 
@@ -368,34 +370,34 @@ struct TaskCard: View {
     private func copyTaskInfo() {
         var lines: [String] = []
         lines.append("\(task.displayName) \(task.productVersion)")
-        lines.append("产品: \(task.productId)")
-        lines.append("平台: \(task.platform)")
+        lines.append(AppLocalized("产品: \(task.productId)"))
+        lines.append(AppLocalized("平台: \(task.platform)"))
         if !task.language.isEmpty {
-            lines.append("语言: \(task.language)")
+            lines.append(AppLocalized("语言: \(task.language)"))
         }
-        lines.append("路径: \(task.directory.path)")
-        lines.append("状态: \(task.status.description)")
-        lines.append("大小: \(task.formattedTotalSize)")
-        copyToPasteboard(lines.joined(separator: "\n"), toastText: "已复制任务信息")
+        lines.append(AppLocalized("路径: \(task.directory.path)"))
+        lines.append(AppLocalized("状态: \(task.status.description)"))
+        lines.append(AppLocalized("大小: \(task.formattedTotalSize)"))
+        copyToPasteboard(lines.joined(separator: "\n"), toastText: AppLocalized("已复制任务信息"))
     }
 
     private func copyFailureInfo(_ info: DownloadStatus.FailureInfo) {
         var lines: [String] = []
-        lines.append("产品: \(task.displayName) \(task.productVersion)")
+        lines.append(AppLocalized("产品: \(task.displayName) \(task.productVersion)"))
         lines.append("SAP: \(task.productId)")
-        lines.append("平台: \(task.platform)")
+        lines.append(AppLocalized("平台: \(task.platform)"))
         if !task.language.isEmpty {
-            lines.append("语言: \(task.language)")
+            lines.append(AppLocalized("语言: \(task.language)"))
         }
-        lines.append("路径: \(task.directory.path)")
-        lines.append("状态: \(task.status.description)")
-        lines.append("错误: \(info.message)")
+        lines.append(AppLocalized("路径: \(task.directory.path)"))
+        lines.append(AppLocalized("状态: \(task.status.description)"))
+        lines.append(AppLocalized("错误: \(info.message)"))
         if let error = info.error {
-            lines.append("错误类型: \(String(describing: type(of: error)))")
-            lines.append("错误详情: \(error.localizedDescription)")
+            lines.append(AppLocalized("错误类型: \(String(describing: type(of: error)))"))
+            lines.append(AppLocalized("错误详情: \(error.localizedDescription)"))
         }
-        lines.append("时间: \(info.timestamp.formatted(date: .numeric, time: .standard))")
-        copyToPasteboard(lines.joined(separator: "\n"), toastText: "已复制错误信息")
+        lines.append(AppLocalized("时间: \(info.timestamp.formatted(Date.FormatStyle(date: .numeric, time: .standard, locale: AppInterfaceLanguage.current.locale)))"))
+        copyToPasteboard(lines.joined(separator: "\n"), toastText: AppLocalized("已复制错误信息"))
     }
 
     private func copyToPasteboard(_ text: String, toastText: String) {
@@ -414,6 +416,7 @@ struct TaskCard: View {
 }
 
 private struct CardHeaderView<Badge: View, Actions: View>: View {
+    @StorageValue(\.interfaceLanguage) private var interfaceLanguage
     @ObservedObject var task: NewDownloadTask
     let iconImage: NSImage?
     let onOpenInFinder: () -> Void
@@ -427,7 +430,7 @@ private struct CardHeaderView<Badge: View, Actions: View>: View {
         case nil:
             switch task.platform {
             case "macarm64": return "Apple Silicon"
-            case "macuniversal": return String(localized: "通用")
+            case "macuniversal": return AppLocalized("通用")
             case "osx10", "osx10-64": return "Intel"
             default: return task.platform
             }
@@ -435,11 +438,12 @@ private struct CardHeaderView<Badge: View, Actions: View>: View {
     }
 
     private var languageName: String {
-        if task.language == "ALL" { return String(localized: "全部语言") }
+        if task.language == "ALL" { return AppLocalized("全部语言") }
         return AppStatics.supportedLanguages.first { $0.code == task.language }?.name ?? task.language
     }
 
     var body: some View {
+        let _ = interfaceLanguage
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 12) {
                 iconView
@@ -471,7 +475,7 @@ private struct CardHeaderView<Badge: View, Actions: View>: View {
                                 .help(task.language)
                         }
                         if task.isDeltaUpdate {
-                            Text(String(localized: "增量包"))
+                            Text(AppLocalized("增量包"))
                                 .fontWeight(.medium)
                                 .foregroundColor(.orange)
                                 .padding(.horizontal, 5)
@@ -506,7 +510,7 @@ private struct CardHeaderView<Badge: View, Actions: View>: View {
             }
             .buttonStyle(.plain)
             .help(task.directory.path)
-            .accessibilityLabel(String(localized: "在 Finder 中显示"))
+            .accessibilityLabel(AppLocalized("在 Finder 中显示"))
         }
     }
 
@@ -535,6 +539,7 @@ private struct CardHeaderView<Badge: View, Actions: View>: View {
 }
 
 private struct CardProgressView: View {
+    @StorageValue(\.interfaceLanguage) private var interfaceLanguage
     @ObservedObject var task: NewDownloadTask
     let tint: Color
 
@@ -553,6 +558,7 @@ private struct CardProgressView: View {
     }
 
     var body: some View {
+        let _ = interfaceLanguage
         VStack(alignment: .leading, spacing: 9) {
             HStack(alignment: .firstTextBaseline, spacing: 12) {
                 Text(task.hasUnknownDownloadSize ? "—" : "\(Int(clampedProgress * 100))%")
@@ -575,7 +581,7 @@ private struct CardProgressView: View {
                             .font(.system(size: 11))
                             .foregroundColor(.secondary)
                             .frame(minWidth: 62, alignment: .trailing)
-                            .help(String(localized: "预计剩余下载时间（不含校验）"))
+                            .help(AppLocalized("预计剩余下载时间（不含校验）"))
                     }
                 }
             }
@@ -586,8 +592,8 @@ private struct CardProgressView: View {
                 ProgressView()
                     .progressViewStyle(.linear)
                     .frame(height: 6)
-                    .accessibilityLabel(String(localized: "下载进度"))
-                    .accessibilityValue(String(localized: "未知"))
+                    .accessibilityLabel(AppLocalized("下载进度"))
+                    .accessibilityValue(AppLocalized("未知"))
             } else {
                 GeometryReader { geometry in
                     ZStack(alignment: .leading) {
@@ -600,12 +606,12 @@ private struct CardProgressView: View {
                     }
                 }
                 .frame(height: 6)
-                .accessibilityLabel(String(localized: "下载进度"))
+                .accessibilityLabel(AppLocalized("下载进度"))
                 .accessibilityValue("\(Int(clampedProgress * 100))%")
             }
 
             if task.isValidatingDownload {
-                Label(String(localized: "正在校验下载文件"), systemImage: "checkmark.shield")
+                Label(AppLocalized("正在校验下载文件"), systemImage: "checkmark.shield")
                     .font(.system(size: 11))
                     .foregroundColor(.secondary)
             } else if case .preparing(let info) = task.status {
@@ -635,9 +641,11 @@ private struct CardProgressView: View {
 }
 
 private struct PausedInfoView: View {
+    @StorageValue(\.interfaceLanguage) private var interfaceLanguage
     let info: DownloadStatus.PauseInfo
 
     var body: some View {
+        let _ = interfaceLanguage
         HStack(spacing: 6) {
             Image(systemName: "pause.circle.fill")
                 .font(.system(size: 11))
@@ -648,12 +656,12 @@ private struct PausedInfoView: View {
             if !info.resumable {
                 Text("·")
                     .foregroundColor(.secondary.opacity(0.3))
-                Text(String(localized: "不可恢复"))
+                Text(AppLocalized("不可恢复"))
                     .font(.system(size: 10))
                     .foregroundColor(.red.opacity(0.7))
             }
             Spacer()
-            Text(info.timestamp.formatted(date: .omitted, time: .shortened))
+            Text(info.timestamp.formatted(Date.FormatStyle(date: .omitted, time: .shortened, locale: AppInterfaceLanguage.current.locale)))
                 .font(.system(size: 10))
                 .foregroundColor(.secondary.opacity(0.7))
         }
@@ -661,11 +669,13 @@ private struct PausedInfoView: View {
 }
 
 private struct FailedInfoView: View {
+    @StorageValue(\.interfaceLanguage) private var interfaceLanguage
     let info: DownloadStatus.FailureInfo
     let progressAtFailure: Double
     let onCopyError: () -> Void
 
     var body: some View {
+        let _ = interfaceLanguage
         VStack(alignment: .leading, spacing: 6) {
             HStack(alignment: .top, spacing: 6) {
                 Image(systemName: "exclamationmark.triangle.fill")
@@ -680,27 +690,27 @@ private struct FailedInfoView: View {
             }
             HStack(spacing: 8) {
                 if progressAtFailure > 0 {
-                    Text("中断于 \(Int(progressAtFailure * 100))%")
+                    Text(AppLocalized("中断于 \(Int(progressAtFailure * 100))%"))
                         .foregroundColor(.secondary.opacity(0.8))
                 }
                 if info.recoverable {
                     Text("·").foregroundColor(.secondary.opacity(0.3))
-                    Text(String(localized: "可重试"))
+                    Text(AppLocalized("可重试"))
                         .foregroundColor(.blue.opacity(0.85))
                 } else {
                     Text("·").foregroundColor(.secondary.opacity(0.3))
-                    Text(String(localized: "不可恢复"))
+                    Text(AppLocalized("不可恢复"))
                         .foregroundColor(.red.opacity(0.75))
                 }
                 Spacer()
                 Button(action: onCopyError) {
-                    Label(String(localized: "复制错误"), systemImage: "doc.on.doc")
+                    Label(AppLocalized("复制错误"), systemImage: "doc.on.doc")
                         .font(.system(size: 10, weight: .semibold))
                 }
                 .buttonStyle(.borderless)
                 .foregroundColor(.red.opacity(0.85))
-                .help(String(localized: "复制错误信息"))
-                Text(info.timestamp.formatted(date: .omitted, time: .shortened))
+                .help(AppLocalized("复制错误信息"))
+                Text(info.timestamp.formatted(Date.FormatStyle(date: .omitted, time: .shortened, locale: AppInterfaceLanguage.current.locale)))
                     .foregroundColor(.secondary.opacity(0.7))
             }
             .font(.system(size: 10, weight: .medium))
@@ -717,11 +727,13 @@ private struct FailedInfoView: View {
 }
 
 private struct CompletedInfoView: View {
+    @StorageValue(\.interfaceLanguage) private var interfaceLanguage
     @ObservedObject var task: NewDownloadTask
     let info: DownloadStatus.CompletionInfo
     let onOpenInFinder: () -> Void
 
     var body: some View {
+        let _ = interfaceLanguage
         HStack(alignment: .center, spacing: 8) {
             Image(systemName: "checkmark.circle.fill")
                 .font(.system(size: 11))
@@ -733,7 +745,7 @@ private struct CompletedInfoView: View {
             if info.totalTime > 0 {
                 Text("·")
                     .foregroundColor(.secondary.opacity(0.3))
-                Text(String(format: String(localized: "用时 %@"), formatDurationLocal(info.totalTime)))
+                Text(String(format: AppLocalized("用时 %@"), formatDurationLocal(info.totalTime)))
                     .font(.system(size: 11))
                     .foregroundColor(.secondary)
             }
@@ -743,7 +755,7 @@ private struct CompletedInfoView: View {
                 HStack(spacing: 4) {
                     Image(systemName: "folder")
                         .font(.system(size: 10))
-                    Text(String(localized: "打开目录"))
+                    Text(AppLocalized("打开目录"))
                         .font(.system(size: 11, weight: .medium))
                 }
             }
@@ -753,15 +765,17 @@ private struct CompletedInfoView: View {
 }
 
 private struct CompletedTimeInfoView: View {
+    @StorageValue(\.interfaceLanguage) private var interfaceLanguage
     @ObservedObject var task: NewDownloadTask
     let info: DownloadStatus.CompletionInfo
 
     var body: some View {
+        let _ = interfaceLanguage
         HStack(spacing: 8) {
-            Text(String(format: String(localized: "创建于: %@"), formatTaskDateLocal(task.createAt)))
+            Text(String(format: AppLocalized("创建于: %@"), formatTaskDateLocal(task.createAt)))
             Text("·")
                 .foregroundColor(.secondary.opacity(0.3))
-            Text(String(format: String(localized: "完成于: %@"), formatTaskDateLocal(info.timestamp)))
+            Text(String(format: AppLocalized("完成于: %@"), formatTaskDateLocal(info.timestamp)))
         }
         .font(.system(size: 10, weight: .medium))
         .foregroundColor(.secondary.opacity(0.75))
@@ -769,6 +783,7 @@ private struct CompletedTimeInfoView: View {
 }
 
 private struct RetryingInfoView: View {
+    @StorageValue(\.interfaceLanguage) private var interfaceLanguage
     let info: DownloadStatus.RetryInfo
     @State private var now = Date()
     private let timer = Timer.publish(every: 1, on: .main, in: .common).autoconnect()
@@ -778,11 +793,12 @@ private struct RetryingInfoView: View {
     }
 
     var body: some View {
+        let _ = interfaceLanguage
         HStack(spacing: 6) {
             ProgressView()
                 .scaleEffect(0.6)
                 .frame(width: 14, height: 14)
-            Text(String(localized: "重试 \(info.attempt)/\(info.maxAttempts)"))
+            Text(AppLocalized("重试 \(info.attempt)/\(info.maxAttempts)"))
                 .font(.system(size: 11, weight: .medium))
                 .foregroundColor(.yellow.opacity(0.95))
             if !info.reason.isEmpty {
@@ -797,7 +813,7 @@ private struct RetryingInfoView: View {
             if remainingSeconds > 0 {
                 Text("·")
                     .foregroundColor(.secondary.opacity(0.3))
-                Text(String(format: String(localized: "%02d:%02d 后重试"), remainingSeconds / 60, remainingSeconds % 60))
+                Text(String(format: AppLocalized("%02d:%02d 后重试"), remainingSeconds / 60, remainingSeconds % 60))
                     .font(.system(size: 11, weight: .medium))
                     .foregroundColor(.orange)
                     .monospacedDigit()

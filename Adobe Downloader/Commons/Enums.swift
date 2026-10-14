@@ -106,64 +106,64 @@ enum NetworkError: Error, LocalizedError {
     var errorDescription: String? {
         switch self {
             case .noConnection:
-                return NSLocalizedString("网络无连接", value: "Network error", comment: "Network error")
+                return AppLocalizedLegacy("网络无连接", value: "Network error", comment: "Network error")
             case .timeout:
-                return NSLocalizedString("请求超时，请检查网络连接后重试", value: "请求超时，请检查网络连接后重试", comment: "Network timeout")
+                return AppLocalizedLegacy("请求超时，请检查网络连接后重试", value: "请求超时，请检查网络连接后重试", comment: "Network timeout")
             case .serverUnreachable(let server):
-                return String(format: NSLocalizedString("无法连接到服务器: %@", value: "无法连接到服务器: %@",comment: "Server unreachable"), server)
+                return String(format: AppLocalizedLegacy("无法连接到服务器: %@", value: "无法连接到服务器: %@",comment: "Server unreachable"), server)
             case .invalidURL(let url):
-                return String(format: NSLocalizedString("无效的URL: %@", value: "无效的URL: %@", comment: "Invalid URL"), url)
+                return String(format: AppLocalizedLegacy("无效的URL: %@", value: "无效的URL: %@", comment: "Invalid URL"), url)
             case .invalidRequest(let reason):
-                return String(format: NSLocalizedString("无效的请求: %@", value: "无效的请求: %@", comment: "Invalid request"), reason)
+                return String(format: AppLocalizedLegacy("无效的请求: %@", value: "无效的请求: %@", comment: "Invalid request"), reason)
             case .invalidResponse:
-                return NSLocalizedString("服务器响应无效", value: "服务器响应无效", comment: "Invalid response")
+                return AppLocalizedLegacy("服务器响应无效", value: "服务器响应无效", comment: "Invalid response")
             case .invalidData(let detail):
-                return String(format: NSLocalizedString("数据无效: %@", value: "数据无效: %@", comment: "Invalid data"), detail)
+                return String(format: AppLocalizedLegacy("数据无效: %@", value: "数据无效: %@", comment: "Invalid data"), detail)
             case .parsingError(let error, let context):
-                return String(format: NSLocalizedString("解析错误: %@ - %@", value: "Parsing error: %@ - %@", comment: "Parsing error"), context, error.localizedDescription)
+                return String(format: AppLocalizedLegacy("解析错误: %@ - %@", value: "Parsing error: %@ - %@", comment: "Parsing error"), context, error.localizedDescription)
             case .dataValidationError(let reason):
-                return String(format: NSLocalizedString("数据验证失败: %@", value: "数据验证失败: %@", comment: "Data validation error"), reason)
+                return String(format: AppLocalizedLegacy("数据验证失败: %@", value: "数据验证失败: %@", comment: "Data validation error"), reason)
             case .httpError(let code, let message):
-                return String(format: NSLocalizedString("HTTP错误 %d: %@", value: "HTTP错误 %d: %@", comment: "HTTP error"), code, message ?? "")
+                return String(format: AppLocalizedLegacy("HTTP错误 %d: %@", value: "HTTP错误 %d: %@", comment: "HTTP error"), code, message ?? "")
             case .serverError(let code):
-                return String(format: NSLocalizedString("服务器错误: %d", value: "服务器错误: %d", comment: "Server error"), code)
+                return String(format: AppLocalizedLegacy("服务器错误: %d", value: "服务器错误: %d", comment: "Server error"), code)
             case .clientError(let code):
-                return String(format: NSLocalizedString("客户端错误: %d", value: "客户端错误: %d", comment: "Client error"), code)
+                return String(format: AppLocalizedLegacy("客户端错误: %d", value: "客户端错误: %d", comment: "Client error"), code)
             case .downloadError(let message, let error):
                 if let error = error {
-                    return String(format: NSLocalizedString("下载错误, 错误原因: %@, %@", value: "%@: %@", comment: "Download error with cause"), message, error.localizedDescription)
+                    return String(format: AppLocalizedLegacy("下载错误, 错误原因: %@, %@", value: "%@: %@", comment: "Download error with cause"), message, error.localizedDescription)
                 }
-                return NSLocalizedString(message, value: message, comment: "Download error")
+                return AppLocalizedLegacy(message, value: message, comment: "Download error")
             case .downloadCancelled:
-                return NSLocalizedString("下载已取消", value: "下载已取消", comment: "Download cancelled")
+                return AppLocalizedLegacy("下载已取消", value: "下载已取消", comment: "Download cancelled")
             case .insufficientStorage(let needed, let available):
-                return String(format: NSLocalizedString("存储空间不足: 需要 %lld字节, 可用 %lld字节", value: "存储空间不足: 需要 %lld字节, 可用 %lld字节", comment: "Insufficient storage"), needed, available)
+                return String(format: AppLocalizedLegacy("存储空间不足: 需要 %lld字节, 可用 %lld字节", value: "存储空间不足: 需要 %lld字节, 可用 %lld字节", comment: "Insufficient storage"), needed, available)
             case .fileSystemError(let operation, let error):
                 if let error = error {
-                    return String(format: NSLocalizedString("文件系统错误(%@): %@", value: "文件系统错误(%@): %@", comment: "File system error with cause"), operation, error.localizedDescription)
+                    return String(format: AppLocalizedLegacy("文件系统错误(%@): %@", value: "文件系统错误(%@): %@", comment: "File system error with cause"), operation, error.localizedDescription)
                 }
-                return String(format: NSLocalizedString("文件系统错误: %@", value: "文件系统错误: %@", comment: "File system error"), operation)
+                return String(format: AppLocalizedLegacy("文件系统错误: %@", value: "文件系统错误: %@", comment: "File system error"), operation)
             case .fileExists(let path):
-                return String(format: NSLocalizedString("文件已存在: %@", value: "文件已存在: %@", comment: "File exists"), path)
+                return String(format: AppLocalizedLegacy("文件已存在: %@", value: "文件已存在: %@", comment: "File exists"), path)
             case .fileNotFound(let path):
-                return String(format: NSLocalizedString("文件不存在: %@", value: "文件不存在: %@", comment: "File not found"), path)
+                return String(format: AppLocalizedLegacy("文件不存在: %@", value: "文件不存在: %@", comment: "File not found"), path)
             case .filePermissionDenied(let path):
-                return String(format: NSLocalizedString("文件访问权限被拒绝: %@", value: "文件访问权限被拒绝: %@", comment: "File permission denied"), path)
+                return String(format: AppLocalizedLegacy("文件访问权限被拒绝: %@", value: "文件访问权限被拒绝: %@", comment: "File permission denied"), path)
             case .applicationInfoError(let message, let error):
                 if let error = error {
-                    return String(format: NSLocalizedString("应用信息错误(%@): %@", value: "应用信息错误(%@): %@", comment: "Application info error with cause"), message, error.localizedDescription)
+                    return String(format: AppLocalizedLegacy("应用信息错误(%@): %@", value: "应用信息错误(%@): %@", comment: "Application info error with cause"), message, error.localizedDescription)
                 }
-                return String(format: NSLocalizedString("应用信息错误: %@", value: "应用信息错误: %@", comment: "Application info error"), message)
+                return String(format: AppLocalizedLegacy("应用信息错误: %@", value: "应用信息错误: %@", comment: "Application info error"), message)
             case .unsupportedPlatform(let platform):
-                return String(format: NSLocalizedString("不支持的平台: %@", value: "不支持的平台: %@", comment: "Unsupported platform"), platform)
+                return String(format: AppLocalizedLegacy("不支持的平台: %@", value: "不支持的平台: %@", comment: "Unsupported platform"), platform)
             case .incompatibleVersion(let current, let required):
-                return String(format: NSLocalizedString("版本不兼容: 当前版本 %@, 需要版本 %@", value: "版本不兼容: 当前版本 %@, 需要版本 %@", comment: "Incompatible version"), current, required)
+                return String(format: AppLocalizedLegacy("版本不兼容: 当前版本 %@, 需要版本 %@", value: "版本不兼容: 当前版本 %@, 需要版本 %@", comment: "Incompatible version"), current, required)
             case .cancelled:
-                return NSLocalizedString("下载已取消", value: "下载已取消", comment: "Download cancelled")
+                return AppLocalizedLegacy("下载已取消", value: "下载已取消", comment: "Download cancelled")
             case .installError(let message):
-                return String(format: NSLocalizedString("安装错误: %@", value: "安装错误: %@", comment: "Install error"), message)
+                return String(format: AppLocalizedLegacy("安装错误: %@", value: "安装错误: %@", comment: "Install error"), message)
             case .productNotFound:
-                return NSLocalizedString("产品未找到", value: "产品未找到", comment: "Product not found")
+                return AppLocalizedLegacy("产品未找到", value: "产品未找到", comment: "Product not found")
         }
     }
     
@@ -336,31 +336,31 @@ enum DownloadStatus: Equatable, Codable {
     var description: String {
         switch self {
         case .waiting:
-            return NSLocalizedString("等待中", value: "等待中", comment: "Download status waiting")
+            return AppLocalizedLegacy("等待中", value: "等待中", comment: "Download status waiting")
         case .preparing(let info):
-            return String(format: NSLocalizedString("准备中: %@", value: "准备中: %@", comment: "Download status preparing"), info.message)
+            return String(format: AppLocalizedLegacy("准备中: %@", value: "准备中: %@", comment: "Download status preparing"), info.message)
         case .downloading(let info):
-            return String(format: NSLocalizedString("正在下载 %@ (%d/%d)", value: "正在下载 %@ (%d/%d)", comment: "Download status downloading"),
+            return String(format: AppLocalizedLegacy("正在下载 %@ (%d/%d)", value: "正在下载 %@ (%d/%d)", comment: "Download status downloading"),
                         info.fileName, info.currentPackageIndex + 1, info.totalPackages)
         case .paused(let info):
             switch info.reason {
             case .userRequested:
-                return NSLocalizedString("已暂停", value: "已暂停", comment: "Download status paused")
+                return AppLocalizedLegacy("已暂停", value: "已暂停", comment: "Download status paused")
             case .networkIssue:
-                return NSLocalizedString("网络中断", value: "网络中断", comment: "Download status network paused")
+                return AppLocalizedLegacy("网络中断", value: "网络中断", comment: "Download status network paused")
             case .systemSleep:
-                return NSLocalizedString("系统休眠", value: "系统休眠", comment: "Download status system sleep")
+                return AppLocalizedLegacy("系统休眠", value: "系统休眠", comment: "Download status system sleep")
             case .other(let reason):
-                return String(format: NSLocalizedString("已暂停: %@", value: "已暂停: %@", comment: "Download status paused with reason"), reason)
+                return String(format: AppLocalizedLegacy("已暂停: %@", value: "已暂停: %@", comment: "Download status paused with reason"), reason)
             }
         case .completed(let info):
-            return String(format: NSLocalizedString("已完成 (用时: %@)", value: "已完成 (用时: %@)", comment: "Download status completed"),
+            return String(format: AppLocalizedLegacy("已完成 (用时: %@)", value: "已完成 (用时: %@)", comment: "Download status completed"),
                         info.totalTime.formatDuration())
         case .failed(let info):
-            return String(format: NSLocalizedString("失败: %@", value: "失败: %@", comment: "Download status failed"),
+            return String(format: AppLocalizedLegacy("失败: %@", value: "失败: %@", comment: "Download status failed"),
                         info.message)
         case .retrying(let info):
-            return String(format: NSLocalizedString("重试中 (%d/%d)", value: "重试中 (%d/%d)", comment: "Download status retrying"),
+            return String(format: AppLocalizedLegacy("重试中 (%d/%d)", value: "重试中 (%d/%d)", comment: "Download status retrying"),
                         info.attempt, info.maxAttempts)
         }
     }
@@ -472,7 +472,7 @@ private extension TimeInterval {
         let hours = Int(self / 3600)
         let minutes = Int((self.truncatingRemainder(dividingBy: 3600)) / 60)
         let seconds = Int(self.truncatingRemainder(dividingBy: 60))
-        return String(format: NSLocalizedString("%02d:%02d:%02d", comment: ""), hours, minutes, seconds)
+        return String(format: AppLocalizedLegacy("%02d:%02d:%02d", comment: ""), hours, minutes, seconds)
     }
 } 
 
@@ -495,29 +495,29 @@ enum CleanupOption: String, CaseIterable, Identifiable {
     var localizedName: String {
         switch self {
         case .adobeApps:
-            return String(localized: "Adobe 应用程序")
+            return AppLocalized("Adobe 应用程序")
         case .adobeCreativeCloud:
-            return String(localized: "Adobe Creative Cloud")
+            return AppLocalized("Adobe Creative Cloud")
         case .adobeUserData:
-            return String(localized: "Adobe 用户数据")
+            return AppLocalized("Adobe 用户数据")
         case .adobePreferences:
-            return String(localized: "Adobe 偏好设置")
+            return AppLocalized("Adobe 偏好设置")
         case .adobeCaches:
-            return String(localized: "Adobe 缓存文件")
+            return AppLocalized("Adobe 缓存文件")
         case .adobeLicenses:
-            return String(localized: "Adobe 许可文件")
+            return AppLocalized("Adobe 许可文件")
         case .adobeLogs:
-            return String(localized: "Adobe 日志文件")
+            return AppLocalized("Adobe 日志文件")
         case .adobeServices:
-            return String(localized: "Adobe 服务")
+            return AppLocalized("Adobe 服务")
         case .adobeKeychain:
-            return String(localized: "Adobe 钥匙串")
+            return AppLocalized("Adobe 钥匙串")
         case .adobeGenuineService:
-            return String(localized: "Adobe 正版验证服务")
+            return AppLocalized("Adobe 正版验证服务")
         case .adobeHosts:
-            return String(localized: "Adobe Hosts")
+            return AppLocalized("Adobe Hosts")
         case .c4dRedGiant:
-            return String(localized: "C4D / Red Giant")
+            return AppLocalized("C4D / Red Giant")
         }
     }
 
@@ -1344,29 +1344,29 @@ enum CleanupOption: String, CaseIterable, Identifiable {
     var description: String {
         switch self {
         case .adobeApps:
-            return String(localized: "删除所有已安装的 Adobe 应用程序（不包括 Adobe Downloader）")
+            return AppLocalized("删除所有已安装的 Adobe 应用程序（不包括 Adobe Downloader）")
         case .adobeCreativeCloud:
-            return String(localized: "删除 Adobe Creative Cloud 应用程序及其组件")
+            return AppLocalized("删除 Adobe Creative Cloud 应用程序及其组件")
         case .adobeUserData:
-            return String(localized: "删除当前用户目录中的 Adobe 支持数据、容器、WebKit 和共享数据")
+            return AppLocalized("删除当前用户目录中的 Adobe 支持数据、容器、WebKit 和共享数据")
         case .adobePreferences:
-            return String(localized: "删除 Adobe 应用程序的偏好设置文件（不包括 Adobe Downloader）")
+            return AppLocalized("删除 Adobe 应用程序的偏好设置文件（不包括 Adobe Downloader）")
         case .adobeCaches:
-            return String(localized: "删除 Adobe 应用程序的缓存文件（不包括 Adobe Downloader）")
+            return AppLocalized("删除 Adobe 应用程序的缓存文件（不包括 Adobe Downloader）")
         case .adobeLicenses:
-            return String(localized: "删除 Adobe 许可和激活相关文件")
+            return AppLocalized("删除 Adobe 许可和激活相关文件")
         case .adobeLogs:
-            return String(localized: "删除 Adobe 应用程序的日志文件（不包括 Adobe Downloader）")
+            return AppLocalized("删除 Adobe 应用程序的日志文件（不包括 Adobe Downloader）")
         case .adobeServices:
-            return String(localized: "停止并删除 Adobe 相关服务")
+            return AppLocalized("停止并删除 Adobe 相关服务")
         case .adobeKeychain:
-            return String(localized: "删除钥匙串中的 Adobe 相关条目")
+            return AppLocalized("删除钥匙串中的 Adobe 相关条目")
         case .adobeGenuineService:
-            return String(localized: "删除 Adobe 正版验证服务及其组件")
+            return AppLocalized("删除 Adobe 正版验证服务及其组件")
         case .adobeHosts:
-            return String(localized: "清理 hosts 文件中的 Adobe 相关条目")
+            return AppLocalized("清理 hosts 文件中的 Adobe 相关条目")
         case .c4dRedGiant:
-            return String(localized: "停止并删除 Cinema 4D、Maxon 和 Red Giant 相关残留")
+            return AppLocalized("停止并删除 Cinema 4D、Maxon 和 Red Giant 相关残留")
         }
     }
 }

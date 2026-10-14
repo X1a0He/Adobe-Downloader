@@ -18,6 +18,7 @@ final class CheckForUpdatesViewModel: ObservableObject {
 }
 
 struct CheckForUpdatesView: View {
+    @StorageValue(\.interfaceLanguage) private var interfaceLanguage
     @ObservedObject private var checkForUpdatesViewModel: CheckForUpdatesViewModel
     private let updater: SPUUpdater
 
@@ -28,11 +29,12 @@ struct CheckForUpdatesView: View {
     }
 
     var body: some View {
+        let _ = interfaceLanguage
         Button(action: updater.checkForUpdates) {
             HStack(spacing: 4) {
                 Image(systemName: "arrow.clockwise")
                     .font(.system(size: 12))
-                Text("检查更新")
+                Text(AppLocalized("检查更新"))
                     .font(.system(size: 13))
             }
         }

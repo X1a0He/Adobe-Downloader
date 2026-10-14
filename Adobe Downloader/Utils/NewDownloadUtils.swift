@@ -164,7 +164,7 @@ class NewDownloadUtils {
         guard task.execution.accepts(generation) else { throw NetworkError.cancelled }
         await MainActor.run {
             task.setStatus(.preparing(DownloadStatus.PrepareInfo(
-                message: String(localized: "正在准备自定义下载..."),
+                message: AppLocalized("正在准备自定义下载..."),
                 timestamp: Date(),
                 stage: .fetchingInfo
             )))
@@ -1540,28 +1540,28 @@ class NewDownloadUtils {
         case let networkError as NetworkError:
             switch networkError {
             case .noConnection:
-                return (String(localized: "网络连接已断开"), true)
+                return (AppLocalized("网络连接已断开"), true)
             case .timeout:
-                return (String(localized: "下载超时"), true)
+                return (AppLocalized("下载超时"), true)
             case .serverUnreachable:
-                return (String(localized: "服务器无法访问"), true)
+                return (AppLocalized("服务器无法访问"), true)
             case .insufficientStorage:
-                return (String(localized: "存储空间不足"), false)
+                return (AppLocalized("存储空间不足"), false)
             case .filePermissionDenied:
-                return (String(localized: "没有写入权限"), false)
+                return (AppLocalized("没有写入权限"), false)
             default:
                 return (networkError.localizedDescription, false)
             }
         case let urlError as URLError:
             switch urlError.code {
             case .notConnectedToInternet, .networkConnectionLost, .dataNotAllowed:
-                return (String(localized: "网络连接已断开"), true)
+                return (AppLocalized("网络连接已断开"), true)
             case .timedOut:
-                return (String(localized: "连接超时"), true)
+                return (AppLocalized("连接超时"), true)
             case .cancelled:
-                return (String(localized: "下载已取消"), false)
+                return (AppLocalized("下载已取消"), false)
             case .cannotConnectToHost, .dnsLookupFailed:
-                return (String(localized: "无法连接到服务器"), true)
+                return (AppLocalized("无法连接到服务器"), true)
             default:
                 return (urlError.localizedDescription, true)
             }
@@ -2031,7 +2031,7 @@ class NewDownloadUtils {
         }
 
         guard let jsonString = String(data: data, encoding: .utf8) else {
-            throw NetworkError.invalidData(String(localized: "无法将响应数据转换为json字符串"))
+            throw NetworkError.invalidData(AppLocalized("无法将响应数据转换为json字符串"))
         }
 
         return jsonString
@@ -2116,7 +2116,7 @@ class NewDownloadUtils {
             }
 
             task.setStatus(.failed(DownloadStatus.FailureInfo(
-                message: String(localized: "下载已取消"),
+                message: AppLocalized("下载已取消"),
                 error: NetworkError.downloadCancelled,
                 timestamp: Date(),
                 recoverable: false

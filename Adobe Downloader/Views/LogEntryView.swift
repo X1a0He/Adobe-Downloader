@@ -7,6 +7,7 @@
 import SwiftUI
 
 struct LogEntryView: View {
+    @StorageValue(\.interfaceLanguage) private var interfaceLanguage
     let log: CleanupLog
     @State private var showCopyButton = false
     
@@ -38,6 +39,7 @@ struct LogEntryView: View {
     }
 
     var body: some View {
+        let _ = interfaceLanguage
         HStack {
             Image(systemName: statusIconName)
                 .foregroundColor(statusColorValue)
@@ -66,7 +68,7 @@ struct LogEntryView: View {
                             .font(.system(size: 11))
                     }
                     .buttonStyle(.plain)
-                    .help("复制完整错误信息")
+                    .help(AppLocalized("复制完整错误信息"))
                 }
             } else {
                 Text(log.message)

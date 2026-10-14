@@ -60,13 +60,13 @@ enum HDPIMExtractionError: Error, LocalizedError {
     var errorDescription: String? {
         switch self {
         case .cancelled:
-            return String(localized: "提取已取消")
+            return AppLocalized("提取已取消")
         case .processFailed(let message):
             return message
         case .dmgAttachFailed(let message):
-            return String(format: String(localized: "DMG 挂载失败: %@"), message)
+            return String(format: AppLocalized("DMG 挂载失败: %@"), message)
         case .dmgCopyFailed(let message):
-            return String(format: String(localized: "DMG 拷贝失败: %@"), message)
+            return String(format: AppLocalized("DMG 拷贝失败: %@"), message)
         case .invalidStructure(let message):
             return message
         }
@@ -619,7 +619,7 @@ final class HDPIMExtractionCoordinator {
             }
         }
 
-        throw HDPIMExtractionError.invalidStructure(String(format: String(localized: "提取失败: %@"), request.packageName))
+        throw HDPIMExtractionError.invalidStructure(String(format: AppLocalized("提取失败: %@"), request.packageName))
     }
 
     private func cleanupExtractionRoot(_ destinationURL: URL) throws {

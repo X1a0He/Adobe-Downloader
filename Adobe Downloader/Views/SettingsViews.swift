@@ -234,7 +234,7 @@ struct X1a0HeCCInstallStatus {
     let issues: [String]
 
     var statusText: String {
-        isInstalled ? String(localized: "已安装") : (hasComponents ? String(localized: "组件不完整") : String(localized: "未安装"))
+        isInstalled ? AppLocalized("已安装") : (hasComponents ? AppLocalized("组件不完整") : AppLocalized("未安装"))
     }
 
     var statusIcon: String {
@@ -247,7 +247,7 @@ struct X1a0HeCCInstallStatus {
 
     var subtitle: String {
         guard isInstalled else {
-            return hasComponents ? (issues.first ?? String(localized: "组件不完整")) : String(localized: "下载 HDBox 和 IPCBox 组件")
+            return hasComponents ? (issues.first ?? AppLocalized("组件不完整")) : AppLocalized("下载 HDBox 和 IPCBox 组件")
         }
 
         return "HDBox \(displayVersion(hdBoxVersion)) / IPCBox \(displayVersion(ipcBoxVersion))"
@@ -265,7 +265,7 @@ struct X1a0HeCCInstallStatus {
     }
 
     private func displayVersion(_ version: String) -> String {
-        version.isEmpty ? String(localized: "未知 Setup 组件版本号") : version
+        version.isEmpty ? AppLocalized("未知 Setup 组件版本号") : version
     }
 
 }
@@ -296,6 +296,7 @@ struct HelperView: View {
 }
 
 struct AboutAppView: View {
+    @StorageValue(\.interfaceLanguage) private var interfaceLanguage
     @State private var debugTapCount = 0
     @State private var showDebugRestartAlert = false
 
@@ -304,8 +305,9 @@ struct AboutAppView: View {
     }
 
     var body: some View {
+        let _ = interfaceLanguage
         VStack(alignment: .leading, spacing: 20) {
-            SettingSection(String(localized: "关于 Adobe Downloader")) {
+            SettingSection(AppLocalized("关于 Adobe Downloader")) {
                 VStack(spacing: 14) {
                     ZStack(alignment: .bottomTrailing) {
                         Image(nsImage: NSApp.applicationIconImage)
@@ -341,7 +343,7 @@ struct AboutAppView: View {
                 .padding(.vertical, 16)
             }
 
-            SettingSection(String(localized: "相关链接")) {
+            SettingSection(AppLocalized("相关链接")) {
                 VStack(spacing: 0) {
                     ForEach(Array(AboutViewConstants.links.enumerated()), id: \.offset) { idx, link in
                         HStack(spacing: 10) {
@@ -368,7 +370,7 @@ struct AboutAppView: View {
 
             HStack {
                 Spacer()
-                Text("GNU 通用公共许可证 GPL v3.")
+                Text(AppLocalized("GNU 通用公共许可证 GPL v3."))
                     .font(.system(size: AboutViewConstants.licenseFontSize))
                     .foregroundColor(.secondary.opacity(0.75))
                 Spacer()
@@ -376,12 +378,12 @@ struct AboutAppView: View {
             .padding(.top, 4)
         }
         .frame(maxWidth: .infinity, alignment: .top)
-        .alert("调试模式已开启", isPresented: $showDebugRestartAlert) {
-            Button("确定") {
+        .alert(AppLocalized("调试模式已开启"), isPresented: $showDebugRestartAlert) {
+            Button(AppLocalized("确定")) {
                 AppDebugMode.restartApplication()
             }
         } message: {
-            Text("需要重启 Adobe Downloader 后生效。")
+            Text(AppLocalized("需要重启 Adobe Downloader 后生效。"))
         }
     }
 
@@ -675,35 +677,61 @@ private struct GeneralSettingsContent: View {
     }
 }
 
+struct InterfaceLanguageSettingRow: View {
+    @StorageValue(\.interfaceLanguage) private var interfaceLanguage
+    @ObservedObject private var storage = StorageData.shared
+
+    var body: some View {
+        let _ = interfaceLanguage
+        SettingRow(
+            title: AppLocalized("界面语言"),
+            subtitle: AppLocalized("选择 App 界面语言，切换后立即生效"),
+            icon: "character.book.closed",
+            iconTint: .blue
+        ) {
+            Picker("", selection: $storage.interfaceLanguage) {
+                ForEach(AppInterfaceLanguage.allCases) { language in
+                    Text(language.title).tag(language.rawValue)
+                }
+            }
+            .labelsHidden()
+            .pickerStyle(.menu)
+            .frame(width: 150, alignment: .trailing)
+        }
+    }
+}
+
 struct PermissionSettingsView: View {
+    @StorageValue(\.interfaceLanguage) private var interfaceLanguage
     @ObservedObject var viewModel: GeneralSettingsViewModel
     @State private var showAppPermissionGuide = false
     @State private var showHelperPermissionGuide = false
 
     var body: some View {
+        let _ = interfaceLanguage
         SettingSection(
-            String(localized: "权限设置"),
-            footer: String(localized: "清理用户容器、群组容器和文档目录时，Adobe Downloader 与 Helper 都建议加入全磁盘访问")
+            AppLocalized("权限设置"),
+            footer: AppLocalized("清理用户容器、群组容器和文档目录时，Adobe Downloader 与 Helper 都建议加入全磁盘访问")
         ) {
             SettingRow(
-                title: String(localized: "App 全磁盘访问权限"),
+                title: AppLocalized("App 全磁盘访问权限"),
                 subtitle: viewModel.fullDiskAccessGranted
-                    ? String(localized: "Adobe Downloader 已具备访问受保护用户目录的权限")
-                    : String(localized: "未授权时，Containers、Group Containers 和 Documents 清理可能失败"),
+                    ? AppLocalized("Adobe Downloader 已具备访问受保护用户目录的权限")
+                    : AppLocalized("未授权时，Containers、Group Containers 和 Documents 清理可能失败"),
                 icon: "externaldrive.badge.checkmark",
                 iconTint: viewModel.fullDiskAccessGranted ? .green : .orange
             ) {
                 HStack(spacing: 8) {
                     SettingsStatusChip(
                         icon: viewModel.fullDiskAccessGranted ? "checkmark.circle.fill" : "exclamationmark.triangle.fill",
-                        text: viewModel.fullDiskAccessGranted ? String(localized: "已授权") : String(localized: "未授权"),
+                        text: viewModel.fullDiskAccessGranted ? AppLocalized("已授权") : AppLocalized("未授权"),
                         tint: viewModel.fullDiskAccessGranted ? .green : .orange
                     )
 
                     Button(action: { showAppPermissionGuide = true }) {
                         HStack(spacing: 4) {
                             Image(systemName: "gearshape.fill").font(.system(size: 10))
-                            Text(String(localized: "打开设置")).font(.system(size: 12))
+                            Text(AppLocalized("打开设置")).font(.system(size: 12))
                         }
                         .foregroundColor(.white)
                     }
@@ -719,7 +747,7 @@ struct PermissionSettingsView: View {
             SettingRowDivider()
 
             SettingRow(
-                title: String(localized: "Helper 全磁盘访问权限"),
+                title: AppLocalized("Helper 全磁盘访问权限"),
                 subtitle: helperPermissionSubtitle,
                 icon: "lock.shield.fill",
                 iconTint: helperPermissionTint
@@ -734,7 +762,7 @@ struct PermissionSettingsView: View {
                     Button(action: { showHelperPermissionGuide = true }) {
                         HStack(spacing: 4) {
                             Image(systemName: "gearshape.fill").font(.system(size: 10))
-                            Text(String(localized: "打开设置")).font(.system(size: 12))
+                            Text(AppLocalized("打开设置")).font(.system(size: 12))
                         }
                         .foregroundColor(.white)
                     }
@@ -750,31 +778,31 @@ struct PermissionSettingsView: View {
         .onAppear {
             viewModel.refreshFullDiskAccessStatus()
         }
-        .alert(String(localized: "设置 Adobe Downloader 全磁盘访问"), isPresented: $showAppPermissionGuide) {
-            Button(String(localized: "取消"), role: .cancel) { }
-            Button(String(localized: "前往设置")) {
+        .alert(AppLocalized("设置 Adobe Downloader 全磁盘访问"), isPresented: $showAppPermissionGuide) {
+            Button(AppLocalized("取消"), role: .cancel) { }
+            Button(AppLocalized("前往设置")) {
                 FullDiskAccessPermission.openSettings()
             }
         } message: {
-            Text(String(localized: "1. 在系统设置中找到「Adobe Downloader」\n2. 勾选以授予全磁盘访问权限\n3. 返回此界面点击刷新按钮验证"))
+            Text(AppLocalized("1. 在系统设置中找到「Adobe Downloader」\n2. 勾选以授予全磁盘访问权限\n3. 返回此界面点击刷新按钮验证"))
         }
-        .alert(String(localized: "Helper 权限说明"), isPresented: $showHelperPermissionGuide) {
-            Button(String(localized: "知道了"), role: .cancel) { }
+        .alert(AppLocalized("Helper 权限说明"), isPresented: $showHelperPermissionGuide) {
+            Button(AppLocalized("知道了"), role: .cancel) { }
         } message: {
-            Text(String(localized: "Helper 的权限状态可通过右侧刷新按钮检测。\n\n如需访问受保护目录，Helper 会在执行操作时自动请求授权。"))
+            Text(AppLocalized("Helper 的权限状态可通过右侧刷新按钮检测。\n\n如需访问受保护目录，Helper 会在执行操作时自动请求授权。"))
         }
     }
 
     private var helperPermissionSubtitle: String {
         switch viewModel.helperFullDiskAccessGranted {
         case .some(true):
-            return String(localized: "Helper 已具备访问受保护用户目录的权限")
+            return AppLocalized("Helper 已具备访问受保护用户目录的权限")
         case .some(false):
-            return "com.x1a0he.macOS.Adobe-Downloader.helper " + String(localized: "未授权")
+            return "com.x1a0he.macOS.Adobe-Downloader.helper " + AppLocalized("未授权")
         case .none:
             return viewModel.helperConnectionStatus == .disconnected
-                ? String(localized: "Helper 未连接，无法检测权限状态")
-                : String(localized: "正在检测权限...")
+                ? AppLocalized("Helper 未连接，无法检测权限状态")
+                : AppLocalized("正在检测权限...")
         }
     }
 
@@ -792,11 +820,11 @@ struct PermissionSettingsView: View {
     private var helperPermissionText: String {
         switch viewModel.helperFullDiskAccessGranted {
         case .some(true):
-            return String(localized: "已授权")
+            return AppLocalized("已授权")
         case .some(false):
-            return String(localized: "未授权")
+            return AppLocalized("未授权")
         case .none:
-            return String(localized: "无法检测")
+            return AppLocalized("无法检测")
         }
     }
 
@@ -813,10 +841,12 @@ struct PermissionSettingsView: View {
 }
 
 private struct PermissionRefreshButton: View {
+    @StorageValue(\.interfaceLanguage) private var interfaceLanguage
     var isLoading = false
     let action: () -> Void
 
     var body: some View {
+        let _ = interfaceLanguage
         Button(action: action) {
             ZStack {
                 ProgressView()
@@ -833,11 +863,12 @@ private struct PermissionRefreshButton: View {
         }
         .buttonStyle(.plain)
         .disabled(isLoading)
-        .help(String(localized: "刷新权限状态"))
+        .help(AppLocalized("刷新权限状态"))
     }
 }
 
 private struct GeneralSettingsAlerts: ViewModifier {
+    @StorageValue(\.interfaceLanguage) private var interfaceLanguage
     @ObservedObject var viewModel: GeneralSettingsViewModel
     @Binding var showHelperAlert: Bool
     @Binding var helperAlertMessage: String
@@ -845,26 +876,27 @@ private struct GeneralSettingsAlerts: ViewModifier {
     @EnvironmentObject private var networkManager: NetworkManager
 
     func body(content: Content) -> some View {
+        let _ = interfaceLanguage
         content
-            .alert(helperAlertSuccess ? "操作成功" : "操作失败", isPresented: $showHelperAlert) {
-                Button("确定") { }
+            .alert(helperAlertSuccess ? AppLocalized("操作成功") : AppLocalized("操作失败"), isPresented: $showHelperAlert) {
+                Button(AppLocalized("确定")) { }
             } message: {
                 Text(helperAlertMessage)
             }
-            .alert(viewModel.isSuccess ? "操作成功" : "操作失败", isPresented: $viewModel.showAlert) {
-                Button("确定") { }
+            .alert(viewModel.isSuccess ? AppLocalized("操作成功") : AppLocalized("操作失败"), isPresented: $viewModel.showAlert) {
+                Button(AppLocalized("确定")) { }
             } message: {
                 Text(viewModel.alertMessage)
             }
-            .alert("确认下载", isPresented: $viewModel.showDownloadOnlyConfirmAlert) {
-                Button(String(localized: "取消"), role: .cancel) { }
-                Button("确定") {
+            .alert(AppLocalized("确认下载"), isPresented: $viewModel.showDownloadOnlyConfirmAlert) {
+                Button(AppLocalized("取消"), role: .cancel) { }
+                Button(AppLocalized("确定")) {
                     Task {
                         startDownloadSetup()
                     }
                 }
             } message: {
-                Text("确定要下载 HDBox 和 IPCBox 组件吗？")
+                Text(AppLocalized("确定要下载 HDBox 和 IPCBox 组件吗？"))
             }
     }
 
@@ -889,11 +921,11 @@ private struct GeneralSettingsAlerts: ViewModifier {
                     cancellationHandler: { viewModel.isCancelled }
                 )
                 viewModel.isSuccess = true
-                viewModel.alertMessage = String(localized: "HDBox 和 IPCBox 下载成功")
+                viewModel.alertMessage = AppLocalized("HDBox 和 IPCBox 下载成功")
                 viewModel.refreshCCInstallStatus()
             } catch NetworkError.cancelled {
                 viewModel.isSuccess = false
-                viewModel.alertMessage = String(localized: "下载已取消")
+                viewModel.alertMessage = AppLocalized("下载已取消")
             } catch {
                 viewModel.isSuccess = false
                 viewModel.alertMessage = error.localizedDescription
@@ -906,12 +938,14 @@ private struct GeneralSettingsAlerts: ViewModifier {
 }
 
 struct DownloadSettingsView: View {
+    @StorageValue(\.interfaceLanguage) private var interfaceLanguage
     @ObservedObject var viewModel: GeneralSettingsViewModel
 
     var body: some View {
+        let _ = interfaceLanguage
         SettingSection(
-            String(localized: "下载设置"),
-            footer: String(localized: "控制默认语言、保存目录、架构与并发等下载行为")
+            AppLocalized("下载设置"),
+            footer: AppLocalized("控制默认语言、保存目录、架构与并发等下载行为")
         ) {
             LanguageSettingRow(viewModel: viewModel)
             SettingRowDivider()
@@ -945,12 +979,14 @@ struct HelperSettingsView: View {
 }
 
 struct CCSettingsView: View {
+    @StorageValue(\.interfaceLanguage) private var interfaceLanguage
     @ObservedObject var viewModel: GeneralSettingsViewModel
 
     var body: some View {
+        let _ = interfaceLanguage
         SettingSection(
-            String(localized: "X1a0He CC 设置"),
-            footer: String(localized: "下载 HDBox 和 IPCBox 组件")
+            AppLocalized("X1a0He CC 设置"),
+            footer: AppLocalized("下载 HDBox 和 IPCBox 组件")
         ) {
             SetupComponentRow(viewModel: viewModel)
         }
@@ -961,6 +997,7 @@ struct CCSettingsView: View {
 }
 
 struct UpdateSettingsView: View {
+    @StorageValue(\.interfaceLanguage) private var interfaceLanguage
     @ObservedObject var viewModel: GeneralSettingsViewModel
     private var appVersion: String {
         Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "Unknown"
@@ -970,12 +1007,13 @@ struct UpdateSettingsView: View {
     }
 
     var body: some View {
+        let _ = interfaceLanguage
         SettingSection(
-            String(localized: "更新设置"),
-            footer: String(localized: "通过 Sparkle 自动检查并更新到最新版本")
+            AppLocalized("更新设置"),
+            footer: AppLocalized("通过 Sparkle 自动检查并更新到最新版本")
         ) {
             SettingRow(
-                title: String(localized: "当前版本"),
+                title: AppLocalized("当前版本"),
                 subtitle: nil,
                 icon: "number.circle.fill",
                 iconTint: .blue
@@ -1020,11 +1058,13 @@ private class PreviewUpdater: SPUUpdater {
 }
 
 struct LanguageSettingRow: View {
+    @StorageValue(\.interfaceLanguage) private var interfaceLanguage
     @ObservedObject var viewModel: GeneralSettingsViewModel
 
     var body: some View {
+        let _ = interfaceLanguage
         SettingRow(
-            title: String(localized: "使用默认语言"),
+            title: AppLocalized("使用默认语言"),
             subtitle: subtitleText,
             icon: "globe",
             iconTint: .blue
@@ -1034,7 +1074,7 @@ struct LanguageSettingRow: View {
                     Button(action: { viewModel.showLanguagePicker = true }) {
                         HStack(spacing: 4) {
                             Image(systemName: "pencil").font(.system(size: 10))
-                            Text("选择").font(.system(size: 12))
+                            Text(AppLocalized("选择")).font(.system(size: 12))
                         }
                         .foregroundColor(.white)
                     }
@@ -1059,9 +1099,9 @@ struct LanguageSettingRow: View {
 
     private var subtitleText: String {
         if viewModel.useDefaultLanguage {
-            return String(format: String(localized: "当前: %@"), getLanguageName(code: viewModel.defaultLanguage))
+            return String(format: AppLocalized("当前: %@"), getLanguageName(code: viewModel.defaultLanguage))
         }
-        return String(localized: "关闭时，每次下载前都会让你选择语言")
+        return AppLocalized("关闭时，每次下载前都会让你选择语言")
     }
 
     private func getLanguageName(code: String) -> String {
@@ -1070,11 +1110,13 @@ struct LanguageSettingRow: View {
 }
 
 struct DirectorySettingRow: View {
+    @StorageValue(\.interfaceLanguage) private var interfaceLanguage
     @ObservedObject var viewModel: GeneralSettingsViewModel
 
     var body: some View {
+        let _ = interfaceLanguage
         SettingRow(
-            title: String(localized: "使用默认目录"),
+            title: AppLocalized("使用默认目录"),
             subtitle: subtitleText,
             icon: "folder.fill",
             iconTint: .orange
@@ -1084,7 +1126,7 @@ struct DirectorySettingRow: View {
                     Button(action: { selectDirectory() }) {
                         HStack(spacing: 4) {
                             Image(systemName: "folder.badge.plus").font(.system(size: 10))
-                            Text("选择").font(.system(size: 12))
+                            Text(AppLocalized("选择")).font(.system(size: 12))
                         }
                         .foregroundColor(.white)
                     }
@@ -1102,21 +1144,21 @@ struct DirectorySettingRow: View {
         if viewModel.useDefaultDirectory {
             let path = viewModel.defaultDirectory
             if path.isEmpty {
-                return String(localized: "尚未设置目录")
+                return AppLocalized("尚未设置目录")
             }
-            return String(format: String(localized: "当前: %@"), formatPath(path))
+            return String(format: AppLocalized("当前: %@"), formatPath(path))
         }
-        return String(localized: "关闭时，每次下载前都会让你选择保存位置")
+        return AppLocalized("关闭时，每次下载前都会让你选择保存位置")
     }
 
     private func formatPath(_ path: String) -> String {
-        if path.isEmpty { return String(localized: "未设置") }
+        if path.isEmpty { return AppLocalized("未设置") }
         return URL(fileURLWithPath: path).lastPathComponent
     }
 
     private func selectDirectory() {
         let panel = NSOpenPanel()
-        panel.title = "选择默认下载目录"
+        panel.title = AppLocalized("选择默认下载目录")
         panel.canCreateDirectories = true
         panel.canChooseDirectories = true
         panel.canChooseFiles = false
@@ -1129,14 +1171,16 @@ struct DirectorySettingRow: View {
 }
 
 struct RedownloadConfirmRow: View {
+    @StorageValue(\.interfaceLanguage) private var interfaceLanguage
     @ObservedObject var viewModel: GeneralSettingsViewModel
 
     var body: some View {
+        let _ = interfaceLanguage
         SettingRow(
-            title: String(localized: "重新下载时需要确认"),
+            title: AppLocalized("重新下载时需要确认"),
             subtitle: viewModel.confirmRedownload
-                ? String(localized: "重新下载会弹出确认对话框，避免误操作")
-                : String(localized: "关闭后重新下载将直接覆盖现有文件"),
+                ? AppLocalized("重新下载会弹出确认对话框，避免误操作")
+                : AppLocalized("关闭后重新下载将直接覆盖现有文件"),
             icon: "exclamationmark.triangle.fill",
             iconTint: .orange
         ) {
@@ -1149,12 +1193,14 @@ struct RedownloadConfirmRow: View {
 }
 
 struct ArchitectureSettingRow: View {
+    @StorageValue(\.interfaceLanguage) private var interfaceLanguage
     @ObservedObject var viewModel: GeneralSettingsViewModel
     @ObservedObject private var networkManager = globalNetworkManager
 
     var body: some View {
+        let _ = interfaceLanguage
         SettingRow(
-            title: String(localized: "下载 Apple Silicon 架构"),
+            title: AppLocalized("下载 Apple Silicon 架构"),
             subtitle: subtitleText,
             icon: "cpu.fill",
             iconTint: .purple
@@ -1162,7 +1208,7 @@ struct ArchitectureSettingRow: View {
             HStack(spacing: 8) {
                 SettingsStatusChip(
                     icon: "memorychip",
-                    text: String(format: String(localized: "本机: %@"), AppStatics.cpuArchitecture),
+                    text: String(format: AppLocalized("本机: %@"), AppStatics.cpuArchitecture),
                     tint: .secondary
                 )
                 if networkManager.isFetchingProducts {
@@ -1186,8 +1232,8 @@ struct ArchitectureSettingRow: View {
 
     private var subtitleText: String {
         viewModel.downloadAppleSilicon
-            ? String(localized: "下载 arm64 架构包，适配 Apple Silicon 芯片")
-            : String(localized: "下载 x86_64 架构包，兼容 Intel 芯片")
+            ? AppLocalized("下载 arm64 架构包，适配 Apple Silicon 芯片")
+            : AppLocalized("下载 x86_64 架构包，兼容 Intel 芯片")
     }
 }
 
@@ -1203,11 +1249,13 @@ struct HelperStatusRow: View {
 }
 
 struct SetupComponentRow: View {
+    @StorageValue(\.interfaceLanguage) private var interfaceLanguage
     @ObservedObject var viewModel: GeneralSettingsViewModel
 
     var body: some View {
+        let _ = interfaceLanguage
         SettingRow(
-            title: String(localized: "X1a0He CC"),
+            title: AppLocalized("X1a0He CC"),
             subtitle: viewModel.isDownloadingSetup
                 ? viewModel.setupDownloadStatus
                 : viewModel.ccInstallStatus.subtitle,
@@ -1222,7 +1270,7 @@ struct SetupComponentRow: View {
                     Button(action: { viewModel.cancelDownload() }) {
                         HStack(spacing: 4) {
                             Image(systemName: "xmark").font(.system(size: 10))
-                            Text("取消").font(.system(size: 12))
+                            Text(AppLocalized("取消")).font(.system(size: 12))
                         }
                         .foregroundColor(.white)
                     }
@@ -1237,7 +1285,7 @@ struct SetupComponentRow: View {
                     Button(action: { viewModel.showDownloadOnlyConfirmAlert = true }) {
                         HStack(spacing: 4) {
                             Image(systemName: "arrow.down.circle").font(.system(size: 10))
-                            Text("下载").font(.system(size: 12))
+                            Text(AppLocalized("下载")).font(.system(size: 12))
                         }
                         .foregroundColor(.white)
                     }
@@ -1249,14 +1297,16 @@ struct SetupComponentRow: View {
 }
 
 struct AutoUpdateRow: View {
+    @StorageValue(\.interfaceLanguage) private var interfaceLanguage
     @ObservedObject var viewModel: GeneralSettingsViewModel
 
     var body: some View {
+        let _ = interfaceLanguage
         SettingRow(
-            title: String(localized: "自动检查更新版本"),
+            title: AppLocalized("自动检查更新版本"),
             subtitle: viewModel.automaticallyChecksForUpdates
-                ? String(localized: "启动时自动检查 GitHub 新版本")
-                : String(localized: "关闭后需要手动点击右侧按钮检查"),
+                ? AppLocalized("启动时自动检查 GitHub 新版本")
+                : AppLocalized("关闭后需要手动点击右侧按钮检查"),
             icon: "arrow.triangle.2.circlepath",
             iconTint: .blue
         ) {
@@ -1277,11 +1327,13 @@ struct AutoUpdateRow: View {
 }
 
 struct AutoDownloadRow: View {
+    @StorageValue(\.interfaceLanguage) private var interfaceLanguage
     @ObservedObject var viewModel: GeneralSettingsViewModel
 
     var body: some View {
+        let _ = interfaceLanguage
         SettingRow(
-            title: String(localized: "自动下载最新版本"),
+            title: AppLocalized("自动下载最新版本"),
             subtitle: subtitleText,
             icon: "arrow.down.circle.fill",
             iconTint: viewModel.isAutomaticallyDownloadsUpdatesDisabled ? .secondary : .blue
@@ -1299,21 +1351,23 @@ struct AutoDownloadRow: View {
 
     private var subtitleText: String {
         if viewModel.isAutomaticallyDownloadsUpdatesDisabled {
-            return String(localized: "需先启用\"自动检查更新版本\"")
+            return AppLocalized("需先启用\"自动检查更新版本\"")
         }
         return viewModel.automaticallyDownloadsUpdates
-            ? String(localized: "检测到新版本后自动下载")
-            : String(localized: "需手动点击更新按钮进行下载")
+            ? AppLocalized("检测到新版本后自动下载")
+            : AppLocalized("需手动点击更新按钮进行下载")
     }
 }
 
 struct ConcurrentDownloadsSettingRow: View {
+    @StorageValue(\.interfaceLanguage) private var interfaceLanguage
     @ObservedObject var viewModel: GeneralSettingsViewModel
 
     var body: some View {
+        let _ = interfaceLanguage
         SettingRow(
-            title: String(localized: "并发下载数"),
-            subtitle: String(format: String(localized: "所有下载任务共用的请求上限（范围 1-10，推荐 %d）"), 3),
+            title: AppLocalized("并发下载数"),
+            subtitle: String(format: AppLocalized("所有下载任务共用的请求上限（范围 1-10，推荐 %d）"), 3),
             icon: "square.stack.3d.up.fill",
             iconTint: .teal
         ) {
@@ -1360,22 +1414,24 @@ struct ConcurrentDownloadsSettingRow: View {
 }
 
 struct DeleteCompletedTasksRow: View {
+    @StorageValue(\.interfaceLanguage) private var interfaceLanguage
     @ObservedObject var viewModel: GeneralSettingsViewModel
 
     var body: some View {
+        let _ = interfaceLanguage
         SettingRow(
-            title: String(localized: "删除任务时同时删除本地文件"),
+            title: AppLocalized("删除任务时同时删除本地文件"),
             subtitle: viewModel.deleteCompletedTasksWithFiles
-                ? String(localized: "删除任务记录时会一并删除本地安装包")
-                : String(localized: "仅删除任务记录，保留本地安装包"),
+                ? AppLocalized("删除任务记录时会一并删除本地安装包")
+                : AppLocalized("仅删除任务记录，保留本地安装包"),
             icon: "trash.slash.fill",
             iconTint: viewModel.deleteCompletedTasksWithFiles ? .red : .blue
         ) {
             HStack(spacing: 8) {
                 if viewModel.deleteCompletedTasksWithFiles {
-                    SettingsStatusChip(icon: "trash.fill", text: String(localized: "将删除文件"), tint: .red)
+                    SettingsStatusChip(icon: "trash.fill", text: AppLocalized("将删除文件"), tint: .red)
                 } else {
-                    SettingsStatusChip(icon: "doc.on.doc.fill", text: String(localized: "保留文件"), tint: .blue)
+                    SettingsStatusChip(icon: "doc.on.doc.fill", text: AppLocalized("保留文件"), tint: .blue)
                 }
                 Toggle("", isOn: $viewModel.deleteCompletedTasksWithFiles)
                     .toggleStyle(SwitchToggleStyle(tint: .red))

@@ -63,11 +63,11 @@ enum VersionPickerFilter: String, CaseIterable, Identifiable {
 
     var title: String {
         switch self {
-        case .all: return String(localized: "全部")
-        case .latest: return String(localized: "各代最新")
-        case .downloaded: return String(localized: "已下载")
-        case .installed: return String(localized: "已安装")
-        case .hasDependencies: return String(localized: "有依赖")
+        case .all: return AppLocalized("全部")
+        case .latest: return AppLocalized("各代最新")
+        case .downloaded: return AppLocalized("已下载")
+        case .installed: return AppLocalized("已安装")
+        case .hasDependencies: return AppLocalized("有依赖")
         }
     }
 
@@ -94,6 +94,7 @@ struct VersionSizeEstimate: Equatable {
 }
 
 struct NavigationVersionPickerView: View {
+    @StorageValue(\.interfaceLanguage) private var interfaceLanguage
     @ObservedObject private var networkManager = globalNetworkManager
     @Environment(\.dismiss) private var dismiss
     @StorageValue(\.defaultLanguage) private var defaultLanguage
@@ -115,6 +116,7 @@ struct NavigationVersionPickerView: View {
     }
 
     var body: some View {
+        let _ = interfaceLanguage
         NavigationStack(path: $navigationPath) {
             VStack(spacing: 0) {
                 VersionPickerHeaderView(
@@ -200,7 +202,7 @@ struct NavigationVersionPickerView: View {
         return try await withCheckedThrowingContinuation { continuation in
             DispatchQueue.main.async {
                 let panel = NSOpenPanel()
-                panel.title = "选择保存位置"
+                panel.title = AppLocalized("选择保存位置")
                 panel.canCreateDirectories = true
                 panel.canChooseDirectories = true
                 panel.canChooseFiles = false
@@ -307,6 +309,7 @@ struct NavigationVersionPickerView: View {
 }
 
 private struct VersionPickerHeaderView: View {
+    @StorageValue(\.interfaceLanguage) private var interfaceLanguage
     @ObservedObject private var networkManager = globalNetworkManager
     let productId: String
     let productIcon: NSImage?
@@ -315,6 +318,7 @@ private struct VersionPickerHeaderView: View {
     let onDismiss: () -> Void
 
     var body: some View {
+        let _ = interfaceLanguage
         VStack(spacing: 8) {
             HStack(spacing: 10) {
                 if let product = findProduct(id: productId) {
@@ -326,7 +330,7 @@ private struct VersionPickerHeaderView: View {
                             .font(.system(size: 15, weight: .semibold))
                             .foregroundColor(.primary.opacity(0.92))
                             .lineLimit(1)
-                        Text("选择版本")
+                        Text(AppLocalized("选择版本"))
                             .font(.system(size: 11))
                             .foregroundColor(.secondary)
                     }
@@ -336,7 +340,7 @@ private struct VersionPickerHeaderView: View {
 
                 architectureMenu
 
-                Button("取消") {
+                Button(AppLocalized("取消")) {
                     onDismiss()
                 }
                 .buttonStyle(BeautifulButtonStyle(baseColor: Color.gray.opacity(0.2)))
@@ -420,7 +424,7 @@ private struct VersionPickerHeaderView: View {
         .menuStyle(.borderlessButton)
         .menuIndicator(.hidden)
         .fixedSize()
-        .help("切换下载架构")
+        .help(AppLocalized("切换下载架构"))
         .disabled(networkManager.isFetchingProducts)
     }
 
@@ -430,10 +434,12 @@ private struct VersionPickerHeaderView: View {
 }
 
 private struct VersionPickerFilterBar: View {
+    @StorageValue(\.interfaceLanguage) private var interfaceLanguage
     @Binding var searchText: String
     @Binding var activeFilter: VersionPickerFilter
 
     var body: some View {
+        let _ = interfaceLanguage
         VStack(spacing: 8) {
             searchField
             filterChips
@@ -449,7 +455,7 @@ private struct VersionPickerFilterBar: View {
                 .font(.system(size: 13))
                 .foregroundColor(.secondary.opacity(0.7))
 
-            TextField("搜索版本号 / buildGuid", text: $searchText)
+            TextField(AppLocalized("搜索版本号 / buildGuid"), text: $searchText)
                 .textFieldStyle(PlainTextFieldStyle())
                 .font(.system(size: 13))
 
@@ -493,11 +499,13 @@ private struct VersionPickerFilterBar: View {
 }
 
 private struct FilterChip: View {
+    @StorageValue(\.interfaceLanguage) private var interfaceLanguage
     let filter: VersionPickerFilter
     let isActive: Bool
     let onTap: () -> Void
 
     var body: some View {
+        let _ = interfaceLanguage
         Button(action: onTap) {
             HStack(spacing: 4) {
                 Image(systemName: filter.icon)
@@ -518,11 +526,12 @@ private struct FilterChip: View {
             )
         }
         .buttonStyle(.plain)
-        .help(filter == .latest ? String(localized: "每个主版本仅显示最新版本") : filter.title)
+        .help(filter == .latest ? AppLocalized("每个主版本仅显示最新版本") : filter.title)
     }
 }
 
 private struct VersionListView: View {
+    @StorageValue(\.interfaceLanguage) private var interfaceLanguage
     let productId: String
     @Binding var searchText: String
     @Binding var activeFilter: VersionPickerFilter
@@ -542,6 +551,7 @@ private struct VersionListView: View {
     }
 
     var body: some View {
+        let _ = interfaceLanguage
         // visibleVersions 已按版本降序排列，最新标记以筛选前的完整列表为准。
         let latestVersionByMajor = cachedVersions.reduce(into: [Int: String]()) { latest, entry in
             let major = majorOf(entry.key)
@@ -572,8 +582,8 @@ private struct VersionListView: View {
                     if groups.isEmpty {
                         VersionPickerEmptyView(
                             hint: searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                                ? "当前筛选下暂无版本"
-                                : "没有匹配 “\(searchText)” 的版本",
+                                ? AppLocalized("当前筛选下暂无版本")
+                                : AppLocalized("没有匹配 “\(searchText)” 的版本"),
                             onReset: hasActiveFilters ? resetFilters : nil
                         )
                         .padding(.top, 40)
@@ -895,6 +905,7 @@ private struct VersionRow: View, Equatable {
 }
 
 private struct VersionHeader: View {
+    @StorageValue(\.interfaceLanguage) private var interfaceLanguage
     let version: String
     let info: Product.Platform
     let isExpanded: Bool
@@ -905,6 +916,7 @@ private struct VersionHeader: View {
     let onToggle: () -> Void
 
     var body: some View {
+        let _ = interfaceLanguage
         Button(action: onToggle) {
             HStack(spacing: 16) {
                 VersionInfo(
@@ -928,23 +940,25 @@ private struct VersionHeader: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .help(isExpanded ? String(localized: "收起详情") : String(localized: "展开详情"))
+        .help(isExpanded ? AppLocalized("收起详情") : AppLocalized("展开详情"))
     }
 }
 
 private struct VersionBuildDetails: View {
+    @StorageValue(\.interfaceLanguage) private var interfaceLanguage
     let info: Product.Platform
 
     var body: some View {
+        let _ = interfaceLanguage
         VStack(alignment: .leading, spacing: 8) {
-            Text("构建信息")
+            Text(AppLocalized("构建信息"))
                 .font(.system(size: 12, weight: .medium))
                 .foregroundColor(.primary.opacity(0.85))
 
             if let languageSet = info.languageSet.first {
                 if !languageSet.productVersion.isEmpty {
                     HStack(spacing: 8) {
-                        Text("完整版本")
+                        Text(AppLocalized("完整版本"))
                             .foregroundColor(.secondary)
                             .frame(width: 64, alignment: .leading)
                         Text(languageSet.productVersion)
@@ -955,7 +969,7 @@ private struct VersionBuildDetails: View {
                 }
 
                 HStack(spacing: 8) {
-                    Text("平台")
+                    Text(AppLocalized("平台"))
                         .foregroundColor(.secondary)
                         .frame(width: 64, alignment: .leading)
                     Text(info.id)
@@ -974,6 +988,7 @@ private struct VersionBuildDetails: View {
 }
 
 private struct VersionDetails: View {
+    @StorageValue(\.interfaceLanguage) private var interfaceLanguage
     @ObservedObject private var networkManager = globalNetworkManager
     @StorageValue(\.defaultLanguage) private var defaultLanguage
 	let productId: String
@@ -1009,6 +1024,7 @@ private struct VersionDetails: View {
     }
 
     var body: some View {
+        let _ = interfaceLanguage
         let dependencies = displayedDependencies
         let unresolvedCount = dependencies.filter { !$0.isMatchPlatform }.count
 
@@ -1045,14 +1061,14 @@ private struct VersionDetails: View {
                         .padding(.top, 6)
                 } label: {
                     HStack(spacing: 6) {
-                        Text(String(localized: "依赖组件"))
+                        Text(AppLocalized("依赖组件"))
                             .font(.system(size: 12, weight: .medium))
                         Text("\(dependencies.count)")
                             .font(.system(size: 11))
                             .foregroundColor(.secondary)
                         Spacer(minLength: 4)
                         if unresolvedCount > 0 {
-                            Label(String(localized: "\(unresolvedCount) 项未解析"), systemImage: "exclamationmark.triangle")
+                            Label(AppLocalized("\(unresolvedCount) 项未解析"), systemImage: "exclamationmark.triangle")
                                 .font(.system(size: 10))
                                 .foregroundColor(.orange)
                         }
@@ -1071,7 +1087,7 @@ private struct VersionDetails: View {
                         .padding(.top, 8)
                 } label: {
                     HStack(spacing: 6) {
-                        Text(String(localized: "可选模块"))
+                        Text(AppLocalized("可选模块"))
                             .font(.system(size: 12, weight: .medium))
                         Text("\(info.modules.count)")
                             .font(.system(size: 11))
@@ -1103,7 +1119,7 @@ private struct VersionDetails: View {
     @MainActor
     private func preloadSize(for version: String) async {
         guard let snapshot = CatalogStore.shared.snapshot else {
-            sizeErrorMessage = "产品目录尚未加载"
+            sizeErrorMessage = AppLocalized("产品目录尚未加载")
             return
         }
         let language = defaultLanguage
@@ -1128,7 +1144,7 @@ private struct VersionDetails: View {
             if size > 0 {
                 cachedPackageSizes[version] = VersionSizeEstimate(fullSize: size, deltaSize: nil)
             } else {
-                sizeErrorMessage = "未取得安装包大小"
+                sizeErrorMessage = AppLocalized("未取得安装包大小")
             }
             return
         }
@@ -1147,7 +1163,7 @@ private struct VersionDetails: View {
                     .reduce(Int64(0)) { $0 + $1.downloadSize }
             }
             guard fullTotal > 0 else {
-                throw NetworkError.invalidData("未取得可用的下载包大小")
+                throw NetworkError.invalidData(AppLocalized("未取得可用的下载包大小"))
             }
             let hasDelta = decision.dependencies.flatMap { $0.packages }.contains { $0.selectedDeltaPackage != nil }
             var deltaTotal: Int64? = nil
@@ -1245,6 +1261,7 @@ private struct VersionDetails: View {
 }
 
 private struct VersionDownloadSummaryView: View {
+    @StorageValue(\.interfaceLanguage) private var interfaceLanguage
     let productId: String
     let version: String
     @Binding var cachedPackageSizes: [String: VersionSizeEstimate]
@@ -1255,10 +1272,11 @@ private struct VersionDownloadSummaryView: View {
     let onCustomDownload: (String, Bool) -> Void
 
     var body: some View {
+        let _ = interfaceLanguage
         VStack(alignment: .leading, spacing: 12) {
             if let estimate = cachedPackageSizes[version], estimate.fullSize > 0 {
                 VStack(alignment: .leading, spacing: 6) {
-                    Text(estimate.deltaSize == nil ? String(localized: "预计下载") : String(localized: "全量包"))
+                    Text(estimate.deltaSize == nil ? AppLocalized("预计下载") : AppLocalized("全量包"))
                         .font(.system(size: 11))
                         .foregroundColor(.secondary)
                     Text(ByteCountFormatter.string(fromByteCount: estimate.fullSize, countStyle: .file))
@@ -1267,7 +1285,7 @@ private struct VersionDownloadSummaryView: View {
                         .foregroundColor(.primary)
 
                     if let deltaSize = estimate.deltaSize {
-                        Text(String(format: String(localized: "增量包 ~%@"), ByteCountFormatter.string(fromByteCount: deltaSize, countStyle: .file)))
+                        Text(String(format: AppLocalized("增量包 ~%@"), ByteCountFormatter.string(fromByteCount: deltaSize, countStyle: .file)))
                             .font(.system(size: 11))
                             .foregroundColor(.secondary)
                     }
@@ -1304,12 +1322,12 @@ private struct VersionDownloadSummaryView: View {
                 HStack(spacing: 6) {
                     ProgressView()
                         .controlSize(.mini)
-                    Text(String(localized: "计算中…"))
+                    Text(AppLocalized("计算中…"))
                         .font(.system(size: 12))
                         .foregroundColor(.secondary)
                 }
             } else if let errorMessage {
-                Label(String(localized: "计算失败"), systemImage: "exclamationmark.triangle")
+                Label(AppLocalized("计算失败"), systemImage: "exclamationmark.triangle")
                     .font(.system(size: 12, weight: .medium))
                     .foregroundColor(.orange)
                 Text(errorMessage)
@@ -1317,11 +1335,11 @@ private struct VersionDownloadSummaryView: View {
                     .foregroundColor(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
                     .textSelection(.enabled)
-                Button(String(localized: "重试"), action: onRetry)
+                Button(AppLocalized("重试"), action: onRetry)
                     .font(.system(size: 11))
                     .buttonStyle(.borderless)
             } else {
-                Text("下载大小")
+                Text(AppLocalized("下载大小"))
                     .font(.system(size: 11))
                     .foregroundColor(.secondary)
                 Text("—")
@@ -1352,16 +1370,17 @@ private enum PendingUninstallAction: Identifiable, Equatable {
 	var title: String {
 		switch self {
 		case .product:
-			return String(localized: "卸载产品")
+			return AppLocalized("卸载产品")
 		case .modules(let moduleIds):
-			return moduleIds.count > 1 ? String(localized: "移除多个模块") : String(localized: "移除模块")
+			return moduleIds.count > 1 ? AppLocalized("移除多个模块") : AppLocalized("移除模块")
 		case .package:
-			return String(localized: "卸载包")
+			return AppLocalized("卸载包")
 		}
 	}
 }
 
 private struct InstalledProductUninstallSection: View {
+	@StorageValue(\.interfaceLanguage) private var interfaceLanguage
 	let productId: String
 	let version: String
 	let info: Product.Platform
@@ -1391,7 +1410,7 @@ private struct InstalledProductUninstallSection: View {
 	}
 
 	private var packageCountText: String {
-		String(format: String(localized: "%d 个包"), installedProduct.packages.count)
+		String(format: AppLocalized("%d 个包"), installedProduct.packages.count)
 	}
 
 	private var canSelectMultipleModules: Bool {
@@ -1400,8 +1419,8 @@ private struct InstalledProductUninstallSection: View {
 
 	private var selectedModuleCountText: String {
 		selectedModuleIds.isEmpty
-			? String(localized: "未选择模块")
-			: String(format: String(localized: "已选择 %d 个模块"), selectedModuleIds.count)
+			? AppLocalized("未选择模块")
+			: String(format: AppLocalized("已选择 %d 个模块"), selectedModuleIds.count)
 	}
 
 	private var selectableModuleIds: Set<String> {
@@ -1438,12 +1457,13 @@ private struct InstalledProductUninstallSection: View {
 	}
 
 	var body: some View {
+		let _ = interfaceLanguage
 		VStack(alignment: .leading, spacing: 10) {
 			HStack(spacing: 8) {
 				Image(systemName: "checkmark.seal.fill")
 					.font(.system(size: 12))
 					.foregroundColor(.green)
-				Text(String(localized: "已安装"))
+				Text(AppLocalized("已安装"))
 					.font(.system(size: 12, weight: .semibold))
 					.foregroundColor(.primary.opacity(0.9))
 				Text(packageCountText)
@@ -1458,7 +1478,7 @@ private struct InstalledProductUninstallSection: View {
 						.textSelection(.enabled)
 				}
 				Spacer()
-                Toggle("保留用户配置", isOn: $preservingUserPreferences)
+                Toggle(AppLocalized("保留用户配置"), isOn: $preservingUserPreferences)
                     .toggleStyle(.checkbox)
                     .font(.system(size: 11))
                     .fixedSize()
@@ -1466,7 +1486,7 @@ private struct InstalledProductUninstallSection: View {
 				Button(role: .destructive) {
 					pendingAction = .product
 				} label: {
-					Label("卸载产品", systemImage: "trash")
+					Label(AppLocalized("卸载产品"), systemImage: "trash")
 				}
 				.buttonStyle(.bordered)
 				.controlSize(.small)
@@ -1485,7 +1505,7 @@ private struct InstalledProductUninstallSection: View {
 								}
 							} label: {
 								Label(
-									selectedModuleIds.count == installedModuleRows.count ? "清空" : "全选",
+									selectedModuleIds.count == installedModuleRows.count ? AppLocalized("清空") : AppLocalized("全选"),
 									systemImage: selectedModuleIds.count == installedModuleRows.count ? "checkmark.square.fill" : "square"
 								)
 							}
@@ -1502,7 +1522,7 @@ private struct InstalledProductUninstallSection: View {
 							Button(role: .destructive) {
 								pendingAction = .modules(selectedModuleIds.intersection(selectableModuleIds))
 							} label: {
-								Label("移除选中", systemImage: "minus.circle.fill")
+								Label(AppLocalized("移除选中"), systemImage: "minus.circle.fill")
 							}
 							.buttonStyle(.bordered)
 							.controlSize(.small)
@@ -1541,7 +1561,7 @@ private struct InstalledProductUninstallSection: View {
 							Button(role: .destructive) {
 								pendingAction = .modules([module.id])
 							} label: {
-								Label("移除", systemImage: "minus.circle")
+								Label(AppLocalized("移除"), systemImage: "minus.circle")
 							}
 							.buttonStyle(.borderless)
 							.controlSize(.small)
@@ -1592,7 +1612,7 @@ private struct InstalledProductUninstallSection: View {
 						Image(systemName: "shippingbox")
 							.font(.system(size: 10))
 							.foregroundColor(.secondary)
-						Text(String(localized: "已安装包"))
+						Text(AppLocalized("已安装包"))
 							.font(.system(size: 12, weight: .medium))
 							.foregroundColor(.primary.opacity(0.85))
 					}
@@ -1614,7 +1634,7 @@ private struct InstalledProductUninstallSection: View {
 			Alert(
 				title: Text(action.title),
 				message: Text(confirmMessage(for: action)),
-				primaryButton: .destructive(Text("确认")) {
+				primaryButton: .destructive(Text(AppLocalized("确认"))) {
 					startUninstall(action)
 				},
 				secondaryButton: .cancel()
@@ -1654,15 +1674,15 @@ private struct InstalledProductUninstallSection: View {
         let target: String
         switch action {
         case .product:
-            target = String(format: String(localized: "将卸载 %@ %@。"), displayName, version)
+            target = String(format: AppLocalized("将卸载 %@ %@。"), displayName, version)
         case .modules(let moduleIds):
-            target = String(format: String(localized: "将卸载模块：%@。"), moduleIds.sorted().joined(separator: "、"))
+            target = String(format: AppLocalized("将卸载模块：%@。"), moduleIds.sorted().joined(separator: "、"))
         case .package(let packageKey):
-            target = String(format: String(localized: "将卸载包 %@ %@。"), packageKey.packageName, packageKey.packageVersion)
+            target = String(format: AppLocalized("将卸载包 %@ %@。"), packageKey.packageName, packageKey.packageVersion)
         }
         let preferences = preservingUserPreferences
-            ? String(localized: "用户配置将保留。")
-            : String(localized: "将一并删除卸载材料中标记的用户配置。")
+            ? AppLocalized("用户配置将保留。")
+            : AppLocalized("将一并删除卸载材料中标记的用户配置。")
         return target + "\n" + preferences
     }
 
@@ -1708,12 +1728,14 @@ private struct InstalledProductUninstallSection: View {
 }
 
 private struct VersionDownloadButton: View {
+    @StorageValue(\.interfaceLanguage) private var interfaceLanguage
     let productId: String
     let version: String
     let onSelect: (String) -> Void
     let onCustomDownload: (String, Bool) -> Void
 
     var body: some View {
+        let _ = interfaceLanguage
         Button(action: {
             if isManifestInstallerProduct(productId) {
                 onSelect(version)
@@ -1721,7 +1743,7 @@ private struct VersionDownloadButton: View {
                 onCustomDownload(version, false)
             }
         }) {
-            Label("下载", systemImage: "arrow.down")
+            Label(AppLocalized("下载"), systemImage: "arrow.down")
                 .font(.system(size: 12, weight: .semibold))
                 .frame(width: VersionPickerConstants.downloadActionLabelWidth, height: 22)
         }
@@ -1732,18 +1754,20 @@ private struct VersionDownloadButton: View {
 }
 
 private struct DeltaUpdateButton: View {
+    @StorageValue(\.interfaceLanguage) private var interfaceLanguage
     let version: String
     let onDeltaUpdate: (String) -> Void
 
     var body: some View {
+        let _ = interfaceLanguage
         Button(action: { onDeltaUpdate(version) }) {
-            Label(String(localized: "增量更新"), systemImage: "arrow.triangle.2.circlepath")
+            Label(AppLocalized("增量更新"), systemImage: "arrow.triangle.2.circlepath")
                 .font(.system(size: 12, weight: .medium))
                 .frame(width: VersionPickerConstants.downloadActionLabelWidth, height: 22)
         }
         .buttonStyle(.bordered)
         .controlSize(.regular)
-        .help(String(localized: "基于已安装版本仅下载差异部分，节省下载流量"))
+        .help(AppLocalized("基于已安装版本仅下载差异部分，节省下载流量"))
     }
 }
 
@@ -1789,6 +1813,7 @@ struct VersionInfo: View {
 }
 
 private struct CatalogPlatformBadge: View {
+    @StorageValue(\.interfaceLanguage) private var interfaceLanguage
     let platform: String
     var unresolvedReason: String = ""
 
@@ -1798,10 +1823,10 @@ private struct CatalogPlatformBadge: View {
 
     private var title: String {
         switch normalizedPlatform {
-        case "macarm64": return String(localized: "Apple Silicon")
-        case "macuniversal": return String(localized: "通用")
-        case "osx10", "osx10-64": return String(localized: "Intel")
-        case "": return String(localized: "未解析")
+        case "macarm64": return AppLocalized("Apple Silicon")
+        case "macuniversal": return AppLocalized("通用")
+        case "osx10", "osx10-64": return AppLocalized("Intel")
+        case "": return AppLocalized("未解析")
         default: return platform
         }
     }
@@ -1820,6 +1845,7 @@ private struct CatalogPlatformBadge: View {
     }
 
     var body: some View {
+        let _ = interfaceLanguage
         Text(title)
             .font(.system(size: 11, weight: .medium))
             .foregroundColor(tint)
@@ -1829,11 +1855,13 @@ private struct CatalogPlatformBadge: View {
 }
 
 private struct BuildGuidCopyButton: View {
+    @StorageValue(\.interfaceLanguage) private var interfaceLanguage
     let buildGuid: String
     @State private var isHovered = false
     @State private var copyFeedbackID: UUID?
 
     var body: some View {
+        let _ = interfaceLanguage
         Button(action: copyBuildGuid) {
             HStack(spacing: 8) {
                 Text("BuildGuid")
@@ -1846,7 +1874,7 @@ private struct BuildGuidCopyButton: View {
                     .truncationMode(.middle)
                     .frame(maxWidth: .infinity, alignment: .leading)
                 HStack(spacing: 4) {
-                    Text(String(localized: "已复制"))
+                    Text(AppLocalized("已复制"))
                         .opacity(copyFeedbackID == nil ? 0 : 1)
                     Image(systemName: copyFeedbackID == nil ? "doc.on.doc" : "checkmark")
                         .frame(width: 12)
@@ -1865,8 +1893,8 @@ private struct BuildGuidCopyButton: View {
         }
         .buttonStyle(.plain)
         .onHover { isHovered = $0 }
-        .help(String(format: String(localized: "复制 buildGuid: %@"), buildGuid))
-        .accessibilityLabel(String(localized: "复制 buildGuid"))
+        .help(String(format: AppLocalized("复制 buildGuid: %@"), buildGuid))
+        .accessibilityLabel(AppLocalized("复制 buildGuid"))
         .accessibilityValue(buildGuid)
         .task(id: copyFeedbackID) {
             guard let feedbackID = copyFeedbackID else { return }
@@ -1892,8 +1920,10 @@ private struct BuildGuidCopyButton: View {
 }
 
 struct GroupLatestBadge: View {
+    @StorageValue(\.interfaceLanguage) private var interfaceLanguage
     var body: some View {
-        Text("本代最新")
+        let _ = interfaceLanguage
+        Text(AppLocalized("本代最新"))
             .font(.system(size: 10, weight: .medium))
             .foregroundColor(.secondary)
             .fixedSize()
@@ -1901,8 +1931,10 @@ struct GroupLatestBadge: View {
 }
 
 struct OverallLatestBadge: View {
+    @StorageValue(\.interfaceLanguage) private var interfaceLanguage
     var body: some View {
-        Text("最新")
+        let _ = interfaceLanguage
+        Text(AppLocalized("最新"))
             .font(.system(size: 10, weight: .semibold))
             .foregroundColor(.accentColor)
             .padding(.horizontal, 6)
@@ -1916,11 +1948,13 @@ struct OverallLatestBadge: View {
 }
 
 struct ExistingPathButton: View {
+    @StorageValue(\.interfaceLanguage) private var interfaceLanguage
     let isVisible: Bool
 
     var body: some View {
+        let _ = interfaceLanguage
         if isVisible {
-            Label(String(localized: "已安装"), systemImage: "checkmark.circle")
+            Label(AppLocalized("已安装"), systemImage: "checkmark.circle")
                 .font(.system(size: 11))
                 .foregroundColor(.secondary)
         }
@@ -1928,11 +1962,13 @@ struct ExistingPathButton: View {
 }
 
 struct DownloadedPackageButton: View {
+    @StorageValue(\.interfaceLanguage) private var interfaceLanguage
     let isVisible: Bool
 
     var body: some View {
+        let _ = interfaceLanguage
         if isVisible {
-            Label(String(localized: "已下载"), systemImage: "arrow.down.circle")
+            Label(AppLocalized("已下载"), systemImage: "arrow.down.circle")
                 .font(.system(size: 11))
                 .foregroundColor(.secondary)
         }
@@ -2075,10 +2111,12 @@ struct ModulesList: View {
 }
 
 private struct VersionPickerEmptyView: View {
+    @StorageValue(\.interfaceLanguage) private var interfaceLanguage
     let hint: String
     let onReset: (() -> Void)?
 
     var body: some View {
+        let _ = interfaceLanguage
         VStack(spacing: 14) {
             ZStack {
                 Circle()
@@ -2090,7 +2128,7 @@ private struct VersionPickerEmptyView: View {
             }
 
             VStack(spacing: 4) {
-                Text("没有结果")
+                Text(AppLocalized("没有结果"))
                     .font(.system(size: 14, weight: .semibold))
                 Text(hint)
                     .font(.system(size: 12))
@@ -2099,7 +2137,7 @@ private struct VersionPickerEmptyView: View {
             }
 
             if let onReset {
-                Button(String(localized: "清除筛选"), action: onReset)
+                Button(AppLocalized("清除筛选"), action: onReset)
                     .buttonStyle(.bordered)
                     .controlSize(.small)
             }
@@ -2110,6 +2148,7 @@ private struct VersionPickerEmptyView: View {
 }
 
 private struct VersionListSummaryView: View {
+    @StorageValue(\.interfaceLanguage) private var interfaceLanguage
     let totalCount: Int
     let visibleCount: Int
     let isFiltered: Bool
@@ -2117,6 +2156,7 @@ private struct VersionListSummaryView: View {
     let onCollapseAll: () -> Void
 
     var body: some View {
+        let _ = interfaceLanguage
         HStack(spacing: 8) {
             Text(summaryText)
                 .font(.system(size: 11))
@@ -2125,7 +2165,7 @@ private struct VersionListSummaryView: View {
             Spacer()
 
             Button(action: onCollapseAll) {
-                Label(String(localized: "全部收起"), systemImage: "chevron.up")
+                Label(AppLocalized("全部收起"), systemImage: "chevron.up")
                     .font(.system(size: 11))
             }
             .buttonStyle(.plain)
@@ -2139,13 +2179,14 @@ private struct VersionListSummaryView: View {
 
     private var summaryText: String {
         if isFiltered {
-            return String(localized: "显示 \(visibleCount) / \(totalCount) 个版本")
+            return AppLocalized("显示 \(visibleCount) / \(totalCount) 个版本")
         }
-        return String(localized: "共 \(totalCount) 个版本")
+        return AppLocalized("共 \(totalCount) 个版本")
     }
 }
 
 private struct DuplicateTaskAlertView: View {
+    @StorageValue(\.interfaceLanguage) private var interfaceLanguage
     let productId: String
     let version: String
     let onCancel: () -> Void
@@ -2156,6 +2197,7 @@ private struct DuplicateTaskAlertView: View {
     }
 
     var body: some View {
+        let _ = interfaceLanguage
         VStack(spacing: 20) {
             ZStack {
                 if let iconImage = iconImage {
@@ -2179,20 +2221,20 @@ private struct DuplicateTaskAlertView: View {
                     .offset(x: 24, y: -24)
             }
 
-            Text("下载任务已存在")
+            Text(AppLocalized("下载任务已存在"))
                 .font(.headline)
 
             VStack(spacing: 8) {
-                Text("产品 \(productName) (版本 \(version)) 已有正在进行的下载任务")
+                Text(AppLocalized("产品 \(productName) (版本 \(version)) 已有正在进行的下载任务"))
                     .multilineTextAlignment(.center)
                     .foregroundColor(.secondary)
 
-                Text("请在下载管理器中查看进度")
+                Text(AppLocalized("请在下载管理器中查看进度"))
                     .font(.caption)
                     .foregroundColor(.secondary)
             }
 
-            Button("确定") {
+            Button(AppLocalized("确定")) {
                 onCancel()
             }
             .buttonStyle(BeautifulButtonStyle(baseColor: Color.blue))
@@ -2205,6 +2247,6 @@ private struct DuplicateTaskAlertView: View {
                 .fill(Color(NSColor.windowBackgroundColor))
                 .shadow(radius: 10)
         )
-        .navigationTitle("任务提示")
+        .navigationTitle(AppLocalized("任务提示"))
     }
 }

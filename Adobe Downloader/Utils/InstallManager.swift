@@ -39,8 +39,8 @@ actor InstallManager {
         var errorDescription: String? {
             switch self {
             case .installationFailed(let message): return message
-            case .cancelled: return String(localized: "安装已取消")
-            case .permissionDenied: return String(localized: "权限被拒绝")
+            case .cancelled: return AppLocalized("安装已取消")
+            case .permissionDenied: return AppLocalized("权限被拒绝")
             case .installationFailedWithDetails(let message, _): return message
             case .installerOpened(let message): return message
             }
@@ -146,7 +146,7 @@ actor InstallManager {
 
         let driverPath = preparedSource.url.appendingPathComponent("driver.xml").path
         guard FileManager.default.fileExists(atPath: driverPath) else {
-            throw InstallError.installationFailed(String(localized: "找不到 driver.xml 文件"))
+            throw InstallError.installationFailed(AppLocalized("找不到 driver.xml 文件"))
         }
 
         let cancellation = HDPIMOperationContext.cancellation
@@ -186,13 +186,13 @@ actor InstallManager {
 
             if let lastStructuredError = outputState.lastStructuredError {
                 throw InstallError.installationFailedWithDetails(
-                    String(format: String(localized: "安装失败: %@"), lastStructuredError),
+                    String(format: AppLocalized("安装失败: %@"), lastStructuredError),
                     lastStructuredError
                 )
             }
         } catch {
             throw InstallError.installationFailedWithDetails(
-                String(format: String(localized: "安装失败: %@"), error.localizedDescription),
+                String(format: AppLocalized("安装失败: %@"), error.localizedDescription),
                 String(describing: error)
             )
         }
@@ -207,7 +207,7 @@ actor InstallManager {
     }
 
     func getInstallCommand(for driverPath: String) -> String {
-        return String(localized: "HDPIM Engine (内置安装引擎，无需外部命令)")
+        return AppLocalized("HDPIM Engine (内置安装引擎，无需外部命令)")
     }
 
     func retry(
@@ -225,7 +225,7 @@ actor InstallManager {
         state: InstallOutputState,
         progressHandler: @escaping (Double, String) -> Void,
         logHandler: ((String) -> Void)?,
-        failureStatusPrefix: String = String(localized: "安装失败"),
+        failureStatusPrefix: String = AppLocalized("安装失败"),
         includeUnstructuredOutput: Bool = true
     ) {
         state.pending.append(output.replacingOccurrences(of: "\r\n", with: "\n"))
@@ -260,7 +260,8 @@ actor InstallManager {
                 // 诊断不覆盖进度状态；耗时和异常在 Release 中也必须可见。
                 if message.hasPrefix(HDPIMPackageProgress.messagePrefix) ||
                     message.hasPrefix("[HDPIM 耗时]") || message.contains("失败") ||
-                    message.contains("Warning") || message.contains("警告") {
+                    message.localizedCaseInsensitiveContains("warning") || message.contains("警告") ||
+                    message.localizedCaseInsensitiveContains("failed") {
                     logHandler?(message)
                 } else {
                     emitDetailedInstallLog(message, logHandler: logHandler)
@@ -273,7 +274,7 @@ actor InstallManager {
                 state.lastStructuredError = message
                 logHandler?(message)
                 Task { @MainActor in
-                    progressHandler(state.latestProgress, String(format: String(localized: "%@: %@"), failureStatusPrefix, message))
+                    progressHandler(state.latestProgress, String(format: AppLocalized("%@: %@"), failureStatusPrefix, message))
                 }
                 continue
             }
@@ -303,8 +304,8 @@ actor InstallManager {
             return PreparedInstallSource(url: appPath, cleanupURL: nil)
         }
 
-        progressHandler(0.0, String(localized: "正在准备安装源..."))
-        Self.emitDetailedInstallLog(String(format: String(localized: "[HDPIM Install] 安装源位于受保护目录，正在复制到临时安装目录: %@"), appPath.path), logHandler: logHandler)
+        progressHandler(0.0, AppLocalized("正在准备安装源..."))
+        Self.emitDetailedInstallLog(String(format: AppLocalized("[HDPIM Install] 安装源位于受保护目录，正在复制到临时安装目录: %@"), appPath.path), logHandler: logHandler)
 
         let stageRoot = URL(fileURLWithPath: NSHomeDirectory(), isDirectory: true)
             .appendingPathComponent("Library/Application Support/Adobe Downloader/InstallSources", isDirectory: true)
@@ -318,10 +319,10 @@ actor InstallManager {
             try sanitizeStagedInstallSource(at: stagedURL)
         } catch {
             try? FileManager.default.removeItem(at: stageRoot)
-            throw InstallError.installationFailed(String(format: String(localized: "安装源复制失败: %@"), error.localizedDescription))
+            throw InstallError.installationFailed(String(format: AppLocalized("安装源复制失败: %@"), error.localizedDescription))
         }
 
-        Self.emitDetailedInstallLog(String(format: String(localized: "[HDPIM Install] 临时安装目录准备完成: %@"), stagedURL.path), logHandler: logHandler)
+        Self.emitDetailedInstallLog(String(format: AppLocalized("[HDPIM Install] 临时安装目录准备完成: %@"), stagedURL.path), logHandler: logHandler)
         return PreparedInstallSource(url: stagedURL, cleanupURL: stageRoot)
     }
 
@@ -460,9 +461,9 @@ actor InstallManager {
         }
 
         Task { @MainActor in
-            progressHandler(0.05, String(localized: "正在挂载 Acrobat 安装镜像..."))
+            progressHandler(0.05, AppLocalized("正在挂载 Acrobat 安装镜像..."))
         }
-        Self.emitDetailedInstallLog(String(format: String(localized: "[Acrobat Install] 挂载 DMG: %@"), dmgURL.path), logHandler: logHandler)
+        Self.emitDetailedInstallLog(String(format: AppLocalized("[Acrobat Install] 挂载 DMG: %@"), dmgURL.path), logHandler: logHandler)
 
         let attachOutput = try await runProcess(
             executable: "/usr/bin/hdiutil",
@@ -500,25 +501,25 @@ actor InstallManager {
 
         if let packageURL = firstInstallerPackage(in: directoryURL) {
             Task { @MainActor in
-                progressHandler(0.2, String(localized: "正在安装 Acrobat 安装包..."))
+                progressHandler(0.2, AppLocalized("正在安装 Acrobat 安装包..."))
             }
-            Self.emitDetailedInstallLog(String(format: String(localized: "[Acrobat Install] 使用 pkg 安装: %@"), packageURL.path), logHandler: logHandler)
+            Self.emitDetailedInstallLog(String(format: AppLocalized("[Acrobat Install] 使用 pkg 安装: %@"), packageURL.path), logHandler: logHandler)
             try await HelperManager.shared.installPackage(at: packageURL.path, target: "/")
             Task { @MainActor in
-                progressHandler(1.0, String(localized: "安装完成"))
+                progressHandler(1.0, AppLocalized("安装完成"))
             }
             return
         }
 
         if let appURL = firstInstallerApplication(in: directoryURL) {
             Task { @MainActor in
-                progressHandler(0.8, String(localized: "已打开 Acrobat 安装器，请按提示完成安装"))
+                progressHandler(0.8, AppLocalized("已打开 Acrobat 安装器，请按提示完成安装"))
             }
-            Self.emitDetailedInstallLog(String(format: String(localized: "[Acrobat Install] 打开 app 安装器: %@"), appURL.path), logHandler: logHandler)
+            Self.emitDetailedInstallLog(String(format: AppLocalized("[Acrobat Install] 打开 app 安装器: %@"), appURL.path), logHandler: logHandler)
             _ = await MainActor.run {
                 NSWorkspace.shared.open(appURL)
             }
-            throw InstallError.installerOpened(String(localized: "已打开 Acrobat 安装器，请按提示完成安装"))
+            throw InstallError.installerOpened(AppLocalized("已打开 Acrobat 安装器，请按提示完成安装"))
         }
 
         throw AcrobatInstallSourceError.notAcrobatSource
@@ -542,9 +543,9 @@ actor InstallManager {
         }
 
         Task { @MainActor in
-            progressHandler(0.12, String(localized: "正在执行 Acrobat 自动安装脚本..."))
+            progressHandler(0.12, AppLocalized("正在执行 Acrobat 自动安装脚本..."))
         }
-        Self.emitDetailedInstallLog(String(format: String(localized: "[Acrobat Install] 使用 PIMX 自动安装: %@"), candidate.pimxURL.path), logHandler: logHandler)
+        Self.emitDetailedInstallLog(String(format: AppLocalized("[Acrobat Install] 使用 PIMX 自动安装: %@"), candidate.pimxURL.path), logHandler: logHandler)
         Self.emitDetailedInstallLog("[Acrobat Install] StagingFolder: \(candidate.stagingURL.path)", logHandler: logHandler)
 
         let oldStagingFolder = currentEnvironmentValue(HDPIMHeadlessInstallRunner.stagingFolderEnvironmentKey)
@@ -565,20 +566,20 @@ actor InstallManager {
                 let percent = Int(ratio * 100)
                 let status = commandName.contains("正在处理:")
                     ? "[Acrobat] \(commandName)"
-                    : String(format: String(localized: "正在自动安装 Acrobat... %d%%"), percent)
+                    : String(format: AppLocalized("正在自动安装 Acrobat... %d%%"), percent)
                 Task { @MainActor in
                     progressHandler(progress, status)
                 }
             }
         } catch {
             throw InstallError.installationFailedWithDetails(
-                String(format: String(localized: "Acrobat 自动安装失败: %@"), error.localizedDescription),
+                String(format: AppLocalized("Acrobat 自动安装失败: %@"), error.localizedDescription),
                 "PIMX: \(candidate.pimxURL.path)\nStagingFolder: \(candidate.stagingURL.path)\n\(String(describing: error))"
             )
         }
 
         Task { @MainActor in
-            progressHandler(1.0, String(localized: "安装完成"))
+            progressHandler(1.0, AppLocalized("安装完成"))
         }
         return true
     }
@@ -621,14 +622,14 @@ actor InstallManager {
                         rootURL: rootURL,
                         packageInfo: packageInfo
                     ) else {
-                        Self.emitDetailedInstallLog(String(format: String(localized: "[Acrobat Install] 跳过非 Acrobat PIMX: %@"), pimxURL.path), logHandler: logHandler)
+                        Self.emitDetailedInstallLog(String(format: AppLocalized("[Acrobat Install] 跳过非 Acrobat PIMX: %@"), pimxURL.path), logHandler: logHandler)
                         break
                     }
 
                     let missingSources = missingRequiredAssetSources(packageInfo.assetReferences)
                     guard missingSources.isEmpty else {
                         Self.emitDetailedInstallLog(
-                            String(format: String(localized: "[Acrobat Install] PIMX staging 不匹配: %@, staging=%@, missing=%@"), pimxURL.path, stagingURL.path, missingSources.prefix(3).joined(separator: " | ")),
+                            String(format: AppLocalized("[Acrobat Install] PIMX staging 不匹配: %@, staging=%@, missing=%@"), pimxURL.path, stagingURL.path, missingSources.prefix(3).joined(separator: " | ")),
                             logHandler: logHandler
                         )
                         continue
@@ -647,7 +648,7 @@ actor InstallManager {
                     break
                 }
             } catch {
-                Self.emitDetailedInstallLog(String(format: String(localized: "[Acrobat Install] PIMX 解析失败: %@, %@"), pimxURL.path, error.localizedDescription), logHandler: logHandler)
+                Self.emitDetailedInstallLog(String(format: AppLocalized("[Acrobat Install] PIMX 解析失败: %@, %@"), pimxURL.path, error.localizedDescription), logHandler: logHandler)
             }
         }
 
