@@ -69,6 +69,7 @@ final class StorageData: ObservableObject {
     @Published var maxConcurrentDownloads: Int {
         didSet {
             UserDefaults.standard.set(maxConcurrentDownloads, forKey: "maxConcurrentDownloads")
+            PDMRequestScheduler.updateSharedLimit(maxConcurrentDownloads)
             objectWillChange.send()
             NotificationCenter.default.post(name: .storageDidChange, object: nil)
         }

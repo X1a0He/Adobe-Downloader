@@ -1403,6 +1403,7 @@ private struct InstalledProductUninstallSection: View {
 	@State private var showUninstallProgress = false
 	@State private var showPackageUninstall = false
 	@State private var selectedModuleIds: Set<String> = []
+    @State private var preservingUserPreferences = true
 
 	private var displayName: String {
 		findProduct(id: productId, version: version)?.displayName ?? productId
@@ -1487,6 +1488,11 @@ private struct InstalledProductUninstallSection: View {
 						.textSelection(.enabled)
 				}
 				Spacer()
+                Toggle("保留用户配置", isOn: $preservingUserPreferences)
+                    .toggleStyle(.checkbox)
+                    .font(.system(size: 11))
+                    .fixedSize()
+                    .disabled(isUninstalling)
 				Button(role: .destructive) {
 					pendingAction = .product
 				} label: {
@@ -1643,21 +1649,19 @@ private struct InstalledProductUninstallSection: View {
 				secondaryButton: .cancel()
 			)
 		}
-		.sheet(isPresented: $showUninstallProgress, onDismiss: {
-			if case .completed = networkManager.uninstallState {
-				onUninstallFinished()
-			}
-		}) {
-			InstallProgressView(
-				data: networkManager.makeUninstallProgressViewData(productName: displayName),
-				onCancel: {
-					showUninstallProgress = false
-					if case .completed = networkManager.uninstallState {
-						onUninstallFinished()
-					}
-				}
-			)
-		}
+        .sheet(isPresented: $showUninstallProgress, onDismiss: onUninstallFinished) {
+            InstallProgressView(
+                data: networkManager.makeUninstallProgressViewData(productName: displayName),
+                onCancel: {
+                    if isUninstalling {
+                        networkManager.cancelUninstallation()
+                    } else {
+                        showUninstallProgress = false
+                    }
+                }
+            )
+            .interactiveDismissDisabled(isUninstalling)
+        }
 	}
 
 	private var isUninstalling: Bool {
@@ -1675,20 +1679,21 @@ private struct InstalledProductUninstallSection: View {
 		}
 	}
 
-	private func confirmMessage(for action: PendingUninstallAction) -> String {
-		switch action {
-		case .product:
-			return String(format: String(localized: "将按 HDPIM 产品卸载流程移除 %@ %@。"), displayName, version)
-		case .modules(let moduleIds):
-			let names = moduleIds.sorted().joined(separator: "、")
-			if moduleIds.count > 1 {
-				return String(format: String(localized: "将按 HDPIM 模块卸载流程移除 %d 个模块：%@。"), moduleIds.count, names)
-			}
-			return String(format: String(localized: "将按 HDPIM 模块卸载流程移除模块 %@。"), names)
-		case .package(let packageKey):
-			return String(format: String(localized: "将按 HDPIM 包级卸载流程移除包 %@ %@。"), packageKey.packageName, packageKey.packageVersion)
-		}
-	}
+    private func confirmMessage(for action: PendingUninstallAction) -> String {
+        let target: String
+        switch action {
+        case .product:
+            target = String(format: String(localized: "将卸载 %@ %@。"), displayName, version)
+        case .modules(let moduleIds):
+            target = String(format: String(localized: "将卸载模块：%@。"), moduleIds.sorted().joined(separator: "、"))
+        case .package(let packageKey):
+            target = String(format: String(localized: "将卸载包 %@ %@。"), packageKey.packageName, packageKey.packageVersion)
+        }
+        let preferences = preservingUserPreferences
+            ? String(localized: "用户配置将保留。")
+            : String(localized: "将一并删除卸载材料中标记的用户配置。")
+        return target + "\n" + preferences
+    }
 
 	private func startUninstall(_ action: PendingUninstallAction) {
 		if case .package = action {
@@ -1696,6 +1701,7 @@ private struct InstalledProductUninstallSection: View {
 			return
 		}
 
+		let preservePreferences = preservingUserPreferences
 		showUninstallProgress = true
 		Task {
 			switch action {
@@ -1704,7 +1710,8 @@ private struct InstalledProductUninstallSection: View {
 					sapCode: installedProduct.sapCode,
 					version: installedProduct.version,
 					processorFamily: installedProduct.processorFamily,
-					productName: displayName
+					productName: displayName,
+                    preservingUserPreferences: preservePreferences
 				)
 			case .modules(let moduleIds):
 				await networkManager.uninstallModules(
@@ -1712,7 +1719,8 @@ private struct InstalledProductUninstallSection: View {
 					version: installedProduct.version,
 					processorFamily: installedProduct.processorFamily,
 					moduleIds: moduleIds,
-					productName: displayName
+					productName: displayName,
+                    preservingUserPreferences: preservePreferences
 				)
 			case .package(let packageKey):
 				await networkManager.uninstallPackages(
@@ -1720,7 +1728,8 @@ private struct InstalledProductUninstallSection: View {
 					version: installedProduct.version,
 					processorFamily: installedProduct.processorFamily,
 					packageKeys: [packageKey],
-					productName: displayName
+					productName: displayName,
+                    preservingUserPreferences: preservePreferences
 				)
 			}
 		}

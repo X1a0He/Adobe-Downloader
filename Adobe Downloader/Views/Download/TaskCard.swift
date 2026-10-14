@@ -172,6 +172,7 @@ struct TaskCard: View {
     }
 
     private var statusTitle: String {
+        if task.isValidatingDownload { return String(localized: "正在校验下载文件") }
         switch task.status {
         case .preparing: return String(localized: "准备中")
         case .paused: return String(localized: "已暂停")
@@ -554,7 +555,7 @@ private struct CardProgressView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 9) {
             HStack(alignment: .firstTextBaseline, spacing: 12) {
-                Text("\(Int(clampedProgress * 100))%")
+                Text(task.hasUnknownDownloadSize ? "—" : "\(Int(clampedProgress * 100))%")
                     .font(.system(size: 16, weight: .semibold))
                     .foregroundColor(tint)
                     .frame(minWidth: 42, alignment: .leading)
@@ -562,44 +563,52 @@ private struct CardProgressView: View {
                     .font(.system(size: 11))
                     .foregroundColor(.secondary)
                 Spacer(minLength: 8)
-                if case .downloading = task.status, task.totalSpeed > 0 {
-                    Label(DownloadFormatters.speed(task.totalSpeed), systemImage: "arrow.down")
+                if task.currentDownloadSpeed > 0 {
+                    Label(DownloadFormatters.speed(task.currentDownloadSpeed), systemImage: "arrow.down")
                         .font(.system(size: 11))
                         .foregroundColor(.secondary)
                         .frame(minWidth: 78, alignment: .trailing)
 
-                    let remaining = DownloadFormatters.remainingTime(
-                        total: task.totalSize,
-                        downloaded: task.totalDownloadedSize,
-                        speed: task.totalSpeed
-                    )
+                    let remaining = DownloadFormatters.remainingTime(seconds: task.remainingDownloadSeconds)
                     if !remaining.isEmpty, task.totalDownloadedSize < task.totalSize {
                         Label(remaining, systemImage: "clock")
                             .font(.system(size: 11))
                             .foregroundColor(.secondary)
                             .frame(minWidth: 62, alignment: .trailing)
-                            .help(String(localized: "预计剩余时间"))
+                            .help(String(localized: "预计剩余下载时间（不含校验）"))
                     }
                 }
             }
             .monospacedDigit()
             .lineLimit(1)
 
-            GeometryReader { geometry in
-                ZStack(alignment: .leading) {
-                    Capsule()
-                        .fill(Color.primary.opacity(0.08))
-                    Capsule()
-                        .fill(tint)
-                        .frame(width: CGFloat(clampedProgress) * geometry.size.width)
-                        .animation(.linear(duration: 0.3), value: clampedProgress)
+            if task.hasUnknownDownloadSize {
+                ProgressView()
+                    .progressViewStyle(.linear)
+                    .frame(height: 6)
+                    .accessibilityLabel(String(localized: "下载进度"))
+                    .accessibilityValue(String(localized: "未知"))
+            } else {
+                GeometryReader { geometry in
+                    ZStack(alignment: .leading) {
+                        Capsule()
+                            .fill(Color.primary.opacity(0.08))
+                        Capsule()
+                            .fill(tint)
+                            .frame(width: CGFloat(clampedProgress) * geometry.size.width)
+                            .animation(.linear(duration: 0.3), value: clampedProgress)
+                    }
                 }
+                .frame(height: 6)
+                .accessibilityLabel(String(localized: "下载进度"))
+                .accessibilityValue("\(Int(clampedProgress * 100))%")
             }
-            .frame(height: 6)
-            .accessibilityLabel(String(localized: "下载进度"))
-            .accessibilityValue("\(Int(clampedProgress * 100))%")
 
-            if case .preparing(let info) = task.status {
+            if task.isValidatingDownload {
+                Label(String(localized: "正在校验下载文件"), systemImage: "checkmark.shield")
+                    .font(.system(size: 11))
+                    .foregroundColor(.secondary)
+            } else if case .preparing(let info) = task.status {
                 Label(info.stage.title, systemImage: "gear.circle")
                     .font(.system(size: 11))
                     .foregroundColor(.secondary)

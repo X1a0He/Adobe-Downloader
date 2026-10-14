@@ -13,6 +13,9 @@ private func xmlEscapedPIMXValue(_ value: String) -> String {
         .replacingOccurrences(of: ">", with: "&gt;")
         .replacingOccurrences(of: "\"", with: "&quot;")
         .replacingOccurrences(of: "'", with: "&apos;")
+        .replacingOccurrences(of: "\r", with: "&#13;")
+        .replacingOccurrences(of: "\n", with: "&#10;")
+        .replacingOccurrences(of: "\t", with: "&#9;")
 }
 
 enum HDPIMPimxFragmentKind {
@@ -25,9 +28,10 @@ struct HDPIMDeleteEntry {
     let isDirectory: Bool
     let isRecursiveDelete: Bool
     let isUserPreferences: Bool
+    var actualTargetPath: String? = nil
 
     var normalizedTargetPath: String {
-        let trimmed = targetPath.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmed = actualTargetPath == nil ? targetPath.trimmingCharacters(in: .whitespacesAndNewlines) : targetPath
         guard isDirectory else {
             return trimmed
         }
@@ -35,8 +39,17 @@ struct HDPIMDeleteEntry {
     }
 
     var xml: String {
+        xml(literalPath: nil)
+    }
+
+    func xml(literalPath: PIMXLiteralPath?) -> String {
         let tagName = isDirectory ? "DeleteDirectory" : "DeleteFile"
-        var attributes = ["target=\"\(xmlEscapedPIMXValue(normalizedTargetPath))\""]
+        let path = literalPath == nil ? normalizedTargetPath.replacingOccurrences(of: "\r", with: ":x0D") : normalizedTargetPath
+        var attributes = ["target=\"\(xmlEscapedPIMXValue(path))\""]
+        if let literalPath {
+            attributes.append("\(PIMXLiteralPath.templateAttribute)=\"\(xmlEscapedPIMXValue(literalPath.template))\"")
+            attributes.append("\(PIMXLiteralPath.relativePathAttribute)=\"\(xmlEscapedPIMXValue(literalPath.relativePath))\"")
+        }
         if isDirectory && isRecursiveDelete {
             attributes.append("isRecursiveDelete=\"true\"")
         }
@@ -101,6 +114,8 @@ class HDPIMInstallHelper {
         aliasPackageName: String,
         productInstallDir: String,
         validatedExtract: ExtractedPackageValidationResult? = nil,
+        commandWillExecute: ((HDPIMCommand) throws -> Void)? = nil,
+        commandDidExecute: ((HDPIMCommand) -> Void)? = nil,
         progressHandler: ((Int, Int, String) -> Void)? = nil
     ) async throws -> InstallResult {
 
@@ -166,150 +181,142 @@ class HDPIMInstallHelper {
             }
         }
 
+        guard packageInfo.uninstallManifest != nil else {
+            throw HDPIMMaterialError.invalid("包 \(packageInfo.packageName) 缺少完整卸载清单")
+        }
         let engine = HDPIMCommandEngine(propertyTable: propertyTable)
         let commands = engine.generateCommands(from: packageInfo.commands)
 
         let executionResult = try await engine.executeAll(
             commands: commands,
+            commandWillExecute: commandWillExecute,
+            commandDidExecute: commandDidExecute,
             progressHandler: progressHandler
         )
 
-        var uninstallPath: URL?
-        var sha1Hash: String?
-        var sha256Hash: String?
-        var repairPath: URL?
-        var repairSha1Hash: String?
-        var repairSha256Hash: String?
-
-        let pimxFileName = makePIMXFileName(
-            sapCode: sapCode,
-            version: version,
-            platform: platform,
-            amtConfigAppID: amtConfigAppID,
-            packageName: parsedPackage.packageName,
-            packageVersion: parsedPackage.packageVersion.isEmpty ? version : parsedPackage.packageVersion
-        )
-        let uninstallFragments = executionResult.pimxFragments
-            .filter { $0.kind == .uninstall }
-            .map(\.xml)
-        let repairFragments = executionResult.pimxFragments
-            .filter { $0.kind == .repair }
-            .map(\.xml)
-        let deleteFragments = makeDeleteCommandFragments(
-            from: executionResult.deleteEntries,
-            assetReferences: packageInfo.assetReferences
-        )
-
-        if !deleteFragments.isEmpty || !uninstallFragments.isEmpty {
-            let uninstallGenerator = UninstallPIMXGenerator()
-            uninstallGenerator.addReverseCommands(deleteFragments)
-            uninstallGenerator.addReverseCommands(uninstallFragments)
-
-            let uninstallDir = URL(fileURLWithPath: "/Library/Application Support/Adobe/Installers/uninstallXml")
-
-            let result = try uninstallGenerator.writeAndHash(
-                to: uninstallDir,
-                fileName: pimxFileName
-            )
-            uninstallPath = result.path
-            sha1Hash = result.sha1
-            sha256Hash = result.sha256
-        }
-
-        let repairDir = URL(fileURLWithPath: "/Library/Application Support/Adobe/Installers/repairXml")
-        let repairGenerator = UninstallPIMXGenerator()
-        repairGenerator.addReverseCommands(repairFragments)
-        let repairResult = try repairGenerator.writeAndHash(
-            to: repairDir,
-            fileName: pimxFileName
-        )
-        repairPath = repairResult.path
-        repairSha1Hash = repairResult.sha1
-        repairSha256Hash = repairResult.sha256
-
-        return InstallResult(
+        return try persistPackageArtifacts(
+            parsedPackage: parsedPackage, packageInfo: packageInfo,
             executedCommands: executionResult.executedCommands,
-            deleteEntries: executionResult.deleteEntries,
-            pimxFragments: executionResult.pimxFragments,
-            uninstallPIMXPath: uninstallPath,
-            uninstallPIMXHash: sha1Hash,
-            uninstallPIMXHash256: sha256Hash,
-            repairPIMXPath: repairPath,
-            repairPIMXHash: repairSha1Hash,
-            repairPIMXHash256: repairSha256Hash
+            deleteEntries: executionResult.deleteEntries, pimxFragments: executionResult.pimxFragments,
+            sapCode: sapCode, version: version, platform: platform, amtConfigAppID: amtConfigAppID
         )
     }
 
     func preparePackageArtifacts(
         parsedPackage: ParsedPackage,
         validatedExtract: ExtractedPackageValidationResult,
+        executedCommands: [HDPIMCommand],
         sapCode: String,
         version: String,
         platform: String,
-        amtConfigAppID: String?
+        amtConfigAppID: String?,
+        uninstallManifestOverride: [HDPIMDeleteEntry]? = nil,
+        literalPathsOverride: [PIMXLiteralPath.Key: PIMXLiteralPath]? = nil
     ) throws -> InstallResult {
         let packageInfo = validatedExtract.packageInfo
         let commands = HDPIMCommandEngine(propertyTable: propertyTable).generateCommands(from: packageInfo.commands)
-        let deleteEntries = makeAssetDeleteEntries(from: packageInfo.assetReferences)
-        let pimxFragments = commands.flatMap { $0.getPimxCommandFragments() }
+        return try persistPackageArtifacts(
+            parsedPackage: parsedPackage, packageInfo: packageInfo,
+            executedCommands: executedCommands, deleteEntries: executedCommands.flatMap { $0.getDeleteEntries() },
+            pimxFragments: commands.flatMap { $0.getPimxCommandFragments() },
+            sapCode: sapCode, version: version, platform: platform, amtConfigAppID: amtConfigAppID,
+            uninstallManifestOverride: uninstallManifestOverride,
+            literalPathsOverride: literalPathsOverride
+        )
+    }
 
+    struct MaterialXML {
+        let uninstall: String?
+        let repair: String
+    }
+
+    func materialXML(
+        packageInfo: PIMXPackageInfo,
+        executedCommands: [HDPIMCommand],
+        deleteEntries: [HDPIMDeleteEntry] = [],
+        pimxFragments: [HDPIMPimxCommandFragment],
+        uninstallManifestOverride: [HDPIMDeleteEntry]? = nil,
+        literalPathsOverride: [PIMXLiteralPath.Key: PIMXLiteralPath]? = nil
+    ) throws -> MaterialXML {
+        let generators = try materialGenerators(
+            packageInfo: packageInfo, executedCommands: executedCommands,
+            deleteEntries: deleteEntries, pimxFragments: pimxFragments,
+            uninstallManifestOverride: uninstallManifestOverride,
+            literalPathsOverride: literalPathsOverride
+        )
+        return MaterialXML(uninstall: generators.uninstall.generate(),
+                           repair: generators.repair.generate())
+    }
+
+    private func materialGenerators(
+        packageInfo: PIMXPackageInfo,
+        executedCommands: [HDPIMCommand],
+        deleteEntries: [HDPIMDeleteEntry],
+        pimxFragments: [HDPIMPimxCommandFragment],
+        uninstallManifestOverride: [HDPIMDeleteEntry]?,
+        literalPathsOverride: [PIMXLiteralPath.Key: PIMXLiteralPath]?
+    ) throws -> (uninstall: UninstallPIMXGenerator, repair: UninstallPIMXGenerator, entries: [HDPIMDeleteEntry]) {
+        guard let manifest = uninstallManifestOverride ?? packageInfo.uninstallManifest else {
+            throw HDPIMMaterialError.invalid("包 \(packageInfo.packageName) 缺少完整卸载清单")
+        }
+        let entries = manifest + deleteEntries.compactMap { applyingAssetDeletionPolicy(to: $0, assets: packageInfo.assetReferences) }
+        let uninstall = UninstallPIMXGenerator()
+        uninstall.addReverseCommands(makeDeleteCommandFragments(
+            from: entries, assetReferences: uninstallManifestOverride == nil ? packageInfo.assetReferences.filter { !$0.isPermanent } : [],
+            literalPaths: literalPathsOverride ?? packageInfo.literalPaths,
+            localizations: localizations(from: executedCommands)
+        ))
+        uninstall.addReverseCommands(pimxFragments.filter { $0.kind == .uninstall }.map(\.xml))
+        let repair = UninstallPIMXGenerator()
+        repair.addReverseCommands(pimxFragments.filter { $0.kind == .repair }.map(\.xml))
+        return (uninstall, repair, entries)
+    }
+
+    private func persistPackageArtifacts(
+        parsedPackage: ParsedPackage,
+        packageInfo: PIMXPackageInfo,
+        executedCommands: [HDPIMCommand],
+        deleteEntries: [HDPIMDeleteEntry],
+        pimxFragments: [HDPIMPimxCommandFragment],
+        sapCode: String,
+        version: String,
+        platform: String,
+        amtConfigAppID: String?,
+        uninstallManifestOverride: [HDPIMDeleteEntry]? = nil,
+        literalPathsOverride: [PIMXLiteralPath.Key: PIMXLiteralPath]? = nil
+    ) throws -> InstallResult {
+        let generators = try materialGenerators(
+            packageInfo: packageInfo, executedCommands: executedCommands,
+            deleteEntries: deleteEntries, pimxFragments: pimxFragments,
+            uninstallManifestOverride: uninstallManifestOverride,
+            literalPathsOverride: literalPathsOverride
+        )
         let pimxFileName = makePIMXFileName(
-            sapCode: sapCode,
-            version: version,
-            platform: platform,
-            amtConfigAppID: amtConfigAppID,
+            sapCode: sapCode, version: version, platform: platform, amtConfigAppID: amtConfigAppID,
             packageName: parsedPackage.packageName,
             packageVersion: parsedPackage.packageVersion.isEmpty ? version : parsedPackage.packageVersion
         )
-
-        let uninstallFragments = pimxFragments
-            .filter { $0.kind == .uninstall }
-            .map(\.xml)
-        let repairFragments = pimxFragments
-            .filter { $0.kind == .repair }
-            .map(\.xml)
-        let deleteFragments = makeDeleteCommandFragments(
-            from: deleteEntries,
-            assetReferences: packageInfo.assetReferences
+        let root = URL(fileURLWithPath: "/Library/Application Support/Adobe/Installers", isDirectory: true)
+        let uninstallResult = try generators.uninstall.writeAndHash(
+            to: root.appendingPathComponent("uninstallXml"), fileName: pimxFileName
         )
-
-        var uninstallPath: URL?
-        var sha1Hash: String?
-        var sha256Hash: String?
-        if !deleteFragments.isEmpty || !uninstallFragments.isEmpty {
-            let uninstallGenerator = UninstallPIMXGenerator()
-            uninstallGenerator.addReverseCommands(deleteFragments)
-            uninstallGenerator.addReverseCommands(uninstallFragments)
-
-            let uninstallDir = URL(fileURLWithPath: "/Library/Application Support/Adobe/Installers/uninstallXml")
-            let result = try uninstallGenerator.writeAndHash(
-                to: uninstallDir,
-                fileName: pimxFileName
-            )
-            uninstallPath = result.path
-            sha1Hash = result.sha1
-            sha256Hash = result.sha256
-        }
-
-        let repairDir = URL(fileURLWithPath: "/Library/Application Support/Adobe/Installers/repairXml")
-        let repairGenerator = UninstallPIMXGenerator()
-        repairGenerator.addReverseCommands(repairFragments)
-        let repairResult = try repairGenerator.writeAndHash(
-            to: repairDir,
-            fileName: pimxFileName
-        )
-
+        let repairResult = try generators.repair.writeAndHash(to: root.appendingPathComponent("repairXml"), fileName: pimxFileName)
         return InstallResult(
-            executedCommands: [],
-            deleteEntries: deleteEntries,
-            pimxFragments: pimxFragments,
-            uninstallPIMXPath: uninstallPath,
-            uninstallPIMXHash: sha1Hash,
-            uninstallPIMXHash256: sha256Hash,
-            repairPIMXPath: repairResult.path,
-            repairPIMXHash: repairResult.sha1,
-            repairPIMXHash256: repairResult.sha256
+            executedCommands: executedCommands, deleteEntries: generators.entries, pimxFragments: pimxFragments,
+            uninstallPIMXPath: uninstallResult.path,
+            uninstallPIMXHash: uninstallResult.sha1, uninstallPIMXHash256: uninstallResult.sha256,
+            repairPIMXPath: repairResult.path, repairPIMXHash: repairResult.sha1, repairPIMXHash256: repairResult.sha256
         )
+    }
+
+    func artifactURLs(for package: PackageToInstall, amtConfigAppID: String?) -> [URL] {
+        let fileName = makePIMXFileName(sapCode: package.sapCode, version: package.version,
+                                      platform: package.platform, amtConfigAppID: amtConfigAppID,
+                                      packageName: package.packageName,
+                                      packageVersion: package.parsed.packageVersion.isEmpty ? package.version : package.parsed.packageVersion)
+        return ["uninstallXml", "repairXml"].map {
+            URL(fileURLWithPath: "/Library/Application Support/Adobe/Installers").appendingPathComponent($0).appendingPathComponent(fileName)
+        }
     }
 
     private func makePIMXFileName(
@@ -354,59 +361,74 @@ class HDPIMInstallHelper {
         return "\(sapCode)_\(version)"
     }
 
-    private func makeAssetDeleteEntries(from assetReferences: [PIMXAssetReference]) -> [HDPIMDeleteEntry] {
-        var seen: Set<String> = []
+    private func applyingAssetDeletionPolicy(to entry: HDPIMDeleteEntry, assets: [PIMXAssetReference]) -> HDPIMDeleteEntry? {
+        let actual = entry.actualTargetPath ?? propertyTable.expandPath(entry.targetPath)
+        let match = assets.filter {
+            let root = URL(fileURLWithPath: $0.target).path
+            return actual == root || ($0.isDirectoryLike && actual.hasPrefix(root + "/"))
+        }.max { $0.target.count < $1.target.count }
+        guard let match else { return entry }
+        guard !match.isPermanent else { return nil }
+        return HDPIMDeleteEntry(
+            targetPath: entry.targetPath, isDirectory: entry.isDirectory,
+            isRecursiveDelete: entry.isDirectory && actual == URL(fileURLWithPath: match.target).path && match.isRecursiveDelete,
+            isUserPreferences: match.isUserPreferences, actualTargetPath: entry.actualTargetPath
+        )
+    }
 
-        return assetReferences.compactMap { asset in
-            let rawTarget = asset.targetTemplate.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !rawTarget.isEmpty, !shouldSkipDeleteEntry(rawTarget) else {
-                return nil
-            }
-
-            let normalizedTarget = asset.isDirectoryLike
-                ? normalizeDirectoryPIMXPath(rawTarget)
-                : rawTarget
-            guard !normalizedTarget.isEmpty else {
-                return nil
-            }
-
-            let lowercasedTarget = normalizedTarget.lowercased()
-            let isUserPreferences = lowercasedTarget.hasPrefix("[userpreferences]/")
-                || lowercasedTarget.hasPrefix("[usercommon]/")
-
-            let entry = HDPIMDeleteEntry(
-                targetPath: normalizedTarget,
-                isDirectory: asset.isDirectoryLike,
-                isRecursiveDelete: isUserPreferences,
-                isUserPreferences: isUserPreferences
-            )
-            let identity = "\(asset.isDirectoryLike ? "D" : "F")|\(entry.normalizedTargetPath)"
-            guard seen.insert(identity).inserted else {
-                return nil
-            }
-            return entry
+    private func localizations(from commands: [HDPIMCommand]) -> [(source: String, target: String)] {
+        commands.compactMap { command in
+            guard let move = command as? LocalizeFileCommand else { return nil }
+            return (move.source, move.target)
         }
     }
 
-    private func makeDeleteCommandFragments(
+    func makeDeleteCommandFragments(
         from deleteEntries: [HDPIMDeleteEntry],
-        assetReferences: [PIMXAssetReference]
+        assetReferences: [PIMXAssetReference],
+        literalPaths: [PIMXLiteralPath.Key: PIMXLiteralPath],
+        localizations: [(source: String, target: String)] = []
     ) -> [String] {
         let orderedEntries = deleteEntries
-            .filter { !shouldSkipDeleteEntry($0.normalizedTargetPath) }
             + makeSourceSideDeleteEntries(from: assetReferences)
             + makeDirectoryDeleteEntries(from: assetReferences)
 
         var seen: Set<String> = []
-        return orderedEntries.compactMap { entry in
+        return orderedEntries.compactMap { original in
+            var entry = original
+            let originalPath = original.actualTargetPath ?? propertyTable.expandPath(original.targetPath)
+            var actualPath = originalPath
+            for move in localizations {
+                if actualPath == move.source || actualPath.hasPrefix(move.source + "/") {
+                    actualPath = move.target + actualPath.dropFirst(move.source.count)
+                }
+            }
+            if actualPath != originalPath {
+                entry = HDPIMDeleteEntry(targetPath: actualPath, isDirectory: original.isDirectory,
+                    isRecursiveDelete: original.isRecursiveDelete, isUserPreferences: original.isUserPreferences,
+                    actualTargetPath: actualPath)
+            }
             guard !entry.normalizedTargetPath.isEmpty else {
                 return nil
             }
-            let key = "\(entry.isDirectory ? "D" : "F")|\(entry.normalizedTargetPath)|\(entry.isRecursiveDelete)|\(entry.isUserPreferences)"
-            guard seen.insert(key).inserted else {
+            var literalPath = entry.actualTargetPath.flatMap {
+                literalPaths[PIMXLiteralPath.Key(actualTarget: $0, targetTemplate: entry.normalizedTargetPath)]
+            }
+            if literalPath == nil, actualPath.hasPrefix("/"), actualPath.contains("[") || actualPath.contains(":x0D") {
+                let components = actualPath.split(separator: "/").map(String.init)
+                if let index = components.firstIndex(where: { $0.contains("[") || $0.contains(":x0D") }), index > 0 {
+                    literalPath = PIMXLiteralPath(template: "/" + components[..<index].joined(separator: "/"),
+                                                 relativePath: components[index...].joined(separator: "/"))
+                    entry = HDPIMDeleteEntry(targetPath: actualPath, isDirectory: entry.isDirectory,
+                        isRecursiveDelete: entry.isRecursiveDelete, isUserPreferences: entry.isUserPreferences,
+                        actualTargetPath: actualPath)
+                }
+            }
+            let identity = "\(entry.isDirectory ? "D" : "F")|\(URL(fileURLWithPath: actualPath).path)"
+            guard seen.insert(identity).inserted else {
                 return nil
             }
-            return entry.xml
+            return entry.xml(literalPath: literalPath)
         }
     }
 
@@ -452,7 +474,7 @@ class HDPIMInstallHelper {
 
         for asset in assetReferences {
             let targetPath = asset.targetTemplate.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !targetPath.isEmpty, !shouldSkipDeleteEntry(targetPath) else {
+            guard !targetPath.isEmpty else {
                 continue
             }
 
@@ -463,15 +485,14 @@ class HDPIMInstallHelper {
                 continue
             }
 
-            let root = targetRoots.first { directoryPath.hasPrefix($0) } ?? directoryPath
+            let root = targetRoots.first { directoryPath == $0 || directoryPath.hasPrefix($0 + "/") } ?? directoryPath
             for directory in recursiveParentDirectories(for: directoryPath, stoppingAt: root) {
-                let isUserPreferences = directory.lowercased().hasPrefix("[userpreferences]/")
-                    || directory.lowercased().hasPrefix("[usercommon]/")
+                let isUserPreferences = asset.isUserPreferences
                 entries.append(
                     HDPIMDeleteEntry(
                         targetPath: directory,
                         isDirectory: true,
-                        isRecursiveDelete: isUserPreferences,
+                        isRecursiveDelete: false,
                         isUserPreferences: isUserPreferences
                     )
                 )
@@ -487,7 +508,7 @@ class HDPIMInstallHelper {
 
         for asset in assetReferences {
             let rawTarget = asset.targetTemplate.trimmingCharacters(in: .whitespacesAndNewlines)
-            guard !rawTarget.isEmpty, !shouldSkipDeleteEntry(rawTarget) else {
+            guard !rawTarget.isEmpty else {
                 continue
             }
 
@@ -539,15 +560,6 @@ class HDPIMInstallHelper {
         return trimmed.hasSuffix("/") ? String(trimmed.dropLast()) : trimmed
     }
 
-    private func shouldSkipDeleteEntry(_ path: String) -> Bool {
-        let normalized = path.trimmingCharacters(in: .whitespacesAndNewlines)
-        if normalized.hasPrefix("["),
-           normalized.localizedCaseInsensitiveContains("/CustomHook/") {
-            return true
-        }
-        return false
-    }
-
     static func validateExtractedPackage(
         parsedPackage: ParsedPackage,
         extractDir: URL,
@@ -577,7 +589,11 @@ class HDPIMInstallHelper {
         let pimxData = try PIMXParser.loadXMLData(from: pimxURL)
 
         let parser = PIMXParser(propertyTable: validationTable)
-        let packageInfo = try parser.parse(pimxURL: pimxURL, xmlData: pimxData, extractDir: extractDir)
+        let packageInfo = try parser.parse(pimxURL: pimxURL, xmlData: pimxData, extractDir: extractDir,
+                                           collectUninstallManifest: !skipAssetSourceValidation)
+        guard packageInfo.packageName == parsedPackage.packageName else {
+            throw HDPIMInstallError.packageNameMismatch(expected: parsedPackage.packageName, actual: packageInfo.packageName)
+        }
         if !skipAssetSourceValidation {
             try validateRequiredAssetSources(packageName: parsedPackage.packageName, assetReferences: packageInfo.assetReferences)
         }
@@ -595,8 +611,9 @@ class HDPIMInstallHelper {
         assetReferences: [PIMXAssetReference]
     ) throws {
         let missingSources = assetReferences
+            .filter { !$0.isSymbolicLink }
             .map(\.source)
-            .filter { !FileManager.default.fileExists(atPath: $0) }
+            .filter { !HDPIMCommandExecutor.pathExists($0) }
 
         guard missingSources.isEmpty else {
             let preview = missingSources.prefix(5).joined(separator: " | ")

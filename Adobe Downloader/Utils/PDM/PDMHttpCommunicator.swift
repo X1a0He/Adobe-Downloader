@@ -4,572 +4,226 @@
 //
 
 import Foundation
-import CryptoKit
 
-final class PDMHttpCommunicator {
+final class PDMHttpCommunicator: @unchecked Sendable {
 
-    private var readStream: CFReadStream?
-    private var runLoop: CFRunLoop?
-    private var currentURL: URL?
-    private var downloadInitialized = false
-    private var isInDownloadMode = false
-    private(set) var cancelDownload = false
-
-    private let cookieManager = PDMCookieManager.shared
-    private var proxyConfig: PDMProxyConfig = PDMProxyConfig()
-    private var userAgent: String = ""
+    private let cancellation: PDMTransferCancellation
+    private let injectedTransport: PDMSessionTransport?
+    private let configurationLock = NSLock()
+    private var proxyConfig = PDMProxyConfig()
+    private var userAgent = PDMHttpCommunicator.buildFFCUserAgent()
     private var bluestreakDisabledDueToProxy = false
-    private var cookieSaved = false
-    private var statusCodeChecked = false
-    private(set) var lastResponseStatusCode: Int = 0
-    private(set) var lastETag: String = ""
-    private(set) var lastContentRange: String = ""
-    private(set) var lastContentLength: Int64 = 0
 
-    init() {
-        userAgent = Self.buildFFCUserAgent()
+    var cancelDownload: Bool { cancellation.isCancelled || Task.isCancelled }
+
+    init(
+        cancellation: PDMTransferCancellation = PDMTransferCancellation(),
+        transport: PDMSessionTransport? = nil
+    ) {
+        self.cancellation = cancellation
+        injectedTransport = transport
     }
 
     func setProxy(_ config: PDMProxyConfig) {
+        configurationLock.lock()
         proxyConfig = config
+        configurationLock.unlock()
     }
 
     func setUserAgent(_ ua: String) {
+        configurationLock.lock()
         userAgent = ua
+        configurationLock.unlock()
     }
 
     func cancel() {
-        cancelDownload = true
-        closeStream()
+        cancellation.cancel()
     }
 
-    func reset() {
-        cancelDownload = false
-        downloadInitialized = false
-        isInDownloadMode = false
-        cookieSaved = false
-        closeStream()
-    }
-
-    func sendRequest(_ config: PDMHTTPRequestConfig) -> PDMHTTPResponse {
-        guard let url = URL(string: config.url) else {
-            return PDMHTTPResponse(statusCode: -1)
-        }
-
-        currentURL = url
-
-        let cfURL = url as CFURL
-        let cfMethod = config.method as CFString
-        let request = CFHTTPMessageCreateRequest(
-            kCFAllocatorDefault,
-            cfMethod,
-            cfURL,
-            kCFHTTPVersion1_1
-        ).takeRetainedValue()
-
-        if config.useCookie {
-            cookieManager.applyCookies(to: request, url: url)
-        }
-
-        if !userAgent.isEmpty {
-            CFHTTPMessageSetHeaderFieldValue(request, "User-Agent" as CFString, userAgent as CFString)
-        }
-
-        if let start = config.rangeStart, let end = config.rangeEnd {
-            let rangeValue = "bytes=\(start)-\(end)"
-            CFHTTPMessageSetHeaderFieldValue(request, "Range" as CFString, rangeValue as CFString)
-        } else if let start = config.rangeStart {
-            let rangeValue = "bytes=\(start)-"
-            CFHTTPMessageSetHeaderFieldValue(request, "Range" as CFString, rangeValue as CFString)
-        }
-
-        for (key, value) in config.headers {
-            CFHTTPMessageSetHeaderFieldValue(request, key as CFString, value as CFString)
-        }
-
-        let stream = CFReadStreamCreateForHTTPRequest(kCFAllocatorDefault, request).takeRetainedValue()
-
-        if config.url.hasPrefix("https") {
-            let sslSettings: [String: Any]
-            if !config.validateSSL {
-                sslSettings = [
-                    kCFStreamSSLValidatesCertificateChain as String: false,
-                    kCFStreamPropertySocketSecurityLevel as String: kCFStreamSocketSecurityLevelSSLv3
-                ]
-            } else {
-                sslSettings = [
-                    kCFStreamPropertySocketSecurityLevel as String: kCFStreamSocketSecurityLevelNegotiatedSSL
-                ]
-            }
-            CFReadStreamSetProperty(
-                stream,
-                CFStreamPropertyKey(rawValue: kCFStreamPropertySSLSettings),
-                sslSettings as CFDictionary
-            )
-        }
-
-        if proxyConfig.isConfigured {
-            applyProxy(to: stream)
-        }
-
-        if config.autoRedirect {
-            CFReadStreamSetProperty(
-                stream,
-                CFStreamPropertyKey(rawValue: kCFStreamPropertyHTTPShouldAutoredirect),
-                kCFBooleanTrue
-            )
-        }
-
-        readStream = stream
-
-        guard CFReadStreamOpen(stream) else {
-            closeStream()
-            return PDMHTTPResponse(statusCode: -1)
-        }
-
-        var responseData = Data()
-        let bufferSize = PDMConstants.downloadBufferSize
-        let buffer = UnsafeMutablePointer<UInt8>.allocate(capacity: bufferSize)
-        defer { buffer.deallocate() }
-
-        let deadline = Date().addingTimeInterval(config.timeoutSeconds)
-
-        while !cancelDownload {
-            if Date() > deadline {
-                closeStream()
-                return PDMHTTPResponse(statusCode: -1)
-            }
-
-            if CFReadStreamHasBytesAvailable(stream) {
-                let bytesRead = CFReadStreamRead(stream, buffer, bufferSize)
-                if bytesRead > 0 {
-                    responseData.append(buffer, count: bytesRead)
-                } else if bytesRead == 0 {
-                    break  // 流结束
-                } else {
-                    closeStream()
-                    return PDMHTTPResponse(statusCode: -1)
-                }
-            } else {
-                let status = CFReadStreamGetStatus(stream)
-                if status == .atEnd || status == .closed {
-                    break
-                }
-                if status == .error {
-                    closeStream()
-                    return PDMHTTPResponse(statusCode: -1)
-                }
-                // 等待数据
-                CFRunLoopRunInMode(.defaultMode, 0.01, true)
-            }
-        }
-
-        let response = buildResponse(from: stream, data: responseData)
-
-        cookieManager.saveCookies(from: response.headers, for: url)
-
-        closeStream()
-        return response
-    }
-
-    func initHttpDownload(
-        url: URL,
-        startByte: Int64,
-        endByte: Int64,
-        headers: [(String, String)] = [],
-        validateSSL: Bool = true
-    ) -> Bool {
-        currentURL = url
-        downloadInitialized = false
-        statusCodeChecked = false
-        lastResponseStatusCode = 0
-        lastETag = ""
-        lastContentRange = ""
-        lastContentLength = 0
-
-        let cfURL = url as CFURL
-        let request = CFHTTPMessageCreateRequest(
-            kCFAllocatorDefault,
-            "GET" as CFString,
-            cfURL,
-            kCFHTTPVersion1_1
-        ).takeRetainedValue()
-
-        let rangeValue = "bytes=\(startByte)-\(endByte)"
-        CFHTTPMessageSetHeaderFieldValue(request, "Range" as CFString, rangeValue as CFString)
-
-        cookieManager.applyCookies(to: request, url: url)
-
-        if !userAgent.isEmpty {
-            CFHTTPMessageSetHeaderFieldValue(request, "User-Agent" as CFString, userAgent as CFString)
-        }
-
-        for (key, value) in headers {
-            CFHTTPMessageSetHeaderFieldValue(request, key as CFString, value as CFString)
-        }
-
-        let stream = CFReadStreamCreateForHTTPRequest(kCFAllocatorDefault, request).takeRetainedValue()
-
-        if url.scheme == "https" {
-            let sslSettings: [String: Any] = [
-                kCFStreamPropertySocketSecurityLevel as String: kCFStreamSocketSecurityLevelNegotiatedSSL
-            ]
-            CFReadStreamSetProperty(
-                stream,
-                CFStreamPropertyKey(rawValue: kCFStreamPropertySSLSettings),
-                sslSettings as CFDictionary
-            )
-        }
-
-        if proxyConfig.isConfigured {
-            applyProxy(to: stream)
-        }
-
-        CFReadStreamSetProperty(
-            stream,
-            CFStreamPropertyKey(rawValue: kCFStreamPropertyHTTPShouldAutoredirect),
-            kCFBooleanTrue
+    func sendRequest(_ config: PDMHTTPRequestConfig) async throws -> PDMHTTPResponse {
+        guard let url = URL(string: config.url) else { throw URLError(.badURL) }
+        let settings = configurationSnapshot()
+        let request = makeRequest(url: url, config: config, userAgent: settings.userAgent)
+        return try await execute(
+            request: request,
+            config: config,
+            proxy: settings.proxy,
+            body: .collected(maximumBytes: 64 * 1024 * 1024),
+            deadline: config.timeoutSeconds
         )
-
-        readStream = stream
-
-        guard CFReadStreamOpen(stream) else {
-            closeStream()
-            return false
-        }
-
-        downloadInitialized = true
-        return true
     }
 
-    func initIndefiniteHttpDownload(
-        url: URL,
-        headers: [(String, String)] = [],
-        validateSSL: Bool = true
-    ) -> Bool {
-        currentURL = url
-        downloadInitialized = false
-        statusCodeChecked = false
-        lastResponseStatusCode = 0
-        lastETag = ""
-        lastContentRange = ""
-        lastContentLength = 0
-
-        let cfURL = url as CFURL
-        let request = CFHTTPMessageCreateRequest(
-            kCFAllocatorDefault,
-            "GET" as CFString,
-            cfURL,
-            kCFHTTPVersion1_1
-        ).takeRetainedValue()
-
-        cookieManager.applyCookies(to: request, url: url)
-
-        if !userAgent.isEmpty {
-            CFHTTPMessageSetHeaderFieldValue(request, "User-Agent" as CFString, userAgent as CFString)
-        }
-
-        for (key, value) in headers {
-            CFHTTPMessageSetHeaderFieldValue(request, key as CFString, value as CFString)
-        }
-
-        let stream = CFReadStreamCreateForHTTPRequest(kCFAllocatorDefault, request).takeRetainedValue()
-
-        if url.scheme == "https" {
-            let sslSettings: [String: Any] = [
-                kCFStreamPropertySocketSecurityLevel as String: kCFStreamSocketSecurityLevelNegotiatedSSL
-            ]
-            CFReadStreamSetProperty(
-                stream,
-                CFStreamPropertyKey(rawValue: kCFStreamPropertySSLSettings),
-                sslSettings as CFDictionary
-            )
-        }
-
-        if proxyConfig.isConfigured {
-            applyProxy(to: stream)
-        }
-
-        CFReadStreamSetProperty(
-            stream,
-            CFStreamPropertyKey(rawValue: kCFStreamPropertyHTTPShouldAutoredirect),
-            kCFBooleanTrue
-        )
-
-        readStream = stream
-
-        guard CFReadStreamOpen(stream) else {
-            closeStream()
-            return false
-        }
-
-        downloadInitialized = true
-        return true
-    }
-
+    /// 只消费探测响应头。服务器忽略 Range 返回 200 时，也不会继续下载整个包。
     func checkByteRangeAcceptance(
         url: URL,
         headers: [(String, String)] = [],
         fileSize: Int64
-    ) -> Bool {
-        guard fileSize > 1 else {
-            return false
-        }
+    ) async -> Bool {
+        guard fileSize > 1 else { return false }
 
-        for attempt in 0...PDMConstants.rangeCheckRetryCount {
+        for attempt in 0..<max(1, PDMConstants.rangeCheckRetryCount) {
+            guard !cancelDownload else { return false }
             if attempt > 0 {
-                usleep(PDMConstants.rangeCheckRetryDelayMs)
-            }
-
-            let startByte = fileSize - 2
-            let endByte = fileSize - 1
-
-            guard initHttpDownload(
-                url: url,
-                startByte: startByte,
-                endByte: endByte,
-                headers: headers
-            ) else {
-                closeStream()
-                continue
-            }
-
-            let deadline = Date().addingTimeInterval(PDMConstants.rangeCheckTimeoutSeconds)
-            var gotResponse = false
-            var statusCode = 0
-            var contentLength: Int64 = -1
-
-            while !cancelDownload && Date() < deadline {
-                guard let stream = readStream else { break }
-
-                if CFReadStreamHasBytesAvailable(stream) {
-                    if let responseMsg = CFReadStreamCopyProperty(
-                        stream,
-                        CFStreamPropertyKey(rawValue: kCFStreamPropertyHTTPResponseHeader)
-                    ) {
-                        let cfResponse = responseMsg as! CFHTTPMessage
-                        statusCode = CFHTTPMessageGetResponseStatusCode(cfResponse)
-
-                        if let url = currentURL {
-                            cookieManager.saveCookies(from: cfResponse, for: url)
-                        }
-
-                        if let headers = CFHTTPMessageCopyAllHeaderFields(cfResponse)?.takeRetainedValue() as? [String: String],
-                           let length = headers["Content-Length"] ?? headers["content-length"] {
-                            contentLength = Int64(length) ?? -1
-                        }
-
-                        gotResponse = true
-                    }
-
-                    let buffer = UnsafeMutablePointer<UInt8>.allocate(capacity: 16)
-                    defer { buffer.deallocate() }
-                    let _ = CFReadStreamRead(stream, buffer, 16)
-                    break
+                do {
+                    // 旧常量保存的是 usleep 使用的微秒值。
+                    try await Task.sleep(nanoseconds: UInt64(PDMConstants.rangeCheckRetryDelayMs) * 1_000)
+                } catch {
+                    return false
                 }
-
-                let status = CFReadStreamGetStatus(stream)
-                if status == .error || status == .atEnd {
-                    break
-                }
-
-                CFRunLoopRunInMode(.defaultMode, 0.01, true)
             }
+            guard !cancelDownload else { return false }
 
-            closeStream()
-
-            if gotResponse && statusCode == 206 && contentLength == 2 {
-                return true
+            let config = PDMHTTPRequestConfig(
+                url: url.absoluteString,
+                headers: headers,
+                timeoutSeconds: PDMConstants.rangeCheckTimeoutSeconds,
+                rangeStart: 0,
+                rangeEnd: 0
+            )
+            let settings = configurationSnapshot()
+            let request = makeRequest(url: url, config: config, userAgent: settings.userAgent)
+            do {
+                let response = try await execute(
+                    request: request,
+                    config: config,
+                    proxy: settings.proxy,
+                    body: .headersOnly,
+                    deadline: config.timeoutSeconds
+                )
+                let contentRange = response.contentRange?
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                    .lowercased()
+                if response.statusCode == 206,
+                   response.contentLength == 1,
+                   contentRange == "bytes 0-0/\(fileSize)" {
+                    return true
+                }
+            } catch {
+                if cancelDownload || error is CancellationError { return false }
             }
         }
-
         return false
     }
 
-    func downloadRemainingData(
-        buffer: UnsafeMutablePointer<UInt8>,
-        bufferSize: Int,
-        progressCallback: ((Int64) -> Void)? = nil
-    ) -> (result: PDMReadResult, bytesRead: Int) {
-        guard !cancelDownload, let stream = readStream else {
-            return (.error(.cancelled), 0)
-        }
-
-        isInDownloadMode = true
-        defer { isInDownloadMode = false }
-
-        if cancelDownload {
-            return (.error(.cancelled), 0)
-        }
-
-        captureResponseMetadata()
-        let bytesRead = CFReadStreamRead(stream, buffer, bufferSize)
-
-        if bytesRead > 0 {
-            progressCallback?(Int64(bytesRead))
-            captureResponseMetadata()
-            return (.moreData, bytesRead)
-        } else if bytesRead == 0 {
-            captureResponseMetadata()
-            return (.complete, 0)
-        } else {
-            captureResponseMetadata()
-            handleStreamError(stream)
-
-            if proxyConfig.isHTTPS && currentURL?.scheme == "https" {
-                bluestreakDisabledDueToProxy = true
+    /// 数据及收尾回调均在专用 I/O 队列执行；返回前网络回调和所有写盘回调都已结束。
+    func transfer(
+        url: URL,
+        range: ClosedRange<Int64>?,
+        headers: [(String, String)] = [],
+        responseHandler: @escaping (PDMHTTPResponse) throws -> Void,
+        dataHandler: @escaping (Data) throws -> Void,
+        completionHandler: @escaping (Bool) throws -> Void
+    ) async throws -> PDMHTTPResponse {
+        let config = PDMHTTPRequestConfig(
+            url: url.absoluteString,
+            headers: headers,
+            timeoutSeconds: PDMConstants.deadConnectionTimeoutSeconds,
+            rangeStart: range?.lowerBound,
+            rangeEnd: range?.upperBound
+        )
+        let settings = configurationSnapshot()
+        let request = makeRequest(url: url, config: config, userAgent: settings.userAgent)
+        let completion = PDMTransferCompletion(handler: completionHandler)
+        do {
+            return try await execute(
+                request: request,
+                config: config,
+                proxy: settings.proxy,
+                body: .streaming(response: responseHandler, data: dataHandler, completion: completion),
+                deadline: nil
+            )
+        } catch {
+            // 预算等待或创建请求之前取消时，也要关闭调用方已经打开的文件。
+            _ = await completion.wait()
+            if settings.proxy.isHTTPS && url.scheme?.lowercased() == "https",
+               !(error is CancellationError) {
+                markBluestreakDisabledByProxy()
             }
-
-            return (.error(.downloadFailed), 0)
+            throw error
         }
-    }
-
-    func getResponseStatusCode() -> Int? {
-        guard let stream = readStream,
-              let responseMsg = CFReadStreamCopyProperty(
-                  stream,
-                  CFStreamPropertyKey(rawValue: kCFStreamPropertyHTTPResponseHeader)
-              ) else {
-            return nil
-        }
-        let cfResponse = responseMsg as! CFHTTPMessage
-        return CFHTTPMessageGetResponseStatusCode(cfResponse)
-    }
-
-    func getResponseHeaders() -> [String: String] {
-        guard let stream = readStream,
-              let responseMsg = CFReadStreamCopyProperty(
-                  stream,
-                  CFStreamPropertyKey(rawValue: kCFStreamPropertyHTTPResponseHeader)
-              ) else {
-            return [:]
-        }
-        let cfResponse = responseMsg as! CFHTTPMessage
-        guard let headers = CFHTTPMessageCopyAllHeaderFields(cfResponse)?.takeRetainedValue() as? [String: String] else {
-            return [:]
-        }
-        return headers
     }
 
     var isBluestreakDisabledByProxy: Bool {
-        bluestreakDisabledDueToProxy
+        configurationLock.lock()
+        defer { configurationLock.unlock() }
+        return bluestreakDisabledDueToProxy
     }
 
-    func closeStream() {
-        if let stream = readStream {
-            CFReadStreamSetClient(stream, 0, nil, nil)
-            if let rl = runLoop {
-                CFReadStreamUnscheduleFromRunLoop(stream, rl, CFRunLoopMode.commonModes)
-                runLoop = nil
-            }
-            CFReadStreamClose(stream)
-            readStream = nil
-        }
-        downloadInitialized = false
-        isInDownloadMode = false
+    private func configurationSnapshot() -> (proxy: PDMProxyConfig, userAgent: String) {
+        configurationLock.lock()
+        defer { configurationLock.unlock() }
+        return (proxyConfig, userAgent)
     }
 
-    private func applyProxy(to stream: CFReadStream) {
-        guard proxyConfig.isConfigured else { return }
+    private func markBluestreakDisabledByProxy() {
+        configurationLock.lock()
+        bluestreakDisabledDueToProxy = true
+        configurationLock.unlock()
+    }
 
-        var proxyDict: [String: Any] = [:]
-
-        switch proxyConfig.type {
-        case .http, .https:
-            proxyDict[kCFStreamPropertyHTTPProxyHost as String] = proxyConfig.host
-            proxyDict[kCFStreamPropertyHTTPProxyPort as String] = proxyConfig.port
-            if proxyConfig.isHTTPS {
-                proxyDict[kCFStreamPropertyHTTPSProxyHost as String] = proxyConfig.host
-                proxyDict[kCFStreamPropertyHTTPSProxyPort as String] = proxyConfig.port
-            }
-        case .socks:
-            proxyDict[kCFStreamPropertySOCKSProxyHost as String] = proxyConfig.host
-            proxyDict[kCFStreamPropertySOCKSProxyPort as String] = proxyConfig.port
-            if !proxyConfig.username.isEmpty {
-                proxyDict[kCFStreamPropertySOCKSUser as String] = proxyConfig.username
-                proxyDict[kCFStreamPropertySOCKSPassword as String] = proxyConfig.password
-            }
-        case .none:
-            return
-        }
-
-        CFReadStreamSetProperty(
-            stream,
-            CFStreamPropertyKey(rawValue: kCFStreamPropertyHTTPProxy),
-            proxyDict as CFDictionary
+    private func makeRequest(
+        url: URL,
+        config: PDMHTTPRequestConfig,
+        userAgent: String
+    ) -> URLRequest {
+        var request = URLRequest(
+            url: url,
+            cachePolicy: .reloadIgnoringLocalCacheData,
+            timeoutInterval: config.timeoutSeconds
         )
+        request.httpMethod = config.method
+        request.httpShouldHandleCookies = false
+        if config.useCookie, let cookie = PDMCookieManager.shared.cookieHeader(for: url) {
+            request.setValue(cookie, forHTTPHeaderField: "Cookie")
+        }
+        if !userAgent.isEmpty {
+            request.setValue(userAgent, forHTTPHeaderField: "User-Agent")
+        }
+        if let start = config.rangeStart, let end = config.rangeEnd {
+            request.setValue("bytes=\(start)-\(end)", forHTTPHeaderField: "Range")
+        } else if let start = config.rangeStart {
+            request.setValue("bytes=\(start)-", forHTTPHeaderField: "Range")
+        }
+        for (name, value) in config.headers {
+            request.setValue(value, forHTTPHeaderField: name)
+        }
+        // 分片偏移以原始实体字节为准，不能把透明解压后的正文写入 Range 对应位置。
+        request.setValue("identity", forHTTPHeaderField: "Accept-Encoding")
+        return request
     }
 
-    private func buildResponse(from stream: CFReadStream, data: Data) -> PDMHTTPResponse {
-        var response = PDMHTTPResponse()
-        response.data = data
+    private func execute(
+        request: URLRequest,
+        config: PDMHTTPRequestConfig,
+        proxy: PDMProxyConfig,
+        body: PDMSessionTransport.Body,
+        deadline: TimeInterval?
+    ) async throws -> PDMHTTPResponse {
+        let requestCancellation = PDMTransferCancellation()
+        let observation = cancellation.register { requestCancellation.cancel() }
+        defer { cancellation.unregister(observation) }
 
-        guard let responseMsg = CFReadStreamCopyProperty(
-            stream,
-            CFStreamPropertyKey(rawValue: kCFStreamPropertyHTTPResponseHeader)
-        ) else {
-            return response
-        }
-
-        let cfResponse = responseMsg as! CFHTTPMessage
-        response.statusCode = CFHTTPMessageGetResponseStatusCode(cfResponse)
-
-        if let headers = CFHTTPMessageCopyAllHeaderFields(cfResponse)?.takeRetainedValue() as? [String: String] {
-            response.headers = headers
-            if let cl = headers["Content-Length"] ?? headers["content-length"] {
-                response.contentLength = Int64(cl) ?? 0
+        return try await withTaskCancellationHandler {
+            try Task.checkCancellation()
+            guard !requestCancellation.isCancelled else { throw CancellationError() }
+            return try await PDMRequestScheduler.shared.withPermit(cancellation: requestCancellation) {
+                let transport = config.validateSSL
+                    ? (injectedTransport ?? PDMSessionTransport.transport(proxy: proxy, validateSSL: true))
+                    : PDMSessionTransport.transport(proxy: proxy, validateSSL: false)
+                return try await transport.execute(
+                    request: request,
+                    useCookies: config.useCookie,
+                    explicitCookie: config.headers.last { $0.0.caseInsensitiveCompare("Cookie") == .orderedSame }?.1,
+                    autoRedirect: config.autoRedirect,
+                    validateSSL: config.validateSSL,
+                    body: body,
+                    deadline: deadline,
+                    cancellation: requestCancellation
+                )
             }
-        }
-
-        return response
-    }
-
-    private func captureResponseMetadata() {
-        if statusCodeChecked { return }
-        guard let stream = readStream,
-              let responseMsg = CFReadStreamCopyProperty(
-                  stream,
-                  CFStreamPropertyKey(rawValue: kCFStreamPropertyHTTPResponseHeader)
-              ) else {
-            return
-        }
-
-        let cfResponse = responseMsg as! CFHTTPMessage
-
-        if let url = currentURL, !cookieSaved {
-            cookieManager.saveCookies(from: cfResponse, for: url)
-            cookieSaved = true
-        }
-
-        if !statusCodeChecked {
-            let statusCode = CFHTTPMessageGetResponseStatusCode(cfResponse)
-            if statusCode > 0 {
-                lastResponseStatusCode = statusCode
-                statusCodeChecked = true
-            }
-        }
-
-        if lastETag.isEmpty,
-           let etagRef = CFHTTPMessageCopyHeaderFieldValue(cfResponse, "ETag" as CFString) {
-            lastETag = etagRef.takeRetainedValue() as String
-        }
-
-        if lastContentRange.isEmpty,
-           let contentRangeRef = CFHTTPMessageCopyHeaderFieldValue(cfResponse, "Content-Range" as CFString) {
-            lastContentRange = contentRangeRef.takeRetainedValue() as String
-        }
-
-        if lastContentLength == 0,
-           let contentLengthRef = CFHTTPMessageCopyHeaderFieldValue(cfResponse, "Content-Length" as CFString) {
-            lastContentLength = Int64(contentLengthRef.takeRetainedValue() as String) ?? 0
-        }
-    }
-
-    private func handleStreamError(_ stream: CFReadStream) {
-        if let error = CFReadStreamCopyError(stream) {
-            let domain = CFErrorGetDomain(error) as String? ?? "unknown"
-            let code = CFErrorGetCode(error)
-            print("[PDMHttpCommunicator] Stream error: domain=\(domain) code=\(code)")
+        } onCancel: {
+            // 一个分片 Task 的取消不得污染其他分片共用的父令牌。
+            requestCancellation.cancel()
         }
     }
 

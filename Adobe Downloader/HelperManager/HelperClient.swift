@@ -89,6 +89,7 @@ final class HelperClient {
         _ operation: HelperOperation,
         progress: @escaping (String) -> Void
     ) async throws {
+        try HDPIMOperationContext.checkCancellation()
         let conn = try connect()
         guard let proxy = conn.remoteObjectProxy as? HelperXPCProtocol else {
             throw HelperError.proxyCreationFailed
@@ -96,7 +97,7 @@ final class HelperClient {
 
         let operationData = try JSONEncoder().encode(operation)
 
-        let started = try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Bool, Error>) in
+        let operationID = try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<UUID?, Error>) in
             proxy.executeInstallation(operationData) { resultData in
                 guard let result = try? JSONDecoder().decode(
                     HelperOperationResult.self,
@@ -107,17 +108,46 @@ final class HelperClient {
                 }
 
                 if result.success {
-                    continuation.resume(returning: true)
+                    continuation.resume(returning: result.operationID)
                 } else {
                     continuation.resume(throwing: HelperError.installationFailed(result.output))
                 }
             }
         }
 
-        guard started else { return }
-
+        let progressRequest = try operationID.map {
+            try JSONEncoder().encode(HelperOperation.hdpimProgress(operationID: $0))
+        }
+        var cancellationSent = false
+        var terminalOutput = ""
+        var committed = false
         while true {
+            if !cancellationSent && (Task.isCancelled || HDPIMOperationContext.cancellation?.isCancelled == true) {
+                // 等启动确认后再取消，避免取消请求先于新进程登记；继续排空进度直到恢复结束。
+                let cancel = operationID.map { HelperOperation.cancelHDPIMOperation(operationID: $0) } ?? .cancelOperation
+                let cancelData = try JSONEncoder().encode(cancel)
+                try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+                    proxy.executeOperation(cancelData) { data in
+                        guard let result = try? JSONDecoder().decode(HelperOperationResult.self, from: data), result.success else {
+                            continuation.resume(throwing: HelperError.operationFailed("发送安装取消请求失败"))
+                            return
+                        }
+                        continuation.resume()
+                    }
+                }
+                cancellationSent = true
+            }
             let progressData = try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Data, Error>) in
+                if let progressRequest {
+                    proxy.executeOperation(progressRequest) { data in
+                        guard let result = try? JSONDecoder().decode(HelperOperationResult.self, from: data), result.success else {
+                            continuation.resume(throwing: HelperError.operationFailed("获取安装进度失败"))
+                            return
+                        }
+                        continuation.resume(returning: Data(result.output.utf8))
+                    }
+                    return
+                }
                 proxy.getInstallationProgress { data in
                     continuation.resume(returning: data)
                 }
@@ -131,6 +161,12 @@ final class HelperClient {
             }
 
             if !installProgress.output.isEmpty {
+                terminalOutput += installProgress.output
+                while let newline = terminalOutput.firstIndex(of: "\n") {
+                    let line = String(terminalOutput[..<newline]).trimmingCharacters(in: .whitespacesAndNewlines)
+                    terminalOutput.removeSubrange(...newline)
+                    if line == "RESULT|SUCCESS" { committed = true }
+                }
                 progress(installProgress.output)
             }
 
@@ -141,10 +177,16 @@ final class HelperClient {
                         output: installProgress.output
                     )
                 }
+                if cancellationSent && !committed { throw CancellationError() }
                 break
             }
 
-            try await Task.sleep(nanoseconds: 100_000_000)
+            // 调用方取消后仍需等待 Helper 收尾，不能让 Task.sleep 提前结束轮询。
+            await withCheckedContinuation { continuation in
+                DispatchQueue.global(qos: .utility).asyncAfter(deadline: .now() + 0.1) {
+                    continuation.resume()
+                }
+            }
         }
     }
 

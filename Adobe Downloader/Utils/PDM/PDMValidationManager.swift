@@ -17,7 +17,7 @@ final class PDMValidationManager {
     func fetchValidationInfo(
         from validationURL: String,
         headers: [(String, String)]
-    ) -> ValidationInfo? {
+    ) async throws -> ValidationInfo? {
         guard !validationURL.isEmpty else { return nil }
 
         let config = PDMHTTPRequestConfig(
@@ -30,7 +30,7 @@ final class PDMValidationManager {
             timeoutSeconds: 60
         )
 
-        let response = communicator.sendRequest(config)
+        let response = try await communicator.sendRequest(config)
 
         guard response.isSuccess, !response.data.isEmpty else {
             return nil
@@ -149,7 +149,7 @@ final class PDMValidationManager {
     func getRemoteFileSize(
         url: String,
         headers: [(String, String)]
-    ) -> Int64 {
+    ) async throws -> Int64 {
         let config = PDMHTTPRequestConfig(
             url: url,
             method: "HEAD",
@@ -160,7 +160,7 @@ final class PDMValidationManager {
             timeoutSeconds: 30
         )
 
-        let response = communicator.sendRequest(config)
+        let response = try await communicator.sendRequest(config)
 
         if response.isSuccess {
             return response.contentLength
@@ -171,7 +171,7 @@ final class PDMValidationManager {
     func getETag(
         url: String,
         headers: [(String, String)]
-    ) -> String? {
+    ) async throws -> String? {
         let config = PDMHTTPRequestConfig(
             url: url,
             method: "HEAD",
@@ -182,7 +182,7 @@ final class PDMValidationManager {
             timeoutSeconds: 30
         )
 
-        let response = communicator.sendRequest(config)
+        let response = try await communicator.sendRequest(config)
         return response.etag
     }
 }

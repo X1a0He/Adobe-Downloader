@@ -8,6 +8,7 @@ import Foundation
 class HDPIMPropertyTable {
 
     private var properties: [String: String] = [:]
+    private static let propertyPattern = try! NSRegularExpression(pattern: #"\[([^\[\]]+)\]"#)
 
     func setProperty(_ key: String, _ value: String) {
         properties[key.lowercased()] = value
@@ -93,45 +94,46 @@ class HDPIMPropertyTable {
     }
 
     func expandPath(_ rawPath: String) -> String {
-        var result = rawPath
-        for _ in 0..<32 {
-            guard let openBracket = result.range(of: "[") else { break }
-            guard let closeBracket = result[openBracket.upperBound...].range(of: "]") else { break }
+        let expanded = expandPathInternal(rawPath).replacingOccurrences(of: "\\", with: "/")
+        return (expanded as NSString).standardizingPath
+    }
 
-            let key = String(result[openBracket.upperBound..<closeBracket.lowerBound])
-            let fullPlaceholder = "[\(key)]"
-
-            if let value = properties[key.lowercased()] {
-                result = result.replacingOccurrences(of: fullPlaceholder, with: value)
-            } else {
-                print("⚠️ [HDPIM] 未知占位符: [\(key)]，替换为空字符串")
-                result = result.replacingOccurrences(of: fullPlaceholder, with: "")
+    /// 只在读取材料模板时检查变量；文件枚举得到的名称不再按模板解释。
+    func expandPathForInstallation(_ rawPath: String) throws -> String {
+        let expanded = expandPathInternal(rawPath).replacingOccurrences(of: "\\", with: "/")
+        for match in Self.propertyPattern.matches(in: expanded, range: NSRange(expanded.startIndex..., in: expanded)) {
+            guard let range = Range(match.range, in: expanded),
+                  let keyRange = Range(match.range(at: 1), in: expanded) else { continue }
+            let key = String(expanded[keyRange])
+            let startsComponent = range.lowerBound == expanded.startIndex || expanded[expanded.index(before: range.lowerBound)] == "/"
+            let endsComponent = range.upperBound == expanded.endIndex || expanded[range.upperBound] == "/"
+            // 独立的 [目录变量] 或仍未展开的已登记属性必须报错；镜头文件名中的 ED[IF] 等保留字面值。
+            if properties[key.lowercased()] != nil || (startsComponent && endsComponent) {
+                throw HDPIMMaterialError.invalid("安装路径包含未解析的占位符：[\(key)]：\(rawPath)")
             }
         }
-        return result
+        return (expanded as NSString).standardizingPath
     }
 
     private func expandPathInternal(_ rawPath: String) -> String {
         var result = rawPath
         for _ in 0..<32 {
-            guard let openBracket = result.range(of: "[") else { break }
-            guard let closeBracket = result[openBracket.upperBound...].range(of: "]") else { break }
-
-            let key = String(result[openBracket.upperBound..<closeBracket.lowerBound])
-            let fullPlaceholder = "[\(key)]"
-
-            if let value = properties[key.lowercased()] {
-                result = result.replacingOccurrences(of: fullPlaceholder, with: value)
-            } else {
-                print("⚠️ [HDPIM] 未知占位符: [\(key)]，替换为空字符串")
-                result = result.replacingOccurrences(of: fullPlaceholder, with: "")
+            let matches = Self.propertyPattern.matches(in: result, range: NSRange(result.startIndex..., in: result))
+            var expanded = result
+            for match in matches.reversed() {
+                guard let keyRange = Range(match.range(at: 1), in: result),
+                      let range = Range(match.range, in: expanded),
+                      let value = properties[String(result[keyRange]).lowercased()] else { continue }
+                expanded.replaceSubrange(range, with: value)
             }
+            guard expanded != result else { break }
+            result = expanded
         }
         return result
     }
 
     func expandString(_ template: String) -> String {
-        expandPath(template)
+        expandPathInternal(template)
     }
 
     var allProperties: [String: String] {

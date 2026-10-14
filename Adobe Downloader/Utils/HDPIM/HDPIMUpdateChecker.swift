@@ -22,19 +22,18 @@ final class HDPIMUpdateChecker {
     private init() {}
 
     func getInstalledProducts(databaseAlreadyOpen: Bool = false) -> [InstalledProduct] {
-        let shouldClose = databaseAlreadyOpen ? false : openDatabaseIfNeeded()
-        guard databaseAlreadyOpen || shouldClose else { return [] }
-        defer {
-            if shouldClose {
-                HDPIMDatabase.shared.close()
-            }
-        }
+        if databaseAlreadyOpen { return getInstalledProducts(database: HDPIMDatabase.shared) }
+        guard let database = try? HDPIMDatabase.shared.makeReadOnlyConnection() else { return [] }
+        defer { database.close() }
+        return getInstalledProducts(database: database)
+    }
 
-        let raw = HDPIMDatabase.shared.getAllInstalledProducts()
+    private func getInstalledProducts(database: HDPIMDatabase) -> [InstalledProduct] {
+        let raw = database.getAllInstalledProducts()
         return raw.map { product in
             let processorFamily = processorFamily(fromRawValue: product.platform)
             let installedPlatform = firstNonEmptyString([
-                HDPIMDatabase.shared.getProductMeta(
+                database.getProductMeta(
                     sapCode: product.sapCode,
                     version: product.version,
                     processorFamily: processorFamily,
@@ -53,15 +52,9 @@ final class HDPIMUpdateChecker {
     }
 
     func checkForUpdates() async -> [AvailableUpdate] {
-        let shouldClose = openDatabaseIfNeeded()
-        guard shouldClose else { return [] }
-        defer {
-            if shouldClose {
-                HDPIMDatabase.shared.close()
-            }
-        }
-
-        let installed = getInstalledProducts(databaseAlreadyOpen: true)
+        guard let database = try? HDPIMDatabase.shared.makeReadOnlyConnection() else { return [] }
+        defer { database.close() }
+        let installed = getInstalledProducts(database: database)
         guard !installed.isEmpty else { return [] }
 
         var updates: [AvailableUpdate] = []
@@ -79,7 +72,7 @@ final class HDPIMUpdateChecker {
             }
 
             let comparison = compareVersions(product.version, ccmProduct.version)
-            let requiresUniversalRepair = comparison == 0 && requiresUniversalArchitectureRepair(product: product)
+            let requiresUniversalRepair = comparison == 0 && requiresUniversalArchitectureRepair(product: product, database: database)
             if comparison < 0 || requiresUniversalRepair {
                 updates.append(AvailableUpdate(
                     sapCode: product.sapCode,
@@ -176,12 +169,12 @@ final class HDPIMUpdateChecker {
         }
     }
 
-    private func requiresUniversalArchitectureRepair(product: InstalledProduct) -> Bool {
+    private func requiresUniversalArchitectureRepair(product: InstalledProduct, database: HDPIMDatabase) -> Bool {
         guard product.platform.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == "macuniversal" else {
             return false
         }
 
-        let installedPackageNames = HDPIMDatabase.shared.getInstalledPackageNames(
+        let installedPackageNames = database.getInstalledPackageNames(
             sapCode: product.sapCode,
             version: product.version,
             processorFamily: product.processorFamily
@@ -214,7 +207,4 @@ final class HDPIMUpdateChecker {
             .first(where: { !$0.isEmpty }) ?? ""
     }
 
-    private func openDatabaseIfNeeded() -> Bool {
-        (try? HDPIMDatabase.shared.open()) != nil
-    }
 }

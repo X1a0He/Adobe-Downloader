@@ -8,7 +8,8 @@ import Darwin
 
 final class PDMAssetDownloadManager {
 
-    let state = PDMAtomicState(.idle)
+    let state: PDMAtomicState
+    private let cancellation: PDMTransferCancellation
 
     private let communicator: PDMHttpCommunicator
     private let bluestreakManager: PDMBluestreakManager
@@ -16,15 +17,13 @@ final class PDMAssetDownloadManager {
     private let validationManager: PDMValidationManager
     private let progressTracker: PDMProgressTracker
 
-    private var downloadURL: URL?
-    private var destinationURL: URL?
-    private var metadataDirectory: URL?
-    private var downloadHeaders: [(String, String)] = []
     private var fileSize: Int64 = 0
     private var etag: String = ""
     private var validationInfo: ValidationInfo?
+    private var artifactIdentity: DownloadArtifactStore.Identity?
+    private var reusedExistingBytes = false
+    private var didRestartUnverifiedResume = false
     private var downloadMode: PDMDownloadMode = .singleStream
-    private var aamd: AAMDFileManager?
     private var segmentSize: Int64 = 2 * 1024 * 1024
     private var segmentCount: Int = 1
     private let criticalErrorForceRetryLimit = 3
@@ -38,15 +37,19 @@ final class PDMAssetDownloadManager {
     private var didRetryDownloadFailed = false
     private var didRetryNeedRetry = false
 
-    private var progressHandler: ((Int64, Int64, Double) -> Void)?
+    private var progressHandler: PDMProgressTracker.ProgressCallback?
     private var rangeAvailabilityHandler: ((Int64, Bool) -> Void)?
 
 
     init(
         communicator: PDMHttpCommunicator? = nil,
-        bluestreakConfig: PDMBluestreakConfig = PDMBluestreakConfig()
+        bluestreakConfig: PDMBluestreakConfig = PDMBluestreakConfig(),
+        state: PDMAtomicState = PDMAtomicState(.idle),
+        cancellation: PDMTransferCancellation = PDMTransferCancellation()
     ) {
-        let comm = communicator ?? PDMHttpCommunicator()
+        self.state = state
+        self.cancellation = cancellation
+        let comm = communicator ?? PDMHttpCommunicator(cancellation: cancellation)
         self.communicator = comm
         self.bluestreakManager = PDMBluestreakManager(config: bluestreakConfig)
         self.errorHandler = PDMErrorHandler()
@@ -55,13 +58,17 @@ final class PDMAssetDownloadManager {
     }
 
     func pause() {
-        state.set(.paused)
-        communicator.cancel()
+        if state.requestStop(.paused) {
+            cancellation.cancel()
+            communicator.cancel()
+        }
     }
 
     func cancelDownload() {
-        state.set(.cancelled)
-        communicator.cancel()
+        if state.requestStop(.cancelled) {
+            cancellation.cancel()
+            communicator.cancel()
+        }
     }
 
     func downloadFile(
@@ -71,228 +78,217 @@ final class PDMAssetDownloadManager {
         headers: [(String, String)],
         totalSize: Int64,
         validationInfo: ValidationInfo?,
+        artifactIdentity: DownloadArtifactStore.Identity? = nil,
         etag: String = "",
-        progressHandler: ((Int64, Int64, Double) -> Void)?,
+        progressHandler: PDMProgressTracker.ProgressCallback?,
         rangeAvailabilityHandler: ((Int64, Bool) -> Void)? = nil
     ) async -> PDMDownloadResult {
 
-        self.downloadURL = url
-        self.destinationURL = destinationURL
-        self.metadataDirectory = metadataDirectory
-        self.downloadHeaders = headers
+        defer { progressTracker.stop() }
         self.validationInfo = validationInfo
+        self.artifactIdentity = artifactIdentity
         self.etag = etag
         self.progressHandler = progressHandler
         self.rangeAvailabilityHandler = rangeAvailabilityHandler
 
-        state.set(.running)
+        if state.current == .idle { _ = state.compareAndSet(expected: .idle, new: .running) }
+        if let interrupted = interruptionResult(bytesDownloaded: 0) { return interrupted }
         errorHandler.resetRetryCount()
         resetRetryTracking()
 
         let aamd = AAMDFileManager(downloadFileURL: destinationURL, metadataDirectory: metadataDirectory)
-        self.aamd = aamd
-
-        fileSize = totalSize
-        if aamd.exists() && aamd.validateAAMDFile() {
-            if let headers = aamd.readHeaders(), let storedSize = headers["FILE_SIZE"], let size = Int64(storedSize), size > 0 {
-                fileSize = size
-            }
-        }
+        fileSize = max(totalSize, 0)
         if fileSize <= 0 {
-            fileSize = validationManager.getRemoteFileSize(
-                url: url.absoluteString,
-                headers: headers
-            )
+            do {
+                fileSize = try await validationManager.getRemoteFileSize(url: url.absoluteString, headers: headers)
+            } catch {
+                if let interrupted = interruptionResult(bytesDownloaded: 0) { return interrupted }
+            }
+        }
+        if let interrupted = interruptionResult(bytesDownloaded: (await resumeSnapshot(aamd))?.downloadedBytes ?? 0) {
+            return interrupted
         }
 
-        downloadMode = bluestreakManager.resolveDownloadMode(
-            communicator: communicator,
-            url: url,
-            headers: headers,
-            fileSize: fileSize
+        downloadMode = await bluestreakManager.resolveDownloadMode(
+            communicator: communicator, url: url, headers: headers, fileSize: fileSize
         )
-
+        if let interrupted = interruptionResult(bytesDownloaded: (await resumeSnapshot(aamd))?.downloadedBytes ?? 0) {
+            return interrupted
+        }
         segmentSize = validationInfo?.segmentSize ?? Int64(2 * 1024 * 1024)
-        segmentCount = downloadMode.isSingleStream ? 1 : max(1, Int((fileSize + segmentSize - 1) / segmentSize))
-
+        guard segmentSize > 0 else {
+            return .error(PDMDownloadError.downloadFailed("Invalid segment size"))
+        }
+        segmentCount = downloadMode.isSingleStream ? 1 : Int((fileSize - 1) / segmentSize + 1)
         var resumeBytes: Int64 = 0
-
-        var shouldInitializeDownloadFiles = !aamd.exists()
-
-        if aamd.exists() {
-            if aamd.validateAAMDFile(),
-               aamd.validateHeaders(
-                   remoteETag: etag,
-                   remoteFileSize: fileSize,
-                   remoteURL: url.absoluteString,
-                   segmentSize: segmentSize
-               ) {
-                if let headers = aamd.readHeaders() {
-                    if let modeStr = headers["DOWNLOAD_MODE"], let mode = parseDownloadMode(from: modeStr) {
-                        downloadMode = mode
-                    }
-                    if let countStr = headers["SEGMENT_COUNT"], let count = Int(countStr), count > 0 {
-                        segmentCount = count
-                    }
-                }
-                resumeBytes = aamd.getTotalBytesDownloaded(segmentCount: segmentCount)
-            } else {
-                shouldInitializeDownloadFiles = true
+        var shouldInitialize = true
+        if let snapshot = await resumeSnapshot(aamd),
+           (try? await PDMDownloadIO.run { [self] in
+               aamd.validateHeaders(remoteETag: etag, remoteFileSize: fileSize, remoteURL: url.absoluteString, segmentSize: segmentSize)
+           }) == true,
+           snapshot.downloadMode.isSingleStream || !downloadMode.isSingleStream {
+            if snapshot.downloadMode.isSingleStream { downloadMode = .singleStream }
+            segmentCount = snapshot.segmentCount
+            resumeBytes = snapshot.downloadedBytes
+            shouldInitialize = false
+        }
+        if shouldInitialize || (resumeBytes == 0 && FileManager.default.fileExists(atPath: DownloadArtifactStore.receiptURL(for: destinationURL).path)) {
+            guard await initializeDownloadFiles(aamd: aamd, url: url, destinationURL: destinationURL) else {
+                return .error(PDMDownloadError.downloadFailed("Cannot initialize download files; existing material was preserved"))
             }
         }
 
-        if shouldInitializeDownloadFiles {
-            guard initializeDownloadFiles(aamd: aamd, url: url, destinationURL: destinationURL) else {
-                return .error(PDMDownloadError.downloadFailed("Cannot initialize download files"))
-            }
-            resumeBytes = 0
-        }
-
-        await progressTracker.configure(
-            totalBytes: fileSize,
-            callback: progressHandler,
-            initialBytes: resumeBytes
-        )
-
-        await progressTracker.forceReport()
-
-        return await executeWithRetry(url: url, destinationURL: destinationURL, headers: headers, aamd: aamd)
+        reusedExistingBytes = resumeBytes > 0
+        progressTracker.configure(totalBytes: fileSize, callback: progressHandler, initialBytes: resumeBytes)
+        progressTracker.forceReport()
+        return await executeWithRetry(url: url, destinationURL: destinationURL, metadataDirectory: metadataDirectory, headers: headers, aamd: aamd)
     }
 
-    func resumeDownload(
-        progressHandler: ((Int64, Int64, Double) -> Void)? = nil,
-        rangeAvailabilityHandler: ((Int64, Bool) -> Void)? = nil
-    ) async -> PDMDownloadResult {
-        guard state.current == .paused,
-              let url = downloadURL,
-              let destURL = destinationURL,
-              let aamd = self.aamd else {
-            return .error(PDMDownloadError(code: .criticalError, message: "Cannot resume: invalid state"))
-        }
-
-        if let progressHandler {
-            self.progressHandler = progressHandler
-        }
-        if let rangeAvailabilityHandler {
-            self.rangeAvailabilityHandler = rangeAvailabilityHandler
-        }
-
-        communicator.reset()
-        state.set(.running)
-
-        let resumeBytes = aamd.getTotalBytesDownloaded(segmentCount: segmentCount)
-
-        await progressTracker.configure(
-            totalBytes: fileSize,
-            callback: progressHandler,
-            initialBytes: resumeBytes
-        )
-        await progressTracker.forceReport()
-
-        return await executeWithRetry(url: url, destinationURL: destURL, headers: downloadHeaders, aamd: aamd)
+    private func interruptionResult(bytesDownloaded: Int64) -> PDMDownloadResult? {
+        if state.current == .paused { return .paused(bytesDownloaded: bytesDownloaded) }
+        if state.current == .cancelled || Task.isCancelled { return .cancelled }
+        return nil
     }
 
     private func executeWithRetry(
         url: URL,
         destinationURL: URL,
+        metadataDirectory: URL?,
         headers: [(String, String)],
         aamd: AAMDFileManager
     ) async -> PDMDownloadResult {
-
-        var shouldRetry = true
-        while shouldRetry {
-            shouldRetry = false
-
-            let currentState = state.current
-            if currentState == .paused {
-                return .paused(bytesDownloaded: await progressTracker.currentDownloadedBytes)
+        while true {
+            if let interrupted = interruptionResult(bytesDownloaded: progressTracker.currentDownloadedBytes) {
+                return interrupted
             }
-            if currentState == .cancelled {
-                return .cancelled
-            }
-
+            progressTracker.setPhase(.transferring)
             let result: PDMDownloadResult
             switch downloadMode {
             case .singleStream:
-                result = await downloadSingleStream(
-                    url: url,
-                    destinationURL: destinationURL,
-                    headers: headers,
-                    aamd: aamd
-                )
+                result = await downloadSingleStream(url: url, destinationURL: destinationURL, headers: headers, aamd: aamd)
             case .multiStream(let maxSegments):
                 result = await downloadMultiStream(
-                    url: url,
-                    destinationURL: destinationURL,
-                    headers: headers,
-                    maxSegments: maxSegments,
-                    aamd: aamd
+                    url: url, destinationURL: destinationURL, headers: headers, maxSegments: maxSegments, aamd: aamd
                 )
             }
-
+            if let interrupted = interruptionResult(bytesDownloaded: progressTracker.currentDownloadedBytes) {
+                return interrupted
+            }
             switch result {
             case .completed:
+                progressTracker.setPhase(.validating)
+                guard let snapshot = await resumeSnapshot(aamd), snapshot.isComplete, snapshot.fileSize == fileSize else {
+                    return .error(PDMDownloadError.downloadFailed("Download has no complete, valid segment record"))
+                }
                 if let info = validationInfo {
-                    do {
-                        let valid = try validationManager.validateFile(
-                            at: destinationURL,
-                            validationInfo: info,
-                            totalSize: fileSize
-                        )
-                        if !valid {
-                            return .error(PDMDownloadError.segmentValidationFailed(-1))
-                        }
-                    } catch {
-                            return .error(PDMDownloadError(code: .segmentValidationFailed, message: error.localizedDescription))
+                    let validationResult = await validateCompletedDownload(info, destinationURL: destinationURL, aamd: aamd)
+                    switch validationResult {
+                    case .completed: break
+                    default: return validationResult
                     }
                 }
+                if reusedExistingBytes {
+                    do {
+                        _ = try await PDMDownloadIO.validate { [self] in
+                            try DownloadArtifactStore.verify(
+                                fileURL: destinationURL, identity: artifactIdentity, expectedSize: fileSize,
+                                metadataDirectory: metadataDirectory, validationInfo: validationInfo,
+                                allowLegacy: true,
+                                cancellationCheck: { self.state.current != .running || self.cancellation.isCancelled }
+                            )
+                        }
+                    } catch is CancellationError {
+                        return interruptionResult(bytesDownloaded: progressTracker.currentDownloadedBytes) ?? .cancelled
+                    } catch {
+                        if let interrupted = interruptionResult(bytesDownloaded: progressTracker.currentDownloadedBytes) {
+                            return interrupted
+                        }
+                        guard !didRestartUnverifiedResume else {
+                            return .error(PDMDownloadError(code: .signatureValidationFailed, message: error.localizedDescription))
+                        }
+                        didRestartUnverifiedResume = true
+                        guard await initializeDownloadFiles(aamd: aamd, url: url, destinationURL: destinationURL) else {
+                            return .error(PDMDownloadError.downloadFailed("Cannot preserve unverified resumed download for retry"))
+                        }
+                        progressTracker.setDownloadedBytes(0)
+                        continue
+                    }
+                }
+                if let interrupted = interruptionResult(bytesDownloaded: progressTracker.currentDownloadedBytes) {
+                    return interrupted
+                }
+                progressTracker.forceReport()
+                guard state.compareAndSet(expected: .running, new: .completed) else {
+                    return interruptionResult(bytesDownloaded: fileSize) ?? .error(PDMDownloadError.criticalError("Invalid completion state"))
+                }
                 rangeAvailabilityHandler?(fileSize, true)
-                state.set(.completed)
                 return .completed
 
-            case .paused(let bytes):
-                return .paused(bytesDownloaded: bytes)
+            case .paused, .cancelled:
+                return result
 
-            case .cancelled:
-                return .cancelled
-
-            case .error(let err):
-                let errorCode = err.errorCode
-                let action = await actionForDownloadError(errorCode)
-
+            case .error(let error):
+                progressTracker.setPhase(.waiting)
+                let action = await actionForDownloadError(error.errorCode)
+                if let interrupted = interruptionResult(bytesDownloaded: progressTracker.currentDownloadedBytes) {
+                    return interrupted
+                }
                 switch action {
                 case .retry:
-                    shouldRetry = true
-                    communicator.reset()
+                    progressTracker.setDownloadedBytes((await resumeSnapshot(aamd))?.downloadedBytes ?? 0)
                 case .switchToSingleStreamAndRetry:
                     downloadMode = .singleStream
                     segmentCount = 1
-                    bluestreakManager.disableBluestreak(reason: "Error \(errorCode.rawValue)")
-                    guard initializeDownloadFiles(aamd: aamd, url: url, destinationURL: destinationURL) else {
-                        state.set(.error)
+                    bluestreakManager.disableBluestreak(reason: "Error \(error.errorCode.rawValue)")
+                    guard await initializeDownloadFiles(aamd: aamd, url: url, destinationURL: destinationURL) else {
+                        _ = state.compareAndSet(expected: .running, new: .error)
                         return .error(PDMDownloadError.downloadFailed("Cannot initialize single stream retry"))
                     }
-                    await progressTracker.configure(
-                        totalBytes: fileSize,
-                        callback: progressHandler,
-                        initialBytes: 0
-                    )
-                    await progressTracker.forceReport()
-                    shouldRetry = true
-                    communicator.reset()
-                case .fatal:
-                    state.set(.error)
-                    return .error(err)
-                case .ignore:
-                    break
+                    progressTracker.setDownloadedBytes(0)
+                case .fatal, .ignore:
+                    _ = state.compareAndSet(expected: .running, new: .error)
+                    return .error(error)
                 }
             }
         }
+    }
 
+    private func validateCompletedDownload(
+        _ info: ValidationInfo,
+        destinationURL: URL,
+        aamd: AAMDFileManager
+    ) async -> PDMDownloadResult {
+        for segment in info.segments {
+            if let interrupted = interruptionResult(bytesDownloaded: progressTracker.currentDownloadedBytes) { return interrupted }
+            let index = segment.segmentNumber - 1
+            let start = Int64(index) * info.segmentSize
+            let length = segment.segmentNumber == info.segmentCount ? info.lastSegmentSize : info.segmentSize
+            do {
+                guard try await PDMDownloadIO.validate({ [self] in
+                    try validationManager.validateSegment(
+                        fileURL: destinationURL, startByte: start, segmentSize: length,
+                        expectedHash: segment.hash, algorithm: info.algorithm
+                    )
+                }) else { throw PDMDownloadError.segmentValidationFailed(index) }
+            } catch {
+                let recordIndex = downloadMode.isSingleStream ? 0 : index
+                let invalidBytes: Int64 = (try? await PDMDownloadIO.run {
+                    let count = aamd.getBytesDownloadedForSegment(recordIndex)
+                    guard aamd.updateSegmentData(segment: recordIndex, bytesDownloaded: 0), aamd.synchronize() else {
+                        throw PDMDownloadError.downloadFailed("Cannot invalidate segment checkpoint")
+                    }
+                    return count
+                }) ?? 0
+                progressTracker.addDownloadedBytes(-invalidBytes)
+                return .error(PDMDownloadError(code: .segmentValidationFailed, message: error.localizedDescription))
+            }
+        }
         return .completed
     }
 
     private func resetRetryTracking() {
+        reusedExistingBytes = false
+        didRestartUnverifiedResume = false
         criticalErrorForceRetryCount = 0
         lastCriticalErrorProgressBytes = -1
         needRetryCount = 0
@@ -320,7 +316,7 @@ final class PDMAssetDownloadManager {
             didFallbackSegmentValidationToSingleStream = true
             return .switchToSingleStreamAndRetry
         case .criticalError:
-            let progressBytes = await progressTracker.currentDownloadedBytes
+            let progressBytes = progressTracker.currentDownloadedBytes
             if progressBytes != lastCriticalErrorProgressBytes {
                 criticalErrorForceRetryCount = 0
                 lastCriticalErrorProgressBytes = progressBytes
@@ -357,13 +353,38 @@ final class PDMAssetDownloadManager {
         }
     }
 
+    private func resumeSnapshot(_ aamd: AAMDFileManager) async -> AAMDResumeSnapshot? {
+        try? await PDMDownloadIO.run { aamd.resumeSnapshot() }
+    }
+
     private func initializeDownloadFiles(
         aamd: AAMDFileManager,
         url: URL,
         destinationURL: URL
-    ) -> Bool {
-        aamd.writeMetaInfo()
-        aamd.writeHeaders([
+    ) async -> Bool {
+        do {
+            let initialized = try await PDMDownloadIO.run { [self] in
+                try aamd.preserveExistingDownload()
+                try FileManager.default.createDirectory(at: destinationURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+                guard FileManager.default.createFile(atPath: destinationURL.path, contents: nil) else { return false }
+                let fileHandle = try FileHandle(forWritingTo: destinationURL)
+                defer { try? fileHandle.close() }
+                try fileHandle.truncate(atOffset: UInt64(max(fileSize, 0)))
+                try fileHandle.synchronize()
+                guard aamd.writeMetaInfo() else { return false }
+                return aamd.writeHeaders(downloadMetadata(url: url), segmentTableSpan: max(0, segmentCount - 1))
+                    && aamd.synchronize()
+            }
+            if initialized { reusedExistingBytes = false }
+            return initialized
+        } catch {
+            print("[PDM] 无法准备下载文件: \(error.localizedDescription)")
+            return false
+        }
+    }
+
+    private func downloadMetadata(url: URL) -> [String: String] {
+        [
             "ETAG": etag,
             "SERVER_PATH": url.absoluteString,
             "FILE_SIZE": String(fileSize),
@@ -372,50 +393,7 @@ final class PDMAssetDownloadManager {
             "DOWNLOAD_START_ADDRESS": "0",
             "DOWNLOAD_MODE": String(describing: downloadMode),
             "SEGMENT_COUNT": String(segmentCount)
-        ], segmentTableSpan: aamdSegmentTableSpan())
-
-        return prepareDestinationFile(destinationURL)
-    }
-
-    private func aamdSegmentTableSpan() -> Int {
-        guard fileSize > 0, segmentSize > 0 else {
-            return 0
-        }
-        return Int(fileSize / segmentSize)
-    }
-
-    private func parseDownloadMode(from string: String) -> PDMDownloadMode? {
-        let trimmed = string.trimmingCharacters(in: .whitespacesAndNewlines)
-        if trimmed == "singleStream" {
-            return .singleStream
-        }
-        if trimmed.hasPrefix("multiStream(maxSegments:") {
-            let digits = trimmed.filter { $0.isNumber }
-            if let max = Int(digits), max > 0 {
-                return .multiStream(maxSegments: max)
-            }
-        }
-        return nil
-    }
-
-    private func prepareDestinationFile(_ destinationURL: URL) -> Bool {
-        do {
-            try FileManager.default.createDirectory(
-                at: destinationURL.deletingLastPathComponent(),
-                withIntermediateDirectories: true
-            )
-
-            if !FileManager.default.fileExists(atPath: destinationURL.path) {
-                FileManager.default.createFile(atPath: destinationURL.path, contents: nil)
-            }
-
-            let fileHandle = try FileHandle(forWritingTo: destinationURL)
-            defer { try? fileHandle.close() }
-            fileHandle.truncateFile(atOffset: UInt64(max(fileSize, 0)))
-            return true
-        } catch {
-            return false
-        }
+        ]
     }
 
     private func downloadSingleStream(
@@ -424,153 +402,18 @@ final class PDMAssetDownloadManager {
         headers: [(String, String)],
         aamd: AAMDFileManager
     ) async -> PDMDownloadResult {
-
         if fileSize <= 0 {
-            return await downloadIndefiniteSingleStream(
-                url: url,
-                destinationURL: destinationURL,
-                headers: headers,
-                aamd: aamd
-            )
+            return await downloadIndefiniteSingleStream(url: url, destinationURL: destinationURL, headers: headers, aamd: aamd)
         }
-
-        let startByte = aamd.getBytesDownloadedForSegment(0)
-        if startByte >= fileSize {
-            return .completed
-        }
-
-        let endByte = fileSize - 1
-        guard communicator.initHttpDownload(
+        return await downloadSegment(
+            segment: PDMSegment(index: 0, startByte: 0, endByte: fileSize - 1, size: fileSize, expectedHash: ""),
+            segmentIndex: 0,
             url: url,
-            startByte: startByte,
-            endByte: endByte,
-            headers: headers
-        ) else {
-            return .error(PDMDownloadError.downloadFailed("Failed to initialize HTTP download"))
-        }
-
-        guard let fileHandle = try? FileHandle(forWritingTo: destinationURL) else {
-            return .error(PDMDownloadError.downloadFailed("Cannot open file for writing"))
-        }
-        defer { try? fileHandle.close() }
-
-        do {
-            try fileHandle.seek(toOffset: UInt64(startByte))
-        } catch {
-            return .error(PDMDownloadError.downloadFailed("Cannot seek to offset \(startByte)"))
-        }
-
-        let bufferSize = PDMConstants.downloadBufferSize
-        let buffer = UnsafeMutablePointer<UInt8>.allocate(capacity: bufferSize)
-        defer { buffer.deallocate() }
-
-        var totalDownloaded = startByte
-        var remaining = fileSize - startByte
-        var lastAAMDUpdate = Date()
-        let aamdUpdateInterval: TimeInterval = 3.0
-
-        while remaining > 0 {
-            if state.current == .paused {
-                aamd.updateSegmentData(segment: 0, bytesDownloaded: totalDownloaded)
-                await progressTracker.forceReport()
-                communicator.closeStream()
-                return .paused(bytesDownloaded: totalDownloaded)
-            }
-
-            if state.current == .cancelled {
-                aamd.updateSegmentData(segment: 0, bytesDownloaded: totalDownloaded)
-                communicator.closeStream()
-                return .cancelled
-            }
-
-            let readSize = min(Int(remaining), bufferSize)
-            let (result, bytesRead) = autoreleasepool {
-                communicator.downloadRemainingData(
-                    buffer: buffer,
-                    bufferSize: readSize
-                )
-            }
-
-            if let responseError = validateDownloadResponse(
-                communicator: communicator,
-                expectedStart: startByte,
-                expectedEnd: endByte,
-                expectedTotalSize: fileSize,
-                allowFullResponse: startByte == 0
-            ) {
-                aamd.updateSegmentData(segment: 0, bytesDownloaded: totalDownloaded)
-                communicator.closeStream()
-                return .error(responseError)
-            }
-
-            switch result {
-            case .moreData:
-                if bytesRead > 0 {
-                    do {
-                        try writeBuffer(buffer, count: bytesRead, to: fileHandle)
-                    } catch {
-                        aamd.updateSegmentData(segment: 0, bytesDownloaded: totalDownloaded)
-                        communicator.closeStream()
-                        return .error(PDMDownloadError.downloadFailed(error.localizedDescription))
-                    }
-                    totalDownloaded += Int64(bytesRead)
-                    remaining -= Int64(bytesRead)
-                    await progressTracker.addDownloadedBytes(Int64(bytesRead))
-                    rangeAvailabilityHandler?(totalDownloaded, false)
-
-                    let now = Date()
-                    if now.timeIntervalSince(lastAAMDUpdate) >= aamdUpdateInterval {
-                        aamd.updateSegmentData(segment: 0, bytesDownloaded: totalDownloaded)
-                        lastAAMDUpdate = now
-                    }
-                }
-
-            case .complete, .streamEnd:
-                if bytesRead > 0 {
-                    do {
-                        try writeBuffer(buffer, count: bytesRead, to: fileHandle)
-                    } catch {
-                        aamd.updateSegmentData(segment: 0, bytesDownloaded: totalDownloaded)
-                        communicator.closeStream()
-                        return .error(PDMDownloadError.downloadFailed(error.localizedDescription))
-                    }
-                    totalDownloaded += Int64(bytesRead)
-                    remaining -= Int64(bytesRead)
-                    await progressTracker.addDownloadedBytes(Int64(bytesRead))
-                }
-                aamd.updateSegmentData(segment: 0, bytesDownloaded: totalDownloaded)
-                rangeAvailabilityHandler?(totalDownloaded, totalDownloaded >= fileSize)
-                guard totalDownloaded == fileSize else {
-                    communicator.closeStream()
-                    return .error(PDMDownloadError.downloadFailed("Downloaded size mismatch: \(totalDownloaded)/\(fileSize)"))
-                }
-                return .completed
-
-            case .error(let errorCode):
-                aamd.updateSegmentData(segment: 0, bytesDownloaded: totalDownloaded)
-                communicator.closeStream()
-
-                if state.current == .paused {
-                    await progressTracker.forceReport()
-                    return .paused(bytesDownloaded: totalDownloaded)
-                }
-                if state.current == .cancelled {
-                    return .cancelled
-                }
-
-                return .error(PDMDownloadError(
-                    code: errorCode,
-                    message: "Download stream error at byte \(totalDownloaded)"
-                ))
-            }
-        }
-
-        aamd.updateSegmentData(segment: 0, bytesDownloaded: totalDownloaded)
-        guard totalDownloaded == fileSize else {
-            communicator.closeStream()
-            return .error(PDMDownloadError.downloadFailed("Downloaded size mismatch: \(totalDownloaded)/\(fileSize)"))
-        }
-        return .completed
+            destinationURL: destinationURL,
+            headers: headers,
+            aamd: aamd,
+            isSingleStream: true
+        )
     }
 
     private func downloadIndefiniteSingleStream(
@@ -579,129 +422,51 @@ final class PDMAssetDownloadManager {
         headers: [(String, String)],
         aamd: AAMDFileManager
     ) async -> PDMDownloadResult {
-        aamd.updateSegmentData(segment: 0, bytesDownloaded: 0)
-
-        guard communicator.initIndefiniteHttpDownload(
-            url: url,
-            headers: headers
-        ) else {
-            return .error(PDMDownloadError.downloadFailed("Failed to initialize indefinite HTTP download"))
+        let existingSize = (try? await PDMDownloadIO.run {
+            (try FileManager.default.attributesOfItem(atPath: destinationURL.path)[.size] as? NSNumber)?.int64Value ?? 0
+        }) ?? 0
+        if existingSize > 0 {
+            guard await initializeDownloadFiles(aamd: aamd, url: url, destinationURL: destinationURL) else {
+                return .error(PDMDownloadError.downloadFailed("Cannot preserve interrupted indefinite download"))
+            }
+            progressTracker.setDownloadedBytes(0)
         }
-
-        guard let fileHandle = try? FileHandle(forWritingTo: destinationURL) else {
-            return .error(PDMDownloadError.downloadFailed("Cannot open file for writing"))
-        }
-        defer { try? fileHandle.close() }
-
+        if let interrupted = interruptionResult(bytesDownloaded: 0) { return interrupted }
         do {
-            try fileHandle.truncate(atOffset: 0)
-            try fileHandle.seek(toOffset: 0)
+            let writer = try await PDMDownloadIO.run { [self] in
+                try PDMSegmentWriter(fileURL: destinationURL, aamd: aamd, segmentIndex: 0,
+                                     start: 0, length: nil, initialBytes: 0) { count in
+                    self.progressTracker.addDownloadedBytes(count)
+                    self.rangeAvailabilityHandler?(self.progressTracker.currentDownloadedBytes, false)
+                }
+            }
+            let response = try await communicator.transfer(
+                url: url, range: nil, headers: headers,
+                responseHandler: { [self] response in
+                    guard response.statusCode == 200 else {
+                        throw PDMDownloadError.downloadFailed("Unexpected HTTP status for indefinite download: \(response.statusCode)")
+                    }
+                    if let error = validateResponseIdentity(response) { throw error }
+                },
+                dataHandler: { try writer.append($0) },
+                completionHandler: { try writer.finish(succeeded: $0) }
+            )
+            let totalDownloaded = try await PDMDownloadIO.run { writer.writtenBytes }
+            if let interrupted = interruptionResult(bytesDownloaded: totalDownloaded) { return interrupted }
+            guard totalDownloaded > 0, response.contentLength <= 0 || response.contentLength == totalDownloaded else {
+                return .error(PDMDownloadError.downloadFailed("Indefinite download size does not match response"))
+            }
+            fileSize = totalDownloaded
+            segmentCount = 1
+            if etag.isEmpty { etag = response.etag ?? "" }
+            let persisted = try await PDMDownloadIO.run { [self] in
+                aamd.writeHeaders(downloadMetadata(url: url), segmentTableSpan: 0) && aamd.synchronize()
+            }
+            guard persisted else { return .error(PDMDownloadError.downloadFailed("Cannot finalize download metadata")) }
+            progressTracker.updateTotalBytes(totalDownloaded)
+            return .completed
         } catch {
-            return .error(PDMDownloadError.downloadFailed("Cannot reset destination file"))
-        }
-
-        let bufferSize = PDMConstants.downloadBufferSize
-        let buffer = UnsafeMutablePointer<UInt8>.allocate(capacity: bufferSize)
-        defer { buffer.deallocate() }
-
-        var totalDownloaded: Int64 = 0
-        var lastAAMDUpdate = Date()
-        let aamdUpdateInterval: TimeInterval = 3.0
-
-        while true {
-            if state.current == .paused {
-                aamd.updateSegmentData(segment: 0, bytesDownloaded: totalDownloaded)
-                await progressTracker.forceReport()
-                communicator.closeStream()
-                return .paused(bytesDownloaded: totalDownloaded)
-            }
-
-            if state.current == .cancelled {
-                aamd.updateSegmentData(segment: 0, bytesDownloaded: totalDownloaded)
-                communicator.closeStream()
-                return .cancelled
-            }
-
-            let (result, bytesRead) = autoreleasepool {
-                communicator.downloadRemainingData(
-                    buffer: buffer,
-                    bufferSize: bufferSize
-                )
-            }
-
-            switch result {
-            case .moreData:
-                if bytesRead > 0 {
-                    do {
-                        try writeBuffer(buffer, count: bytesRead, to: fileHandle)
-                    } catch {
-                        aamd.updateSegmentData(segment: 0, bytesDownloaded: totalDownloaded)
-                        communicator.closeStream()
-                        return .error(PDMDownloadError.downloadFailed(error.localizedDescription))
-                    }
-                    totalDownloaded += Int64(bytesRead)
-                    await progressTracker.addDownloadedBytes(Int64(bytesRead))
-                    rangeAvailabilityHandler?(totalDownloaded, false)
-
-                    let now = Date()
-                    if now.timeIntervalSince(lastAAMDUpdate) >= aamdUpdateInterval {
-                        aamd.updateSegmentData(segment: 0, bytesDownloaded: totalDownloaded)
-                        lastAAMDUpdate = now
-                    }
-                }
-
-            case .complete, .streamEnd:
-                if bytesRead > 0 {
-                    do {
-                        try writeBuffer(buffer, count: bytesRead, to: fileHandle)
-                    } catch {
-                        aamd.updateSegmentData(segment: 0, bytesDownloaded: totalDownloaded)
-                        communicator.closeStream()
-                        return .error(PDMDownloadError.downloadFailed(error.localizedDescription))
-                    }
-                    totalDownloaded += Int64(bytesRead)
-                    await progressTracker.addDownloadedBytes(Int64(bytesRead))
-                }
-
-                fileSize = totalDownloaded
-                segmentCount = 1
-                if etag.isEmpty {
-                    etag = communicator.lastETag
-                }
-
-                aamd.updateSegmentData(segment: 0, bytesDownloaded: totalDownloaded)
-                aamd.writeHeaders([
-                    "ETAG": etag,
-                    "SERVER_PATH": url.absoluteString,
-                    "FILE_SIZE": String(totalDownloaded),
-                    "SEGMENT_SIZE": String(segmentSize),
-                    "NO_Of_BYTES_TO_DOWNLOAD": String(totalDownloaded),
-                    "DOWNLOAD_START_ADDRESS": "0"
-                ], segmentTableSpan: 0)
-
-                await progressTracker.updateTotalBytes(totalDownloaded)
-                await progressTracker.forceReport()
-                rangeAvailabilityHandler?(totalDownloaded, true)
-                communicator.closeStream()
-                return .completed
-
-            case .error(let errorCode):
-                aamd.updateSegmentData(segment: 0, bytesDownloaded: totalDownloaded)
-                communicator.closeStream()
-
-                if state.current == .paused {
-                    await progressTracker.forceReport()
-                    return .paused(bytesDownloaded: totalDownloaded)
-                }
-                if state.current == .cancelled {
-                    return .cancelled
-                }
-
-                return .error(PDMDownloadError(
-                    code: errorCode,
-                    message: "Indefinite download stream error at byte \(totalDownloaded)"
-                ))
-            }
+            return transferFailure(error)
         }
     }
 
@@ -712,90 +477,44 @@ final class PDMAssetDownloadManager {
         maxSegments: Int,
         aamd: AAMDFileManager
     ) async -> PDMDownloadResult {
-
-        let segments = bluestreakManager.calculateSegments(
-            totalSize: fileSize,
-            validationInfo: validationInfo
-        )
-
+        let segments = bluestreakManager.calculateSegments(totalSize: fileSize, validationInfo: validationInfo)
         var finalResult: PDMDownloadResult = .completed
-
-        do {
-            try await withThrowingTaskGroup(of: PDMDownloadResult.self) { group in
-                var activeCount = 0
-                var segmentIndex = 0
-
-                while segmentIndex < segments.count || activeCount > 0 {
-                    if state.current == .paused {
+        await withTaskGroup(of: PDMDownloadResult.self) { group in
+            var activeCount = 0
+            var segmentIndex = 0
+            while segmentIndex < segments.count || activeCount > 0 {
+                if let interrupted = interruptionResult(bytesDownloaded: progressTracker.currentDownloadedBytes) {
+                    group.cancelAll()
+                    finalResult = interrupted
+                    return
+                }
+                while segmentIndex < segments.count && activeCount < max(1, maxSegments) {
+                    let segment = segments[segmentIndex]
+                    let index = segmentIndex
+                    segmentIndex += 1
+                    activeCount += 1
+                    group.addTask { [self] in
+                        await downloadSegment(
+                            segment: segment, segmentIndex: index, url: url, destinationURL: destinationURL,
+                            headers: headers, aamd: aamd
+                        )
+                    }
+                }
+                if let result = await group.next() {
+                    activeCount -= 1
+                    switch result {
+                    case .completed:
+                        continue
+                    default:
                         group.cancelAll()
-                        finalResult = .paused(bytesDownloaded: await progressTracker.currentDownloadedBytes)
+                        finalResult = result
                         return
-                    }
-                    if state.current == .cancelled {
-                        group.cancelAll()
-                        finalResult = .cancelled
-                        return
-                    }
-
-                    while segmentIndex < segments.count && activeCount < maxSegments {
-                        let segment = segments[segmentIndex]
-                        let segIdx = segmentIndex
-
-                        let alreadyDownloaded = aamd.getBytesDownloadedForSegment(segIdx)
-                        let segSize = segment.endByte - segment.startByte + 1
-
-                        if alreadyDownloaded >= segSize {
-                            segmentIndex += 1
-                            continue
-                        }
-
-                        segmentIndex += 1
-                        activeCount += 1
-
-                        group.addTask { [weak self] in
-                            guard let self else { return .cancelled }
-                            return await self.downloadSegment(
-                                segment: segment,
-                                segmentIndex: segIdx,
-                                url: url,
-                                destinationURL: destinationURL,
-                                headers: headers,
-                                aamd: aamd
-                            )
-                        }
-                    }
-
-                    if let segResult = try await group.next() {
-                        activeCount -= 1
-                        switch segResult {
-                        case .completed:
-                            continue
-                        case .paused(let bytes):
-                            group.cancelAll()
-                            finalResult = .paused(bytesDownloaded: bytes)
-                            return
-                        case .cancelled:
-                            group.cancelAll()
-                            finalResult = .cancelled
-                            return
-                        case .error(let err):
-                            group.cancelAll()
-                            finalResult = .error(err)
-                            return
-                        }
                     }
                 }
             }
-        } catch {
-            if state.current == .paused {
-                return .paused(bytesDownloaded: await progressTracker.currentDownloadedBytes)
-            }
-            if state.current == .cancelled {
-                return .cancelled
-            }
-            return .error(PDMDownloadError(code: .downloadFailed, message: error.localizedDescription))
         }
-
+        // TaskGroup 退出时所有分片已关闭流和文件句柄，才允许重试或释放目标路径。
+        if let interrupted = interruptionResult(bytesDownloaded: progressTracker.currentDownloadedBytes) { return interrupted }
         return finalResult
     }
 
@@ -805,187 +524,125 @@ final class PDMAssetDownloadManager {
         url: URL,
         destinationURL: URL,
         headers: [(String, String)],
-        aamd: AAMDFileManager
+        aamd: AAMDFileManager,
+        isSingleStream: Bool = false
     ) async -> PDMDownloadResult {
-        let alreadyDownloaded = aamd.getBytesDownloadedForSegment(segmentIndex)
-        let segmentSize = segment.endByte - segment.startByte + 1
-        if alreadyDownloaded >= segmentSize {
-            return .completed
-        }
-
-        let startByte = segment.startByte + alreadyDownloaded
-
-        let segmentComm = PDMHttpCommunicator()
-        segmentComm.setUserAgent(PDMHttpCommunicator.buildFFCUserAgent())
-
-        guard segmentComm.initHttpDownload(
-            url: url,
-            startByte: startByte,
-            endByte: segment.endByte,
-            headers: headers
-        ) else {
-            return .error(PDMDownloadError.downloadFailed("Failed to init segment \(segment.index)"))
-        }
-
-        guard let fileHandle = try? FileHandle(forWritingTo: destinationURL) else {
-            return .error(PDMDownloadError.downloadFailed("Cannot open file for writing"))
-        }
-        defer { try? fileHandle.close() }
-
         do {
-            try fileHandle.seek(toOffset: UInt64(segment.startByte + alreadyDownloaded))
+            let length = segment.endByte - segment.startByte + 1
+            let initialBytes = try await PDMDownloadIO.run { aamd.getBytesDownloadedForSegment(segmentIndex) }
+            guard length > 0, initialBytes >= 0, initialBytes <= length else {
+                return .error(PDMDownloadError.downloadFailed("Invalid saved segment byte count"))
+            }
+            if let interrupted = interruptionResult(bytesDownloaded: initialBytes) { return interrupted }
+            if initialBytes == length {
+                return await validateCompletedSegment(segment, segmentIndex: segmentIndex, destinationURL: destinationURL, aamd: aamd)
+            }
+            let startByte = segment.startByte + initialBytes
+            var requestHeaders = headers
+            if !etag.isEmpty && !etag.hasPrefix("W/"), !headers.contains(where: { $0.0.lowercased() == "if-range" }) {
+                requestHeaders.append(("If-Range", etag))
+            }
+            let writer = try await PDMDownloadIO.run { [self] in
+                try PDMSegmentWriter(fileURL: destinationURL, aamd: aamd, segmentIndex: segmentIndex,
+                                     start: segment.startByte, length: length, initialBytes: initialBytes) { count in
+                    self.progressTracker.addDownloadedBytes(count)
+                    if isSingleStream {
+                        self.rangeAvailabilityHandler?(self.progressTracker.currentDownloadedBytes, false)
+                    }
+                }
+            }
+            _ = try await communicator.transfer(
+                url: url, range: startByte...segment.endByte, headers: requestHeaders,
+                responseHandler: { [self] response in
+                    if let error = validateDownloadResponse(
+                        response: response, expectedStart: startByte, expectedEnd: segment.endByte,
+                        expectedTotalSize: fileSize, allowFullResponse: isSingleStream && startByte == 0
+                    ) { throw error }
+                },
+                dataHandler: { try writer.append($0) },
+                completionHandler: { try writer.finish(succeeded: $0) }
+            )
+            let writtenBytes = try await PDMDownloadIO.run { writer.writtenBytes }
+            if let interrupted = interruptionResult(bytesDownloaded: writtenBytes) { return interrupted }
+            guard writtenBytes == length else {
+                return .error(PDMDownloadError(code: .needRetry, message: "Segment \(segmentIndex) incomplete: \(writtenBytes)/\(length)"))
+            }
+            return await validateCompletedSegment(segment, segmentIndex: segmentIndex, destinationURL: destinationURL, aamd: aamd)
         } catch {
-            return .error(PDMDownloadError.downloadFailed("Cannot seek to segment offset"))
-        }
-
-        let bufferSize = PDMConstants.downloadBufferSize
-        let buffer = UnsafeMutablePointer<UInt8>.allocate(capacity: bufferSize)
-        defer { buffer.deallocate() }
-
-        var bytesDownloaded = alreadyDownloaded
-        var bytesSinceLastAAMDUpdate: Int64 = 0
-        let aamdUpdateThreshold: Int64 = 0x40000
-
-        while true {
-            if state.current == .paused {
-                aamd.updateSegmentData(segment: segmentIndex, bytesDownloaded: bytesDownloaded)
-                segmentComm.closeStream()
-                return .paused(bytesDownloaded: bytesDownloaded)
-            }
-
-            if state.current == .cancelled {
-                aamd.updateSegmentData(segment: segmentIndex, bytesDownloaded: bytesDownloaded)
-                segmentComm.closeStream()
-                return .cancelled
-            }
-
-            let (result, bytesRead) = autoreleasepool {
-                segmentComm.downloadRemainingData(
-                    buffer: buffer,
-                    bufferSize: bufferSize
-                )
-            }
-
-            if let responseError = validateDownloadResponse(
-                communicator: segmentComm,
-                expectedStart: startByte,
-                expectedEnd: segment.endByte,
-                expectedTotalSize: fileSize,
-                allowFullResponse: false
-            ) {
-                aamd.updateSegmentData(segment: segmentIndex, bytesDownloaded: bytesDownloaded)
-                segmentComm.closeStream()
-                return .error(responseError)
-            }
-
-            switch result {
-            case .moreData:
-                if bytesRead > 0 {
-                    do {
-                        try writeBuffer(buffer, count: bytesRead, to: fileHandle)
-                    } catch {
-                        aamd.updateSegmentData(segment: segmentIndex, bytesDownloaded: bytesDownloaded)
-                        segmentComm.closeStream()
-                        return .error(PDMDownloadError.downloadFailed(error.localizedDescription))
-                    }
-                    bytesDownloaded += Int64(bytesRead)
-                    bytesSinceLastAAMDUpdate += Int64(bytesRead)
-                    if bytesDownloaded > segmentSize {
-                        aamd.updateSegmentData(segment: segmentIndex, bytesDownloaded: bytesDownloaded)
-                        segmentComm.closeStream()
-                        return .error(PDMDownloadError.downloadFailed("Segment \(segment.index) size overflow: \(bytesDownloaded)/\(segmentSize)"))
-                    }
-                    await progressTracker.addDownloadedBytes(Int64(bytesRead))
-                    if bytesSinceLastAAMDUpdate >= aamdUpdateThreshold {
-                        aamd.updateSegmentData(segment: segmentIndex, bytesDownloaded: bytesDownloaded)
-                        bytesSinceLastAAMDUpdate = 0
-                    }
-                }
-
-            case .complete, .streamEnd:
-                if bytesRead > 0 {
-                    do {
-                        try writeBuffer(buffer, count: bytesRead, to: fileHandle)
-                    } catch {
-                        aamd.updateSegmentData(segment: segmentIndex, bytesDownloaded: bytesDownloaded)
-                        segmentComm.closeStream()
-                        return .error(PDMDownloadError.downloadFailed(error.localizedDescription))
-                    }
-                    bytesDownloaded += Int64(bytesRead)
-                    await progressTracker.addDownloadedBytes(Int64(bytesRead))
-                }
-
-                aamd.updateSegmentData(segment: segmentIndex, bytesDownloaded: bytesDownloaded)
-
-                guard bytesDownloaded == segmentSize else {
-                    segmentComm.closeStream()
-                    return .error(PDMDownloadError(code: .needRetry, message: "Segment \(segment.index) incomplete: \(bytesDownloaded)/\(segmentSize)"))
-                }
-
-                if !segment.expectedHash.isEmpty, let info = validationInfo {
-                    do {
-                        let valid = try validationManager.validateSegment(
-                            fileURL: destinationURL,
-                            startByte: segment.startByte,
-                            segmentSize: segmentSize,
-                            expectedHash: segment.expectedHash,
-                            algorithm: info.algorithm
-                        )
-                        if !valid {
-                            return .error(PDMDownloadError.segmentValidationFailed(segment.index))
-                        }
-                    } catch {
-                        return .error(PDMDownloadError.downloadFailed("Hash validation read error"))
-                    }
-                }
-
-                rangeAvailabilityHandler?(segment.endByte + 1, false)
-                return .completed
-
-            case .error(let errorCode):
-                aamd.updateSegmentData(segment: segmentIndex, bytesDownloaded: bytesDownloaded)
-                segmentComm.closeStream()
-
-                if state.current == .paused {
-                    return .paused(bytesDownloaded: bytesDownloaded)
-                }
-                if state.current == .cancelled {
-                    return .cancelled
-                }
-
-                return .error(PDMDownloadError(
-                    code: errorCode,
-                    message: "Segment \(segment.index) download error"
-                ))
-            }
+            return transferFailure(error)
         }
     }
 
+    private func transferFailure(_ error: Error) -> PDMDownloadResult {
+        if let interrupted = interruptionResult(bytesDownloaded: progressTracker.currentDownloadedBytes) { return interrupted }
+        if DownloadTaskExecution.isCancellation(error) { return .cancelled }
+        if let error = error as? PDMDownloadError { return .error(error) }
+        return .error(PDMDownloadError(code: PDMErrorHandler.classify(error), message: error.localizedDescription, underlying: error))
+    }
+
+    private func validateCompletedSegment(
+        _ segment: PDMSegment,
+        segmentIndex: Int,
+        destinationURL: URL,
+        aamd: AAMDFileManager
+    ) async -> PDMDownloadResult {
+        if let interrupted = interruptionResult(bytesDownloaded: segment.size) { return interrupted }
+        if !segment.expectedHash.isEmpty, let info = validationInfo {
+            do {
+                guard try await PDMDownloadIO.validate({ [self] in
+                    try validationManager.validateSegment(
+                        fileURL: destinationURL, startByte: segment.startByte,
+                        segmentSize: segment.size, expectedHash: segment.expectedHash, algorithm: info.algorithm
+                    )
+                }) else { throw PDMDownloadError.segmentValidationFailed(segment.index) }
+            } catch {
+                _ = try? await PDMDownloadIO.run {
+                    aamd.updateSegmentData(segment: segmentIndex, bytesDownloaded: 0) && aamd.synchronize()
+                }
+                progressTracker.addDownloadedBytes(-segment.size)
+                return .error(PDMDownloadError(code: .segmentValidationFailed, message: error.localizedDescription))
+            }
+        }
+        if let interrupted = interruptionResult(bytesDownloaded: segment.size) { return interrupted }
+        rangeAvailabilityHandler?(segment.endByte + 1, false)
+        return .completed
+    }
+
+    private func validateResponseIdentity(_ response: PDMHTTPResponse) -> PDMDownloadError? {
+        if !etag.isEmpty && (response.etag ?? "") != etag {
+            return PDMDownloadError.downloadFailed("Remote ETag changed or disappeared during download")
+        }
+        return nil
+    }
+
     private func validateDownloadResponse(
-        communicator: PDMHttpCommunicator,
+        response: PDMHTTPResponse,
         expectedStart: Int64,
         expectedEnd: Int64,
         expectedTotalSize: Int64,
         allowFullResponse: Bool
     ) -> PDMDownloadError? {
-        let statusCode = communicator.lastResponseStatusCode
-        guard statusCode != 0 else {
-            return nil
-        }
-
+        let statusCode = response.statusCode
+        if let identityError = validateResponseIdentity(response) { return identityError }
         if statusCode == 206 {
+            if response.contentLength > 0 && response.contentLength != expectedEnd - expectedStart + 1 {
+                return PDMDownloadError.downloadFailed("Response length does not match requested range")
+            }
             guard contentRangeMatches(
-                communicator.lastContentRange,
+                (response.contentRange ?? ""),
                 expectedStart: expectedStart,
                 expectedEnd: expectedEnd,
                 expectedTotalSize: expectedTotalSize
             ) else {
-                return PDMDownloadError.downloadFailed("Invalid Content-Range: \(communicator.lastContentRange)")
+                return PDMDownloadError.downloadFailed("Invalid Content-Range: \((response.contentRange ?? ""))")
             }
             return nil
         }
 
         if allowFullResponse && expectedStart == 0 && statusCode == 200 {
+            if response.contentLength > 0 && response.contentLength != expectedTotalSize {
+                return PDMDownloadError.downloadFailed("Response length does not match asset size")
+            }
             return nil
         }
 
@@ -994,29 +651,6 @@ final class PDMAssetDownloadManager {
         }
 
         return PDMDownloadError.downloadFailed("Unexpected HTTP status \(statusCode) for range \(expectedStart)-\(expectedEnd)")
-    }
-
-    private func writeBuffer(
-        _ buffer: UnsafeMutablePointer<UInt8>,
-        count: Int,
-        to fileHandle: FileHandle
-    ) throws {
-        var written = 0
-        let descriptor = fileHandle.fileDescriptor
-
-        while written < count {
-            let result = Darwin.write(descriptor, buffer.advanced(by: written), count - written)
-            if result > 0 {
-                written += result
-                continue
-            }
-
-            if result == -1 && errno == EINTR {
-                continue
-            }
-
-            throw PDMDownloadError.downloadFailed(String(cString: strerror(errno)))
-        }
     }
 
     private func contentRangeMatches(
@@ -1042,11 +676,9 @@ final class PDMAssetDownloadManager {
             return false
         }
 
-        if rangeAndTotal[1] != "*",
-           let actualTotal = Int64(rangeAndTotal[1]),
-           expectedTotalSize > 0,
-           actualTotal != expectedTotalSize {
-            return false
+        if rangeAndTotal[1] != "*" {
+            guard let actualTotal = Int64(rangeAndTotal[1]), actualTotal > actualEnd,
+                  expectedTotalSize <= 0 || actualTotal == expectedTotalSize else { return false }
         }
 
         return actualStart == expectedStart && actualEnd == expectedEnd

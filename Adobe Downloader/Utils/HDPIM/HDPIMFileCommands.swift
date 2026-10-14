@@ -52,26 +52,46 @@ private func removeEmptyDirectoryIfExists(at path: String) async throws {
     }
 }
 
-private func isProtectedRecursiveDeleteRoot(_ path: String) -> Bool {
-    let trimmedPath = path.trimmingCharacters(in: .whitespacesAndNewlines)
-    guard !trimmedPath.isEmpty else {
-        return true
+enum HDPIMRemovalPolicy {
+    struct PreflightChecker {
+        private let protectedRoots: Set<String>
+
+        init() {
+            let table = HDPIMPropertyTable()
+            table.setupSystemDirectories()
+            var roots = Set(["/", "/Applications", "/Library", "/System", "/Users", "/usr", "/var", "/bin", "/sbin",
+                             "/etc", "/private", "/usr/local", "/tmp", "/private/tmp", "/Volumes"])
+            var visited = Set<String>()
+            for value in table.allProperties.values where value.hasPrefix("/") {
+                var parent = URL(fileURLWithPath: value).standardizedFileURL
+                while parent.path != "/" {
+                    guard visited.insert(parent.path).inserted else { break }
+                    roots.insert(parent.path)
+                    roots.insert(parent.resolvingSymlinksInPath().path)
+                    parent.deleteLastPathComponent()
+                }
+            }
+            protectedRoots = Set(roots.map { $0.lowercased() })
+        }
+
+        func isProtected(_ path: String) -> Bool {
+            let url = URL(fileURLWithPath: path).standardizedFileURL
+            let resolved = url.resolvingSymlinksInPath()
+            if protectedRoots.contains(url.path.lowercased()) || protectedRoots.contains(resolved.path.lowercased()) { return true }
+            var info = stat()
+            var parentInfo = stat()
+            let parent = resolved.deletingLastPathComponent().path
+            return stat(resolved.path, &info) == 0 && stat(parent, &parentInfo) == 0 && info.st_dev != parentInfo.st_dev
+        }
     }
 
-    let normalized = URL(fileURLWithPath: trimmedPath).standardizedFileURL.path
-        .trimmingCharacters(in: CharacterSet(charactersIn: "/"))
-    let normalizedPath = "/" + normalized
-    return [
-        "/",
-        "/Library",
-        "/Library/Application Support",
-        "/Library/Application Support/Adobe",
-        "/Applications",
-        HDPIMRuntimeEnvironment.userHomeDirectory(),
-        HDPIMRuntimeEnvironment.userHomeDirectory() + "/Library",
-        HDPIMRuntimeEnvironment.userHomeDirectory() + "/Library/Application Support",
-        HDPIMRuntimeEnvironment.userHomeDirectory() + "/Library/Preferences"
-    ].contains(normalizedPath)
+    static func isProtected(_ path: String) -> Bool {
+        PreflightChecker().isProtected(path)
+    }
+}
+
+private func isProtectedRecursiveDeleteRoot(_ path: String) -> Bool {
+    HDPIMRemovalPolicy.isProtected(path)
 }
 
 private func ensureParentDirectoryExists(for path: String) async throws {
@@ -165,15 +185,16 @@ private func makeDeleteEntry(
     return HDPIMDeleteEntry(
         targetPath: pimxTargetPath,
         isDirectory: isDirectory,
-        isRecursiveDelete: isUserPreferences,
-        isUserPreferences: isUserPreferences
+        isRecursiveDelete: false,
+        isUserPreferences: isUserPreferences,
+        actualTargetPath: actualTargetPath
     )
 }
 
 private func isDirectoryDeleteTarget(_ path: String) -> Bool {
-    var isDirectory: ObjCBool = false
-    if FileManager.default.fileExists(atPath: path, isDirectory: &isDirectory) {
-        return isDirectory.boolValue
+    var info = stat()
+    if lstat(path, &info) == 0 {
+        return (info.st_mode & S_IFMT) == S_IFDIR
     }
 
     return URL(fileURLWithPath: path).pathExtension.lowercased() == "app"
@@ -235,7 +256,7 @@ class MergeDirectoryCommand: HDPIMCommand {
         try await ensureDirectoryExists(at: target)
 
         guard let enumerator = FileManager.default.enumerator(atPath: source) else {
-            return
+            throw HDPIMCommandError.fileNotFound
         }
 
         while let relativePath = enumerator.nextObject() as? String {
@@ -243,8 +264,9 @@ class MergeDirectoryCommand: HDPIMCommand {
 
             let itemURL = URL(fileURLWithPath: source, isDirectory: true).appendingPathComponent(relativePath)
             let targetURL = URL(fileURLWithPath: target, isDirectory: true).appendingPathComponent(relativePath)
-            let resourceValues = try? itemURL.resourceValues(forKeys: [.isDirectoryKey])
-            let isDirectory = resourceValues?.isDirectory ?? false
+            let resourceValues = try itemURL.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey])
+            let isSymbolicLink = resourceValues.isSymbolicLink == true
+            let isDirectory = resourceValues.isDirectory == true && !isSymbolicLink
 
             if isDirectory {
                 try await ensureDirectoryExists(at: targetURL.path)
@@ -315,7 +337,7 @@ class BlindCopyCommand: HDPIMCommand {
 
     func execute() async throws {
         if HDPIMCommandExecutor.pathExists(source) {
-            try? await copyItemReplacing(source: source, target: target)
+            try await copyItemReplacing(source: source, target: target)
             didCopy = true
         }
     }
@@ -371,7 +393,12 @@ class DeleteFileCommand: HDPIMCommand {
     }
 
     func execute() async throws {
-        try? await removeItemIfExists(at: target)
+        guard !HDPIMRemovalPolicy.isProtected(target) else { throw HDPIMCommandError.targetConflict }
+        var info = stat()
+        if lstat(target, &info) == 0, info.st_mode & S_IFMT == S_IFDIR {
+            throw HDPIMCommandError.targetConflict
+        }
+        try await removeItemIfExists(at: target)
     }
 
     func rollBack() async throws { }
@@ -391,15 +418,13 @@ class DeleteDirectoryCommand: HDPIMCommand {
     }
 
     func execute() async throws {
-        if isRecursiveDelete || isUserPreferences {
-            guard !isProtectedRecursiveDeleteRoot(source) else {
-                return
-            }
-            try? await removeItemIfExists(at: source)
+        guard !isProtectedRecursiveDeleteRoot(source) else { throw HDPIMCommandError.targetConflict }
+        if isRecursiveDelete {
+            try await removeItemIfExists(at: source)
             return
         }
 
-        try? await removeEmptyDirectoryIfExists(at: source)
+        try await removeEmptyDirectoryIfExists(at: source)
     }
 
     func rollBack() async throws { }
@@ -445,5 +470,62 @@ class CreateSymlinkCommand: HDPIMCommand {
             return []
         }
         return [makeDeleteEntry(pimxTargetPath: pimxTargetPath, actualTargetPath: target, isDirectory: false)]
+    }
+}
+
+final class UnlockPathCommand: HDPIMCommand {
+    let path: String
+    let active: Bool
+    var commandName: String { "UnlockPath" }
+    var commandDetails: String? { path }
+    init(path: String, active: Bool) { self.path = path; self.active = active }
+    func execute() async throws {
+        guard active, FileManager.default.fileExists(atPath: path) else { return }
+        try FileManager.default.setAttributes([.immutable: false], ofItemAtPath: path)
+    }
+    func rollBack() async throws { }
+    func getPimxCommandFragments() -> [HDPIMPimxCommandFragment] {
+        let value = path.replacingOccurrences(of: "&", with: "&amp;").replacingOccurrences(of: "<", with: "&lt;")
+            .replacingOccurrences(of: ">", with: "&gt;")
+        return [.init(xml: "<UnlockPath><Path>\(value)</Path></UnlockPath>", kind: .uninstall)]
+    }
+}
+
+final class LocalizeFileCommand: HDPIMCommand {
+    let source: String
+    let target: String
+    var commandName: String { "LocalizeFileName" }
+    var commandDetails: String? { "\(source) → \(target)" }
+    init(source: String, target: String) { self.source = source; self.target = target }
+    func execute() async throws {
+        guard FileManager.default.fileExists(atPath: source) else { throw HDPIMCommandError.fileNotFound }
+        guard !FileManager.default.fileExists(atPath: target) else { throw HDPIMCommandError.targetConflict }
+        try FileManager.default.moveItem(atPath: source, toPath: target)
+    }
+    func rollBack() async throws { }
+}
+
+final class MacAliasCommand: HDPIMCommand {
+    let target: String
+    let path: String
+    let isPermanent: Bool
+    private var created = false
+    var commandName: String { "Shortcut" }
+    var commandDetails: String? { path }
+    init(target: String, path: String, isPermanent: Bool) {
+        self.target = target; self.path = path; self.isPermanent = isPermanent
+    }
+    func execute() async throws {
+        try await ensureParentDirectoryExists(for: path)
+        let bookmark = try URL(fileURLWithPath: target).bookmarkData(options: .suitableForBookmarkFile,
+                                                                    includingResourceValuesForKeys: nil, relativeTo: nil)
+        try await removeItemIfExists(at: path)
+        try URL.writeBookmarkData(bookmark, to: URL(fileURLWithPath: path))
+        created = true
+    }
+    func rollBack() async throws { }
+    func getDeleteEntries() -> [HDPIMDeleteEntry] {
+        guard created, !isPermanent else { return [] }
+        return [makeDeleteEntry(pimxTargetPath: path, actualTargetPath: path, isDirectory: false)]
     }
 }

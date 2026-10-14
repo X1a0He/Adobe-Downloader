@@ -10,23 +10,6 @@ private func shellQuotedSystemCommand(_ value: String) -> String {
     "'" + value.replacingOccurrences(of: "'", with: "'\"'\"'") + "'"
 }
 
-private func userNameForHDPIMRunProgram() -> String? {
-    guard let userHome = ProcessInfo.processInfo.environment[HDPIMHeadlessInstallRunner.userHomeEnvironmentKey],
-          !userHome.isEmpty else {
-        return nil
-    }
-
-    let userName = URL(fileURLWithPath: userHome).lastPathComponent
-    return userName.isEmpty ? nil : userName
-}
-
-private func uidForUserName(_ userName: String) -> uid_t? {
-    guard let record = getpwnam(userName) else {
-        return nil
-    }
-    return record.pointee.pw_uid
-}
-
 private func xmlEscapedPIMXValue(_ value: String) -> String {
     value
         .replacingOccurrences(of: "&", with: "&amp;")
@@ -54,7 +37,7 @@ private func resolvedPIMXInvocationValues(
 private func renderUninstallFragment(_ invocation: PIMXProgramInvocation) -> String {
     let values = resolvedPIMXInvocationValues(invocation)
 
-    var lines = ["<UninstallCommand>"]
+    var lines = ["<UninstallCommand runInUserMode=\"\(invocation.runInUserMode)\">"]
     lines.append("            <Path>\(xmlEscapedPIMXValue(values.path))</Path>")
     if !values.arguments.isEmpty {
         lines.append("            <Arguments>")
@@ -78,7 +61,7 @@ private func renderRepairFragment(_ invocation: PIMXProgramInvocation) -> String
     }
 
     var lines = ["<RunProgram>"]
-    lines.append("            <InstallCommand>")
+    lines.append("            <InstallCommand runInUserMode=\"\(invocation.runInUserMode)\">")
     lines.append("                <Path>\(xmlEscapedPIMXValue(path))</Path>")
     if !arguments.isEmpty {
         lines.append("                <Arguments>")
@@ -117,6 +100,8 @@ class RunProgramCommand: HDPIMCommand {
             return
         }
 
+        try HDPIMRepairResources.validatePersistentReferences(in: execution)
+
         var executablePath = execution.path
         if !FileManager.default.fileExists(atPath: executablePath) {
             if let stagingFolder = ProcessInfo.processInfo.environment[HDPIMHeadlessInstallRunner.stagingFolderEnvironmentKey] {
@@ -147,15 +132,9 @@ class RunProgramCommand: HDPIMCommand {
         let result: HDPIMShellExecutionResult
         if execution.runInUserMode {
             print("[RunProgram] 使用直接执行模式（用户态）")
-            if getuid() == 0,
-               let userName = userNameForHDPIMRunProgram(),
-               let uid = uidForUserName(userName) {
-                result = try await executeAsUser(
-                    userName: userName,
-                    uid: uid,
-                    path: executablePath,
-                    arguments: execution.arguments
-                )
+            let user = try HDPIMUserExecutionContext.resolve()
+            if geteuid() == 0 {
+                result = try await executeAsUser(user: user, path: executablePath, arguments: execution.arguments)
             } else {
                 result = try await executeDirectly(path: executablePath, arguments: execution.arguments)
             }
@@ -185,58 +164,20 @@ class RunProgramCommand: HDPIMCommand {
     }
 
     private func executeAsUser(
-        userName: String,
-        uid: uid_t,
+        user: HDPIMUserExecutionContext,
         path: String,
         arguments: [String]
     ) async throws -> HDPIMShellExecutionResult {
-        let fullCommand = ([path] + arguments)
-            .map(shellQuotedSystemCommand)
-            .joined(separator: " ")
-        let command = "/bin/launchctl asuser \(uid) /usr/bin/sudo -u \(shellQuotedSystemCommand(userName)) \(fullCommand)"
-        return try await HDPIMCommandExecutor.executeShellResult(command)
+        try await HDPIMProcessRunner.run(
+            executable: "/bin/launchctl",
+            arguments: ["asuser", String(user.uid), "/usr/bin/sudo", "-n", "-H", "-u", user.name, "--",
+                        "/usr/bin/env", "HOME=\(user.home)", "USER=\(user.name)", "LOGNAME=\(user.name)",
+                        path] + arguments
+        )
     }
 
     private func executeDirectly(path: String, arguments: [String]) async throws -> HDPIMShellExecutionResult {
-        return try await withCheckedThrowingContinuation { continuation in
-            DispatchQueue.global(qos: .userInitiated).async {
-                let task = Process()
-                let stdout = Pipe()
-                let stderr = Pipe()
-                task.launchPath = path
-                task.arguments = arguments
-                task.standardOutput = stdout
-                task.standardError = stderr
-                task.environment = ProcessInfo.processInfo.environment
-
-                do {
-                    task.launch()
-                    task.waitUntilExit()
-
-                    let outputData = stdout.fileHandleForReading.readDataToEndOfFile()
-                    let errorData = stderr.fileHandleForReading.readDataToEndOfFile()
-                    let output = String(data: outputData, encoding: .utf8) ?? ""
-                    let errorOutput = String(data: errorData, encoding: .utf8) ?? ""
-                    let resultOutput = [output, errorOutput]
-                        .filter { !$0.isEmpty }
-                        .joined(separator: "\n")
-                        .trimmingCharacters(in: .whitespacesAndNewlines)
-                    continuation.resume(returning: HDPIMShellExecutionResult(
-                        output: resultOutput,
-                        exitCode: task.terminationStatus
-                    ))
-                } catch {
-                    print("[RunProgram] 执行失败: \(path)")
-                    print("[RunProgram] 错误描述: \(error.localizedDescription)")
-                    if let nsError = error as NSError? {
-                        print("[RunProgram] 错误域: \(nsError.domain)")
-                        print("[RunProgram] 错误码: \(nsError.code)")
-                        print("[RunProgram] 错误信息: \(nsError.userInfo)")
-                    }
-                    continuation.resume(throwing: error)
-                }
-            }
-        }
+        try await HDPIMProcessRunner.run(executable: path, arguments: arguments)
     }
 
     private func ensureExecutablePermissions(_ path: String) throws {
@@ -261,36 +202,16 @@ class RunProgramCommand: HDPIMCommand {
     }
 
     private func executeViaShell(command: String) async throws -> HDPIMShellExecutionResult {
-        return try await withCheckedThrowingContinuation { continuation in
-            DispatchQueue.global(qos: .userInitiated).async {
-                let task = Process()
-                let stdout = Pipe()
-                let stderr = Pipe()
-                task.launchPath = "/bin/sh"
-                task.arguments = ["-c", command]
-                task.standardOutput = stdout
-                task.standardError = stderr
-
-                task.launch()
-                task.waitUntilExit()
-
-                let outputData = stdout.fileHandleForReading.readDataToEndOfFile()
-                let errorData = stderr.fileHandleForReading.readDataToEndOfFile()
-                let output = String(data: outputData, encoding: .utf8) ?? ""
-                let errorOutput = String(data: errorData, encoding: .utf8) ?? ""
-                let resultOutput = [output, errorOutput]
-                    .filter { !$0.isEmpty }
-                    .joined(separator: "\n")
-                    .trimmingCharacters(in: .whitespacesAndNewlines)
-                continuation.resume(returning: HDPIMShellExecutionResult(
-                    output: resultOutput,
-                    exitCode: task.terminationStatus
-                ))
-            }
-        }
+        try await HDPIMProcessRunner.run(executable: "/bin/sh", arguments: ["-c", command])
     }
 
-    func rollBack() async throws { }
+    func rollBack() async throws {
+        guard execution != nil else { return }
+        guard let uninstall else {
+            throw HDPIMInstallError.rollbackFailed("RunProgram 未声明恢复动作：\(execution?.path ?? "")")
+        }
+        try await RunProgramCommand(execution: uninstall, repair: nil, uninstall: nil).execute()
+    }
 
     func getPimxCommandFragments() -> [HDPIMPimxCommandFragment] {
         var fragments: [HDPIMPimxCommandFragment] = []
@@ -341,6 +262,7 @@ class RegisterApplicationCommand: HDPIMCommand {
 class SetDisplayAttributesCommand: HDPIMCommand {
     let target: String
     let icon: String
+    private var didSetIcon = false
     var commandName: String { "SetDisplayAttributes" }
 
     init(target: String, icon: String) {
@@ -349,6 +271,7 @@ class SetDisplayAttributesCommand: HDPIMCommand {
     }
 
     func execute() async throws {
+        didSetIcon = false
         let targetURL = URL(fileURLWithPath: target)
         let iconURL = URL(fileURLWithPath: icon)
 
@@ -358,9 +281,16 @@ class SetDisplayAttributesCommand: HDPIMCommand {
         }
 
         if let image = NSImage(contentsOf: iconURL) {
-            NSWorkspace.shared.setIcon(image, forFile: targetURL.path)
+            didSetIcon = NSWorkspace.shared.setIcon(image, forFile: targetURL.path)
         }
     }
 
     func rollBack() async throws { }
+
+    func getDeleteEntries() -> [HDPIMDeleteEntry] {
+        guard didSetIcon else { return [] }
+        let path = URL(fileURLWithPath: target).appendingPathComponent("Icon\r").path
+        return [HDPIMDeleteEntry(targetPath: path, isDirectory: false,
+                                isRecursiveDelete: false, isUserPreferences: false, actualTargetPath: path)]
+    }
 }

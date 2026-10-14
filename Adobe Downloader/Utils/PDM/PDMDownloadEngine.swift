@@ -9,8 +9,9 @@ final class PDMDownloadEngine {
 
     static let shared = PDMDownloadEngine()
 
-    private var activeManagers: [String: PDMAssetDownloadManager] = [:]
-    private let managersLock = NSLock()
+    private var activeExecutions: [String: PDMDownloadExecution] = [:]
+    private var destinationOwners: [String: UUID] = [:]
+    private let executionsLock = NSLock()
 
     private init() {}
 
@@ -23,35 +24,65 @@ final class PDMDownloadEngine {
         expectedTotalSize: Int64 = 0,
         validationURL: String? = nil,
         validationURLs: [String] = [],
-        progressHandler: ((Int64, Int64, Double) -> Void)?,
+        validationInfo: ValidationInfo? = nil,
+        artifactIdentity: DownloadArtifactStore.Identity? = nil,
+        progressHandler: PDMProgressTracker.ProgressCallback?,
         rangeAvailabilityHandler: ((Int64, Bool) -> Void)? = nil
     ) async -> PDMDownloadResult {
+        let execution = PDMDownloadExecution(packageId: packageId, destinationURL: destinationURL)
+        guard register(execution) else {
+            return .error(PDMDownloadError.downloadFailed("Another download still owns this package or destination"))
+        }
+        defer { finish(execution) }
 
-        let headerTuples = headers.map { ($0.key, $0.value) }
-        let enrichedHeaders = enrichHeaders(headerTuples)
-
-        if let existingManager = getManager(packageId), existingManager.state.current == .paused {
-            let result = await existingManager.resumeDownload(
+        return await withTaskCancellationHandler {
+            if Task.isCancelled { execution.requestStop(.cancelled) }
+            let result = await performDownload(
+                execution: execution,
+                url: url,
+                destinationURL: destinationURL,
+                metadataDirectory: metadataDirectory,
+                headers: headers,
+                expectedTotalSize: expectedTotalSize,
+                validationURL: validationURL,
+                validationURLs: validationURLs,
+                inlineValidation: validationInfo,
+                artifactIdentity: artifactIdentity,
                 progressHandler: progressHandler,
                 rangeAvailabilityHandler: rangeAvailabilityHandler
             )
-            switch result {
-            case .completed, .cancelled:
-                removeManager(packageId)
-            case .paused:
-                break
-            case .error:
-                removeManager(packageId)
-            }
+            let aamd = AAMDFileManager(downloadFileURL: destinationURL, metadataDirectory: metadataDirectory)
+            if let stopped = stoppedResult(execution, aamd: aamd) { return stopped }
+            if case .error = result { _ = execution.state.compareAndSet(expected: .running, new: .error) }
             return result
+        } onCancel: {
+            execution.requestStop(.cancelled)
         }
+    }
 
-        let communicator = PDMHttpCommunicator()
-        var totalSize: Int64 = 0
-        var etag = ""
-        var validationInfo: ValidationInfo? = nil
+    private func performDownload(
+        execution: PDMDownloadExecution,
+        url: URL,
+        destinationURL: URL,
+        metadataDirectory: URL?,
+        headers: [String: String],
+        expectedTotalSize: Int64,
+        validationURL: String?,
+        validationURLs: [String],
+        inlineValidation: ValidationInfo?,
+        artifactIdentity: DownloadArtifactStore.Identity?,
+        progressHandler: PDMProgressTracker.ProgressCallback?,
+        rangeAvailabilityHandler: ((Int64, Bool) -> Void)?
+    ) async -> PDMDownloadResult {
+        let requestLimit = await MainActor.run { max(1, StorageData.shared.maxConcurrentDownloads) }
+        let enrichedHeaders = enrichHeaders(headers.map { ($0.key, $0.value) })
+        let communicator = PDMHttpCommunicator(cancellation: execution.cancellation)
+        let aamd = AAMDFileManager(downloadFileURL: destinationURL, metadataDirectory: metadataDirectory)
+        if let stopped = stoppedResult(execution, aamd: aamd) { return stopped }
 
-        let sizeResponse = communicator.sendRequest(PDMHTTPRequestConfig(
+        let sizeResponse: PDMHTTPResponse
+        do {
+            sizeResponse = try await communicator.sendRequest(PDMHTTPRequestConfig(
             url: url.absoluteString,
             method: "HEAD",
             headers: enrichedHeaders,
@@ -59,46 +90,55 @@ final class PDMDownloadEngine {
             autoRedirect: true,
             validateSSL: true,
             timeoutSeconds: 30
-        ))
+            ))
+        } catch {
+            if let stopped = stoppedResult(execution, aamd: aamd) { return stopped }
+            if Task.isCancelled { return .cancelled }
+            sizeResponse = PDMHTTPResponse(statusCode: -1)
+        }
+        if let stopped = stoppedResult(execution, aamd: aamd) { return stopped }
 
-        if sizeResponse.isSuccess {
-            totalSize = sizeResponse.contentLength
-            etag = sizeResponse.headers["ETag"] ?? sizeResponse.headers["etag"] ?? ""
+        var totalSize = sizeResponse.isSuccess ? sizeResponse.contentLength : 0
+        let etag = sizeResponse.isSuccess ? (sizeResponse.etag ?? "") : ""
+        if totalSize > 0, expectedTotalSize > 0, totalSize != expectedTotalSize {
+            return .error(PDMDownloadError.downloadFailed("Remote size differs from declared asset size"))
+        }
+        if totalSize <= 0 { totalSize = expectedTotalSize }
+        if !sizeResponse.isSuccess, let snapshot = aamd.resumeSnapshot(), snapshot.downloadedBytes > 0 {
+            return .error(PDMDownloadError.downloadFailed("Cannot verify remote identity before resuming download"))
         }
 
-        if totalSize <= 0, expectedTotalSize > 0 {
-            totalSize = expectedTotalSize
+        var validationInfo = inlineValidation
+        if let info = inlineValidation {
+            guard let size = validationTotalSize(info),
+                  (expectedTotalSize <= 0 || size == expectedTotalSize),
+                  (totalSize <= 0 || size == totalSize) else {
+                return .error(PDMDownloadError(code: .signatureValidationFailed, message: "Inline validation does not match asset geometry"))
+            }
+            if totalSize <= 0 { totalSize = size }
         }
-
-        let validationCandidates = normalizedValidationCandidates(
-            primary: validationURL,
-            candidates: validationURLs
-        )
-
-        if !validationCandidates.isEmpty {
-            let validationMgr = PDMValidationManager(communicator: communicator)
-            for validationURLString in validationCandidates {
-                guard let info = validationMgr.fetchValidationInfo(
-                    from: validationURLString,
-                    headers: enrichedHeaders
-                ) else {
+        let candidates = normalizedValidationCandidates(primary: validationURL, candidates: validationURLs)
+        if validationInfo == nil, !candidates.isEmpty {
+            let validationManager = PDMValidationManager(communicator: communicator)
+            for candidate in candidates {
+                if let stopped = stoppedResult(execution, aamd: aamd) { return stopped }
+                let fetched: ValidationInfo?
+                do {
+                    fetched = try await validationManager.fetchValidationInfo(from: candidate, headers: enrichedHeaders)
+                } catch {
+                    if let stopped = stoppedResult(execution, aamd: aamd) { return stopped }
+                    if Task.isCancelled { return .cancelled }
                     continue
                 }
-
-                let validationSize = validationTotalSize(info)
-                if expectedTotalSize > 0, validationSize > 0, validationSize != expectedTotalSize {
-                    continue
-                }
-                if totalSize > 0, validationSize > 0, validationSize != totalSize {
-                    continue
-                }
-
+                guard let info = fetched,
+                      let size = validationTotalSize(info),
+                      (expectedTotalSize <= 0 || size == expectedTotalSize),
+                      (totalSize <= 0 || size == totalSize) else { continue }
                 validationInfo = info
-                if totalSize <= 0, validationSize > 0 {
-                    totalSize = validationSize
-                }
+                if totalSize <= 0 { totalSize = size }
                 break
             }
+            if let stopped = stoppedResult(execution, aamd: aamd) { return stopped }
             guard validationInfo != nil else {
                 return .error(PDMDownloadError(
                     code: .signatureValidationFailed,
@@ -107,109 +147,136 @@ final class PDMDownloadEngine {
             }
         }
 
-        let bluestreakConfig = PDMBluestreakConfig(
+        let config = PDMBluestreakConfig(
             downloadEnabled: true,
             extractionV2Enabled: false,
-            maxSegments: StorageData.shared.maxConcurrentDownloads,
+            maxSegments: min(3, requestLimit),
             segmentSize: validationInfo?.segmentSize ?? (2 * 1024 * 1024),
             isAutoUpdate: false,
             isLowBandwidthMode: false
         )
-
         let manager = PDMAssetDownloadManager(
             communicator: communicator,
-            bluestreakConfig: bluestreakConfig
+            bluestreakConfig: config,
+            state: execution.state,
+            cancellation: execution.cancellation
         )
-
-        setManager(packageId, manager: manager)
-
-        let result = await manager.downloadFile(
+        return await manager.downloadFile(
             url: url,
             destinationURL: destinationURL,
             metadataDirectory: metadataDirectory,
             headers: enrichedHeaders,
             totalSize: totalSize,
             validationInfo: validationInfo,
+            artifactIdentity: artifactIdentity,
             etag: etag,
-            progressHandler: progressHandler,
-            rangeAvailabilityHandler: rangeAvailabilityHandler
+            progressHandler: { [weak self] downloaded, total, speed, phase in
+                guard let self, self.isCurrent(execution), execution.state.current == .running else { return }
+                progressHandler?(downloaded, total, speed, phase)
+            },
+            rangeAvailabilityHandler: { [weak self] bytes, complete in
+                guard let self, self.isCurrent(execution),
+                      execution.state.current == .running || (complete && execution.state.current == .completed) else { return }
+                rangeAvailabilityHandler?(bytes, complete)
+            }
         )
+    }
 
-        switch result {
-        case .completed, .cancelled:
-            removeManager(packageId)
-        case .paused:
-            break
-        case .error:
-            removeManager(packageId)
+    private func stoppedResult(_ execution: PDMDownloadExecution, aamd: AAMDFileManager) -> PDMDownloadResult? {
+        switch execution.state.current {
+        case .paused: return .paused(bytesDownloaded: aamd.resumeSnapshot()?.downloadedBytes ?? 0)
+        case .cancelled: return .cancelled
+        default: return nil
         }
-
-        return result
     }
 
     private func normalizedValidationCandidates(primary: String?, candidates: [String]) -> [String] {
         var result: [String] = []
         for value in [primary].compactMap({ $0 }) + candidates {
             let normalized = value.trimmingCharacters(in: .whitespacesAndNewlines)
-            if !normalized.isEmpty, !result.contains(normalized) {
-                result.append(normalized)
-            }
+            if !normalized.isEmpty, !result.contains(normalized) { result.append(normalized) }
         }
         return result
     }
 
-    private func validationTotalSize(_ info: ValidationInfo) -> Int64 {
-        guard info.segmentCount > 0, info.segmentSize > 0 else {
-            return 0
-        }
-        let lastSegmentSize = info.lastSegmentSize > 0 ? info.lastSegmentSize : info.segmentSize
-        return Int64(max(0, info.segmentCount - 1)) * info.segmentSize + lastSegmentSize
+    private func validationTotalSize(_ info: ValidationInfo) -> Int64? {
+        guard info.segmentSize > 0, info.segmentCount > 0,
+              info.lastSegmentSize > 0, info.lastSegmentSize <= info.segmentSize,
+              !info.algorithm.isEmpty,
+              info.segments.count == info.segmentCount,
+              Set(info.segments.map(\.segmentNumber)).count == info.segmentCount,
+              info.segments.allSatisfy({ (1...info.segmentCount).contains($0.segmentNumber) && !$0.hash.isEmpty }) else { return nil }
+        let (prefix, overflow) = Int64(info.segmentCount - 1).multipliedReportingOverflow(by: info.segmentSize)
+        let (size, totalOverflow) = prefix.addingReportingOverflow(info.lastSegmentSize)
+        return overflow || totalOverflow ? nil : size
     }
 
     func pause(packageId: String) {
-        getManager(packageId)?.pause()
+        getExecution(packageId)?.requestStop(.paused)
     }
 
     func cancelDownload(packageId: String) {
-        getManager(packageId)?.cancelDownload()
-        removeManager(packageId)
+        getExecution(packageId)?.requestStop(.cancelled)
+    }
+
+    func pauseAndWait(packageId: String) async {
+        guard let execution = getExecution(packageId) else { return }
+        execution.requestStop(.paused)
+        await execution.waitUntilFinished()
+    }
+
+    func cancelAndWait(packageId: String) async {
+        guard let execution = getExecution(packageId) else { return }
+        execution.requestStop(.cancelled)
+        await execution.waitUntilFinished()
     }
 
     func pauseAll() {
-        managersLock.lock()
-        let managers = Array(activeManagers.values)
-        managersLock.unlock()
-        for manager in managers {
-            manager.pause()
-        }
+        for execution in allExecutions() { execution.requestStop(.paused) }
     }
 
     func cancelAll() {
-        managersLock.lock()
-        let managers = activeManagers
-        activeManagers.removeAll()
-        managersLock.unlock()
-        for (_, manager) in managers {
-            manager.cancelDownload()
+        for execution in allExecutions() { execution.requestStop(.cancelled) }
+    }
+
+    private func register(_ execution: PDMDownloadExecution) -> Bool {
+        executionsLock.lock()
+        defer { executionsLock.unlock() }
+        guard activeExecutions[execution.packageId] == nil,
+              destinationOwners[execution.destinationPath] == nil else { return false }
+        activeExecutions[execution.packageId] = execution
+        destinationOwners[execution.destinationPath] = execution.id
+        return true
+    }
+
+    private func finish(_ execution: PDMDownloadExecution) {
+        executionsLock.lock()
+        if activeExecutions[execution.packageId]?.id == execution.id {
+            activeExecutions.removeValue(forKey: execution.packageId)
         }
+        if destinationOwners[execution.destinationPath] == execution.id {
+            destinationOwners.removeValue(forKey: execution.destinationPath)
+        }
+        executionsLock.unlock()
+        execution.finish()
     }
 
-    private func getManager(_ packageId: String) -> PDMAssetDownloadManager? {
-        managersLock.lock()
-        defer { managersLock.unlock() }
-        return activeManagers[packageId]
+    private func getExecution(_ packageId: String) -> PDMDownloadExecution? {
+        executionsLock.lock()
+        defer { executionsLock.unlock() }
+        return activeExecutions[packageId]
     }
 
-    private func setManager(_ packageId: String, manager: PDMAssetDownloadManager) {
-        managersLock.lock()
-        defer { managersLock.unlock() }
-        activeManagers[packageId] = manager
+    private func allExecutions() -> [PDMDownloadExecution] {
+        executionsLock.lock()
+        defer { executionsLock.unlock() }
+        return Array(activeExecutions.values)
     }
 
-    private func removeManager(_ packageId: String) {
-        managersLock.lock()
-        defer { managersLock.unlock() }
-        activeManagers.removeValue(forKey: packageId)
+    private func isCurrent(_ execution: PDMDownloadExecution) -> Bool {
+        executionsLock.lock()
+        defer { executionsLock.unlock() }
+        return activeExecutions[execution.packageId]?.id == execution.id
     }
 
     private func enrichHeaders(_ headers: [(String, String)]) -> [(String, String)] {

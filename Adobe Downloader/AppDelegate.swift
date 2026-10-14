@@ -19,6 +19,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     static var shouldTerminateImmediately = false
 
     private var eventMonitor: Any?
+    private var isPreparingTermination = false
     
     func applicationDidFinishLaunching(_ notification: Notification) {
         if HDPIMHeadlessInstallRunner.isActive {
@@ -33,7 +34,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             if event.modifierFlags.contains(.command) && event.characters?.lowercased() == "q" {
                 if let mainWindow = NSApp.mainWindow,
                    mainWindow.sheets.isEmpty && !mainWindow.isSheet {
-                    _ = self?.applicationShouldTerminate(NSApp)
+                    NSApp.terminate(nil)
                     return nil
                 }
             }
@@ -48,51 +49,38 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             return .terminateNow
         }
 
-        let hasActiveDownloads = globalNetworkManager.downloadTasks.contains { task in
-            if case .downloading = task.totalStatus { return true }
-            return false
-        }
-        
-        if hasActiveDownloads {
-            Task {
-                for task in globalNetworkManager.downloadTasks {
-                    if case .downloading = task.totalStatus {
-                        await globalNewDownloadUtils.pauseDownloadTask(
-                            taskId: task.id,
-                            reason: .other(String(localized: "程序即将退出"))
-                        )
-                        await globalNetworkManager.saveTask(task)
-                    }
-                }
+        if isPreparingTermination { return .terminateLater }
+        let activeTasks = globalNetworkManager.downloadTasks.filter { $0.status.isActive }
+        guard !activeTasks.isEmpty else { return .terminateNow }
+        isPreparingTermination = true
 
-                await MainActor.run {
-                    let alert = NSAlert()
-                    alert.messageText = String(localized: "确认退出")
-                    alert.informativeText = String(localized:"有正在进行的下载任务，确定要退出吗？\n所有下载任务的进度已保存，下次启动可以继续下载")
-                    alert.alertStyle = .warning
-                    alert.addButton(withTitle: String(localized:"退出"))
-                    alert.addButton(withTitle: String(localized:"取消"))
-
-                    let response = alert.runModal()
-                    if response == .alertSecondButtonReturn {
-                        Task {
-                            for task in globalNetworkManager.downloadTasks {
-                                if case .paused = task.totalStatus {
-                                    await globalNewDownloadUtils.resumeDownloadTask(taskId: task.id)
-                                }
-                            }
-                        }
-                    } else {
-                        NSApplication.shared.terminate(0)
+        Task { @MainActor in
+            for task in activeTasks {
+                await globalNewDownloadUtils.pauseDownloadTask(
+                    taskId: task.id, reason: .other(String(localized: "程序即将退出"))
+                )
+                await globalNetworkManager.saveTask(task)
+            }
+            let alert = NSAlert()
+            alert.messageText = String(localized: "确认退出")
+            alert.informativeText = String(localized: "有正在进行的下载任务，确定要退出吗？\n所有下载任务的进度已保存，下次启动可以继续下载")
+            alert.alertStyle = .warning
+            alert.addButton(withTitle: String(localized: "退出"))
+            alert.addButton(withTitle: String(localized: "取消"))
+            let shouldExit = alert.runModal() != .alertSecondButtonReturn
+            isPreparingTermination = false
+            sender.reply(toApplicationShouldTerminate: shouldExit)
+            if !shouldExit {
+                for task in activeTasks {
+                    if case .paused = task.status {
+                        Task { await globalNewDownloadUtils.resumeDownloadTask(taskId: task.id) }
                     }
                 }
             }
-        } else {
-            NSApplication.shared.terminate(nil)
         }
-        return .terminateCancel
+        return .terminateLater
     }
-    
+
     deinit {
         if let monitor = eventMonitor {
             NSEvent.removeMonitor(monitor)

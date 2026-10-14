@@ -127,8 +127,8 @@ enum InstallProgressOperation: Equatable {
 enum InstallProgressPhase: Int, CaseIterable {
     case preparing
     case parsing
-    case backingUp
     case extracting
+    case backingUp
     case installing
     case finishing
 
@@ -196,7 +196,12 @@ struct InstallProgressViewData {
     let outcome: InstallProgressOutcome
     let operation: InstallProgressOperation
     let isUserCancelled: Bool
+    let warnings: [String]
+    let isPartialFailure: Bool
+    let recoveryDirectory: String?
+    let isCancellationPending: Bool
     let currentPackageName: String?
+    let packages: [HDPIMPackageProgress]
     private let contextStatus: String
 
     init(
@@ -210,7 +215,12 @@ struct InstallProgressViewData {
         outcome: InstallProgressOutcome,
         operation: InstallProgressOperation = .install,
         contextStatus: String? = nil,
-        isUserCancelled: Bool = false
+        isUserCancelled: Bool = false,
+        warnings: [String] = [],
+        isPartialFailure: Bool = false,
+        recoveryDirectory: String? = nil,
+        isCancellationPending: Bool = false,
+        packages: [HDPIMPackageProgress] = []
     ) {
         self.productName = productName
         self.progress = progress
@@ -222,6 +232,11 @@ struct InstallProgressViewData {
         self.outcome = outcome
         self.operation = operation
         self.isUserCancelled = isUserCancelled
+        self.warnings = warnings
+        self.isPartialFailure = isPartialFailure
+        self.recoveryDirectory = recoveryDirectory
+        self.isCancellationPending = isCancellationPending
+        self.packages = packages
         self.contextStatus = contextStatus ?? status
         self.currentPackageName = InstallProgressTextParser.currentPackageName(from: self.contextStatus, logs: logs)
     }
@@ -263,6 +278,9 @@ struct InstallProgressViewData {
     var statusTitle: String {
         switch outcome {
         case .completed:
+            if !warnings.isEmpty {
+                return String(format: String(localized: "%@ 已完成，请查看警告"), productName)
+            }
             switch operation {
             case .install:
                 return String(format: String(localized: "%@ 安装完成"), productName)
@@ -270,6 +288,9 @@ struct InstallProgressViewData {
                 return String(format: String(localized: "%@ 卸载完成"), productName)
             }
         case .failed:
+            if isPartialFailure {
+                return String(format: String(localized: "%@ 卸载部分失败"), productName)
+            }
             if isUserCancelled {
                 return String(format: String(localized: "%@ 已取消"), productName)
             }
@@ -290,6 +311,7 @@ struct InstallProgressViewData {
     }
 
     var statusIcon: String {
+        if isPartialFailure || (!warnings.isEmpty && isCompleted) { return "exclamationmark.triangle.fill" }
         switch outcome {
         case .completed:
             return "checkmark.circle.fill"
@@ -301,6 +323,7 @@ struct InstallProgressViewData {
     }
 
     var statusColor: Color {
+        if !warnings.isEmpty && isCompleted { return .orange }
         switch outcome {
         case .completed:
             return .green
@@ -312,6 +335,8 @@ struct InstallProgressViewData {
     }
 
     var statusBadge: String {
+        if isPartialFailure { return String(localized: "部分失败") }
+        if !warnings.isEmpty && isCompleted { return String(localized: "有警告") }
         switch outcome {
         case .completed:
             return operation.completedBadge
@@ -337,13 +362,13 @@ enum InstallProgressTextParser {
         if source.contains("回滚") || source.contains("清理") || source.contains("rollback") || source.contains("clean") {
             return .finishing
         }
-        if source.contains("正在安装") || source.contains("正在卸载") || source.contains("正在处理:") || source.contains("Installing ") || source.contains("Uninstalling ") || source.contains("Processing:") {
+        if source.contains("正在全量安装") || source.contains("正在增量更新") || source.contains("正在安装") || source.contains("正在卸载") || source.contains("正在处理:") || source.contains("Installing ") || source.contains("Uninstalling ") || source.contains("Processing:") {
             return .installing
         }
         if source.contains("解压") || source.contains("Extracting ") {
             return .extracting
         }
-        if source.contains("备份") || source.contains("Backing up ") {
+        if source.contains("备份") || source.contains("恢复记录") || source.contains("Backing up ") {
             return .backingUp
         }
         if source.contains("解析 driver.xml") || source.contains("收集包信息") {
@@ -372,7 +397,7 @@ enum InstallProgressTextParser {
     }
 
     private static func hasPhaseKeyword(_ text: String) -> Bool {
-        let keywords = ["准备安装", "准备卸载", "重试安装", "解析 driver.xml", "收集包信息", "分析 HDPIM 卸载", "备份", "解压", "正在安装", "正在卸载", "正在处理:", "清理", "回滚", "安装完成", "卸载完成", "Preparing install", "Preparing uninstall", "Retrying install", "Analyzing HDPIM uninstall", "Backing up", "Extracting", "Installing", "Uninstalling", "Processing:", "clean", "rollback", "Install completed", "Uninstall completed"]
+        let keywords = ["准备安装", "准备卸载", "重试安装", "解析 driver.xml", "收集包信息", "分析 HDPIM 卸载", "备份", "恢复记录", "解压", "正在全量安装", "正在增量更新", "正在安装", "正在卸载", "正在处理:", "清理", "回滚", "安装完成", "卸载完成", "Preparing install", "Preparing uninstall", "Retrying install", "Analyzing HDPIM uninstall", "Backing up", "Extracting", "Installing", "Uninstalling", "Processing:", "clean", "rollback", "Install completed", "Uninstall completed"]
         return keywords.contains { text.contains($0) }
     }
 
@@ -447,7 +472,6 @@ struct InstallProgressView: View {
 
     @State private var selectedPanel: InstallProgressPanel
     @State private var lastOutcome: InstallProgressOutcome
-    @State private var scrollViewportHeight: CGFloat = 0
 
     init(
         data: InstallProgressViewData,
@@ -472,7 +496,7 @@ struct InstallProgressView: View {
 
                     if let currentPackageName = data.currentPackageName,
                        data.shouldShowCurrentPackage,
-                       !data.isCompleted {
+                       !data.isCompleted, data.packages.isEmpty {
                         CurrentPackageSection(packageName: currentPackageName, phase: data.phase, operation: data.operation)
                     }
 
@@ -493,7 +517,7 @@ struct InstallProgressView: View {
                                 InstallLogPanel(data: data)
                             }
                         }
-                        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                        .frame(maxWidth: .infinity, alignment: .topLeading)
                         .padding(18)
                         .background(
                             RoundedRectangle(cornerRadius: 12)
@@ -504,22 +528,13 @@ struct InstallProgressView: View {
                                 .strokeBorder(Color.secondary.opacity(0.12), lineWidth: 1)
                         )
                     }
-                    .frame(maxWidth: .infinity, minHeight: 220, maxHeight: .infinity, alignment: .topLeading)
+                    .frame(maxWidth: .infinity, alignment: .topLeading)
                 }
                 .padding(.horizontal, 24)
                 .padding(.top, 24)
                 .padding(.bottom, 18)
-                .frame(maxWidth: .infinity, minHeight: scrollViewportHeight, alignment: .top)
+                .frame(maxWidth: .infinity, alignment: .top)
             }
-            .background(
-                GeometryReader { proxy in
-                    Color.clear
-                        .onAppear { scrollViewportHeight = proxy.size.height }
-                        .onChange(of: proxy.size.height) { newValue in
-                            scrollViewportHeight = newValue
-                        }
-                }
-            )
 
             Divider()
 
@@ -840,28 +855,53 @@ private struct InstallOverviewPanel: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            BeautifulGroupBox(label: {
-                Label(data.operation.infoSectionTitle, systemImage: "info.circle")
-            }) {
-                VStack(alignment: .leading, spacing: 10) {
-                    InstallInfoRow(title: "当前阶段", value: data.currentPhaseTitle)
-
-                    if data.isRunning {
-                        InstallInfoRow(title: "当前状态", value: data.phaseStatus)
-                    }
-
-                    if data.shouldShowCurrentPackage,
-                       let currentPackageName = data.currentPackageName {
-                        InstallInfoRow(title: "当前包", value: currentPackageName)
-                    }
-
+            if data.packages.isEmpty {
+                VStack(alignment: .leading, spacing: 12) {
+                    Label(data.operation.infoSectionTitle, systemImage: "info.circle")
+                        .font(.system(size: 14, weight: .semibold))
                     if data.isCompleted {
-                        InstallInfoRow(title: "状态", value: data.operation.completedStatusText)
-                    } else if data.isFailed {
-                        InstallInfoRow(title: "最后状态", value: data.phaseStatus)
+                        Label(data.warnings.isEmpty ? data.operation.completedStatusText : data.status,
+                              systemImage: data.statusIcon)
+                            .font(.system(size: 13))
+                            .foregroundColor(data.statusColor)
+                    } else {
+                        InstallInfoRow(title: data.isFailed ? String(localized: "最后状态") : String(localized: "当前状态"),
+                                       value: data.phaseStatus)
                     }
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
+            } else {
+                InstallPackageList(data: data)
+            }
+
+            if !data.warnings.isEmpty {
+                BeautifulGroupBox(label: {
+                    Label("警告事项", systemImage: "exclamationmark.triangle.fill")
+                        .foregroundColor(.orange)
+                }) {
+                    VStack(alignment: .leading, spacing: 8) {
+                        ForEach(Array(data.warnings.enumerated()), id: \.offset) { _, warning in
+                            Text(warning)
+                                .font(.system(size: 12))
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .textSelection(.enabled)
+                        }
+                    }
+                }
+            }
+
+            if let directory = data.recoveryDirectory {
+                BeautifulGroupBox(label: {
+                    Label("恢复目录", systemImage: "folder")
+                }) {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("请保留此目录，以便检查和恢复未完成的卸载操作。")
+                            .font(.system(size: 12))
+                        Text(directory)
+                            .font(.system(size: 11, design: .monospaced))
+                            .textSelection(.enabled)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
             }
 
             if data.isFailed {
@@ -890,9 +930,121 @@ private struct InstallOverviewPanel: View {
                 }
             }
 
-            Spacer(minLength: 0)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .frame(maxWidth: .infinity, alignment: .topLeading)
+    }
+}
+
+private struct InstallPackageList: View {
+    let data: InstallProgressViewData
+
+    private var summary: String {
+        if data.isCompleted {
+            return String(format: String(localized: "%d 个包已完成"), data.packages.count)
+        }
+        if data.isFailed {
+            return data.isUserCancelled ? String(localized: "安装已取消") : String(localized: "安装未完成")
+        }
+        let processed = data.packages.filter { $0.stage == .awaitingCompletion }.count
+        return String(format: String(localized: "已处理 %d / %d"), processed, data.packages.count)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            HStack {
+                Label("安装包", systemImage: "shippingbox")
+                    .font(.system(size: 14, weight: .semibold))
+                Spacer()
+                Text(summary)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundColor(data.isCompleted ? .green : .secondary)
+            }
+
+            if data.isRunning {
+                Text("显示各包当前阶段的进度，全部处理后统一完成安装。")
+                    .font(.system(size: 11))
+                    .foregroundColor(.secondary)
+            }
+
+            ForEach(data.packages) { package in
+                InstallPackageProgressRow(package: package, outcome: data.outcome,
+                                          isCancelled: data.isUserCancelled)
+                if package.id != data.packages.last?.id {
+                    Divider().opacity(0.5)
+                }
+            }
+        }
+    }
+}
+
+private struct InstallPackageProgressRow: View {
+    let package: HDPIMPackageProgress
+    let outcome: InstallProgressOutcome
+    let isCancelled: Bool
+
+    private var tint: Color {
+        if outcome == .completed { return .green }
+        if outcome == .failed { return isCancelled ? .secondary : .orange }
+        return package.stage == .waiting ? .secondary : .blue
+    }
+
+    private var stageTitle: String {
+        if outcome == .completed { return String(localized: "已完成") }
+        if outcome == .failed {
+            if package.stage == .waiting { return String(localized: "未开始") }
+            return isCancelled ? String(localized: "已停止") : String(localized: "未完成")
+        }
+        switch package.stage {
+        case .waiting: return String(localized: "等待准备")
+        case .preparing: return String(localized: "解压与校验")
+        case .prepared: return String(localized: "已就绪")
+        case .updatingFiles: return String(localized: "更新文件")
+        case .installing: return String(localized: "安装中")
+        case .registering: return String(localized: "登记信息")
+        case .awaitingCompletion: return String(localized: "等待收尾")
+        }
+    }
+
+    private var progress: Double { outcome == .completed ? 1 : package.fraction }
+    private var showsPercentage: Bool {
+        outcome == .running && [.preparing, .updatingFiles, .installing].contains(package.stage)
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 9) {
+            HStack(alignment: .top, spacing: 12) {
+                Image(systemName: outcome == .completed ? "checkmark.circle.fill" : "shippingbox")
+                    .foregroundColor(tint)
+                    .font(.system(size: 16))
+                    .frame(width: 22, height: 22)
+
+                VStack(alignment: .leading, spacing: 4) {
+                    Text(package.name)
+                        .font(.system(size: 12, weight: .medium))
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                        .help(package.name)
+                    Text([package.productCode, package.version].filter { !$0.isEmpty }.joined(separator: " · "))
+                        .font(.system(size: 10))
+                        .foregroundColor(.secondary)
+                }
+                Spacer(minLength: 12)
+                HStack(spacing: 8) {
+                    Text(stageTitle)
+                    if showsPercentage {
+                        Text("\(Int(progress * 100))%")
+                            .monospacedDigit()
+                            .frame(width: 36, alignment: .trailing)
+                    }
+                }
+                .font(.system(size: 11, weight: .medium))
+                .foregroundColor(tint)
+            }
+            ProgressView(value: outcome == .running && package.stage == .registering ? nil : progress)
+                .progressViewStyle(.linear)
+                .tint(tint)
+                .accessibilityLabel(package.name + "，" + stageTitle)
+        }
     }
 }
 
@@ -971,7 +1123,7 @@ private struct InstallLogPanel: View {
                             .font(.system(size: 12))
                             .foregroundColor(.secondary)
                     }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .frame(maxWidth: .infinity)
                     .padding(.vertical, 32)
                 } else {
                     ScrollViewReader { proxy in
@@ -988,7 +1140,7 @@ private struct InstallLogPanel: View {
                             }
                             .padding(12)
                         }
-                        .frame(maxHeight: 360)
+                        .frame(height: 300)
                         .background(
                             RoundedRectangle(cornerRadius: 10)
                                 .fill(Color(NSColor.textBackgroundColor).opacity(0.52))
@@ -1025,9 +1177,9 @@ private struct InstallLogPanel: View {
                     .transition(.opacity)
                 }
             }
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+            .frame(maxWidth: .infinity, alignment: .topLeading)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .frame(maxWidth: .infinity, alignment: .topLeading)
     }
 
     private func copyLogs() {
@@ -1086,15 +1238,15 @@ private struct InstallActionSection: View {
                         .font(.system(size: 13, weight: .medium))
                         .foregroundColor(.white)
                 }
-                .buttonStyle(BeautifulButtonStyle(baseColor: .green))
+                .buttonStyle(BeautifulButtonStyle(baseColor: data.statusColor))
             } else {
                 Button(action: onCancel) {
-                    Label("取消", systemImage: "xmark")
+                    Label(data.isCancellationPending ? "正在取消…" : "取消", systemImage: "xmark")
                         .font(.system(size: 13, weight: .medium))
                         .foregroundColor(.white)
                 }
                 .buttonStyle(BeautifulButtonStyle(baseColor: .red))
-                .disabled(data.status.contains("回滚") || data.logs.last?.contains("回滚") == true)
+                .disabled(data.isCancellationPending || data.status.contains("回滚") || data.logs.last?.contains("回滚") == true)
             }
 
             Spacer()

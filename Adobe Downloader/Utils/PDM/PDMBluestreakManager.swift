@@ -18,7 +18,7 @@ final class PDMBluestreakManager {
         url: URL,
         headers: [(String, String)],
         fileSize: Int64
-    ) -> PDMDownloadMode {
+    ) async -> PDMDownloadMode {
         guard config.downloadEnabled else {
             return .singleStream
         }
@@ -39,7 +39,7 @@ final class PDMBluestreakManager {
             return .singleStream
         }
 
-        let supportsRange = communicator.checkByteRangeAcceptance(
+        let supportsRange = await communicator.checkByteRangeAcceptance(
             url: url,
             headers: headers,
             fileSize: fileSize

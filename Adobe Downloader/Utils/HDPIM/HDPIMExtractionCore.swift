@@ -1,8 +1,33 @@
 import Foundation
 
 enum HDPIMExtractionConcurrency {
-    static let maxConcurrentEntries = 3
+    static let maxConcurrentEntries = max(3, min(6, ProcessInfo.processInfo.activeProcessorCount - 2))
     static let entrySemaphore = DispatchSemaphore(value: maxConcurrentEntries)
+    static let dictionaryBudget = HDPIMExtractionMemoryBudget()
+}
+
+final class HDPIMExtractionMemoryBudget {
+    private let condition = NSCondition()
+    private let capacity = max(UInt64(64 * 1024 * 1024), min(ProcessInfo.processInfo.physicalMemory / 8, UInt64(512 * 1024 * 1024)))
+    private var reserved: UInt64 = 0
+
+    func acquire(_ bytes: UInt64, cancellationCheck: (() -> Bool)?) throws {
+        condition.lock()
+        defer { condition.unlock() }
+        while reserved > 0 && (bytes > capacity || reserved > capacity - bytes) {
+            if cancellationCheck?() == true { throw HDPIMExtractionError.cancelled }
+            _ = condition.wait(until: Date(timeIntervalSinceNow: 0.1))
+        }
+        if cancellationCheck?() == true { throw HDPIMExtractionError.cancelled }
+        reserved += bytes
+    }
+
+    func release(_ bytes: UInt64) {
+        condition.lock()
+        reserved -= bytes
+        condition.broadcast()
+        condition.unlock()
+    }
 }
 
 struct HDPIMExtractionRequest {
@@ -48,21 +73,37 @@ enum HDPIMExtractionError: Error, LocalizedError {
     }
 }
 
-private actor HDPIMZipEntryQueue {
+private final class HDPIMZipEntryQueue {
+    private let lock = NSLock()
     private var entries: [HDPIMZipEntryRecord]
     private var index = 0
+    private var stopped = false
 
     init(entries: [HDPIMZipEntryRecord]) {
         self.entries = entries
     }
 
     func next() -> HDPIMZipEntryRecord? {
-        guard index < entries.count else {
+        lock.lock()
+        defer { lock.unlock() }
+        guard !stopped, index < entries.count else {
             return nil
         }
         let entry = entries[index]
         index += 1
         return entry
+    }
+
+    var isStopped: Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return stopped
+    }
+
+    func stop() {
+        lock.lock()
+        stopped = true
+        lock.unlock()
     }
 }
 
@@ -131,7 +172,9 @@ final class HDPIMZipExtractor {
         return HDPIMExtractionResult(
             extractRoot: request.destinationURL,
             pimxURLs: Self.collectArtifacts(in: request.destinationURL, matching: { $0.pathExtension.lowercased() == "pimx" }),
-            diffJSONURLs: Self.collectArtifacts(in: request.destinationURL, matching: { $0.lastPathComponent.lowercased().hasSuffix("_diff.json") }),
+            diffJSONURLs: Self.collectArtifacts(in: request.destinationURL, matching: {
+                $0.lastPathComponent.lowercased().hasSuffix("_diff.json") || $0.lastPathComponent.lowercased() == "diff.json"
+            }),
             restoredSymlinkCount: summary.restoredSymlinkCount,
             restoredPermissionCount: summary.restoredPermissionCount,
             restoredMetadataCount: summary.restoredMetadataCount,
@@ -218,7 +261,8 @@ final class HDPIMZipExtractor {
         }
 
         let regularEntries = entries.filter { $0.type == .regularFile && !archiveExtractor.isMacOSXEntry($0) }
-        let workerCount = min(3, max(regularEntries.isEmpty ? 0 : 1, regularEntries.count))
+            .sorted { $0.uncompressedSize > $1.uncompressedSize }
+        let workerCount = min(HDPIMExtractionConcurrency.maxConcurrentEntries, regularEntries.count)
 
         if workerCount > 0 {
             let workQueue = HDPIMZipEntryQueue(entries: regularEntries)
@@ -233,10 +277,14 @@ final class HDPIMZipExtractor {
                     defer { dispatchGroup.leave() }
                     do {
                         let session = try self.archiveExtractor.makeSession(zipURL: zipURL)
-                        while let entry = try awaitNextEntry(from: workQueue) {
-                            try self.archiveExtractor.throwIfCancelled(cancellationCheck)
-                            HDPIMExtractionConcurrency.entrySemaphore.wait()
+                        let shouldStop = { workQueue.isStopped || (cancellationCheck?() ?? false) }
+                        while let entry = workQueue.next() {
+                            try self.archiveExtractor.throwIfCancelled(shouldStop)
+                            while HDPIMExtractionConcurrency.entrySemaphore.wait(timeout: .now() + 0.1) == .timedOut {
+                                try self.archiveExtractor.throwIfCancelled(shouldStop)
+                            }
                             defer { HDPIMExtractionConcurrency.entrySemaphore.signal() }
+                            try self.archiveExtractor.throwIfCancelled(shouldStop)
                             let outputURL = destinationURL.appendingPathComponent(entry.normalizedPath, isDirectory: false)
                             let restored: Bool
                             do {
@@ -245,16 +293,16 @@ final class HDPIMZipExtractor {
                                     to: outputURL,
                                     compressionType: compressionType,
                                     chunkHandler: { tracker.advance(UInt64($0)) },
-                                    cancellationCheck: cancellationCheck
+                                    cancellationCheck: shouldStop
                                 )
                             } catch {
-                                try self.archiveExtractor.throwIfCancelled(cancellationCheck)
+                                try self.archiveExtractor.throwIfCancelled(shouldStop)
                                 restored = try session.extractRegularEntry(
                                     entry,
                                     to: outputURL,
                                     compressionType: compressionType,
                                     chunkHandler: { tracker.advance(UInt64($0)) },
-                                    cancellationCheck: cancellationCheck
+                                    cancellationCheck: shouldStop
                                 )
                             }
                             if restored {
@@ -269,6 +317,7 @@ final class HDPIMZipExtractor {
                             firstError = error
                         }
                         errorLock.unlock()
+                        workQueue.stop()
                     }
                 }
             }
@@ -322,12 +371,12 @@ final class HDPIMZipExtractor {
             let metadataSession = try archiveExtractor.makeSession(zipURL: zipURL)
             for entry in pendingAppleDoubleEntries {
                 try archiveExtractor.throwIfCancelled(cancellationCheck)
-                let restored = (try? metadataSession.restoreAppleDoubleMetadata(
+                let restored = try metadataSession.restoreAppleDoubleMetadata(
                     entry,
                     destinationURL: destinationURL,
                     compressionType: compressionType,
                     cancellationCheck: cancellationCheck
-                )) ?? false
+                )
                 if restored {
                     restoredMetadataCount += 1
                 }
@@ -344,17 +393,6 @@ final class HDPIMZipExtractor {
     }
 }
 
-private func awaitNextEntry(from queue: HDPIMZipEntryQueue) throws -> HDPIMZipEntryRecord? {
-    let semaphore = DispatchSemaphore(value: 0)
-    var result: HDPIMZipEntryRecord?
-    Task {
-        result = await queue.next()
-        semaphore.signal()
-    }
-    semaphore.wait()
-    return result
-}
-
 final class HDPIMDMGExtractor {
     private let fileManager = FileManager.default
 
@@ -368,16 +406,8 @@ final class HDPIMDMGExtractor {
             .appendingPathComponent("HDPIM-DMG-\(UUID().uuidString)", isDirectory: true)
         try fileManager.createDirectory(at: mountPoint, withIntermediateDirectories: true)
 
-        defer {
-            let process = Process()
-            process.executableURL = URL(fileURLWithPath: "/usr/bin/hdiutil")
-            process.arguments = ["detach", mountPoint.path, "-quiet"]
-            try? process.run()
-            process.waitUntilExit()
-            try? FileManager.default.removeItem(at: mountPoint)
-        }
-
-        let attachOutput = try await Self.runProcess(
+        do {
+        let attachOutput = try await HDPIMProcessRunner.run(
             executable: "/usr/bin/hdiutil",
             arguments: ["attach", request.sourceURL.path, "-mountpoint", mountPoint.path, "-nobrowse", "-quiet"]
         )
@@ -402,6 +432,7 @@ final class HDPIMDMGExtractor {
             }
         }
 
+        try await detach(mountPoint)
         return HDPIMExtractionResult(
             extractRoot: request.destinationURL,
             pimxURLs: [],
@@ -411,29 +442,23 @@ final class HDPIMDMGExtractor {
             restoredMetadataCount: 0,
             usedRetryCount: 0
         )
+        } catch {
+            do { try await detach(mountPoint) }
+            catch { throw HDPIMExtractionError.processFailed("DMG 清理失败，挂载目录保留在 \(mountPoint.path)：\(error.localizedDescription)") }
+            throw error
+        }
     }
 
-    private static func runProcess(executable: String, arguments: [String]) async throws -> (exitCode: Int32, output: String) {
-        try await withCheckedThrowingContinuation { continuation in
-            let process = Process()
-            let pipe = Pipe()
-
-            process.executableURL = URL(fileURLWithPath: executable)
-            process.arguments = arguments
-            process.standardOutput = pipe
-            process.standardError = pipe
-
-            process.terminationHandler = { process in
-                let data = pipe.fileHandleForReading.readDataToEndOfFile()
-                let output = String(data: data, encoding: .utf8) ?? ""
-                continuation.resume(returning: (process.terminationStatus, output))
+    private func detach(_ mountPoint: URL) async throws {
+        try await HDPIMOperationContext.$isRecovering.withValue(true) {
+            let result = try await HDPIMProcessRunner.run(executable: "/usr/bin/hdiutil",
+                                                        arguments: ["detach", mountPoint.path, "-quiet"])
+            if result.exitCode != 0 {
+                guard (try? fileManager.contentsOfDirectory(atPath: mountPoint.path).isEmpty) == true else {
+                    throw HDPIMExtractionError.processFailed(result.output)
+                }
             }
-
-            do {
-                try process.run()
-            } catch {
-                continuation.resume(throwing: HDPIMExtractionError.processFailed(error.localizedDescription))
-            }
+            if fileManager.fileExists(atPath: mountPoint.path) { try fileManager.removeItem(at: mountPoint) }
         }
     }
 
@@ -549,6 +574,7 @@ final class HDPIMExtractionCoordinator {
 
         for attempt in 0..<totalAttempts {
             do {
+                if Task.isCancelled || (cancellationCheck?() ?? false) { throw HDPIMExtractionError.cancelled }
                 try cleanupExtractionRoot(request.destinationURL)
                 try fileManager.createDirectory(at: request.destinationURL, withIntermediateDirectories: true)
 
@@ -577,6 +603,12 @@ final class HDPIMExtractionCoordinator {
                 )
             } catch {
                 try? cleanupExtractionRoot(request.destinationURL)
+
+                if Task.isCancelled || (cancellationCheck?() ?? false) || error is CancellationError {
+                    throw HDPIMExtractionError.cancelled
+                }
+                if case HDPIMExtractionError.cancelled = error { throw error }
+                if case HDPIMMiniZipError.cancelled = error { throw error }
 
                 if request.isDMG || attempt == totalAttempts - 1 {
                     throw error

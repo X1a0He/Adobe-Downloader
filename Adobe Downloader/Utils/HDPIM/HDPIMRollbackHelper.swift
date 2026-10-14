@@ -11,14 +11,20 @@ class HDPIMRollbackHelper {
 		let commands: [HDPIMCommand]
 	}
 
+    @discardableResult
     static func rollback(
         executedCommands: [HDPIMCommand],
-        backupManager: HDPIMBackupManager
-    ) async {
+        backupManager: HDPIMBackupManager,
+        fileChangesCaptured: Bool = false
+    ) async -> (failures: [String], filesRestored: Bool) {
+        var failures: [String] = []
+        var filesRestored = true
         for command in executedCommands.reversed() {
+            if fileChangesCaptured && !(command is RunProgramCommand) { continue }
             do {
                 try await command.rollBack()
             } catch {
+                failures.append("\(command.commandName)：\(error.localizedDescription)")
                 print("Warning: 回滚命令 '\(command.commandName)' 失败: \(error.localizedDescription)")
             }
         }
@@ -27,11 +33,24 @@ class HDPIMRollbackHelper {
             do {
                 try await backupManager.restoreAll()
             } catch {
+                filesRestored = false
+                failures.append(error.localizedDescription)
                 print("Warning: 恢复备份失败: \(error.localizedDescription)")
             }
         }
 
-        HDPIMUserOwnershipFixer.restoreUserOwnership(logHandler: { print("[HDPIM Rollback] \($0)") })
+        return (failures, filesRestored)
+    }
+
+    static func repairPreviousPackages(_ packages: [[HDPIMCommand]]) async -> [String] {
+        var failures: [String] = []
+        for commands in packages {
+            for command in commands {
+                do { try await command.execute() }
+                catch { failures.append("旧版本 repair \(command.commandName)：\(error.localizedDescription)") }
+            }
+        }
+        return failures
     }
 
 	static func executeUninstallPIMX(
@@ -95,9 +114,13 @@ class HDPIMRollbackHelper {
 				progressHandler?(reportedBytes, detail)
 			}
 			do {
+                try HDPIMOperationContext.checkCancellation()
 				try await command.execute()
+                try HDPIMOperationContext.checkCancellation()
 				reportProgress(for: commandIndex, detail: detail)
-			} catch {
+			} catch is CancellationError {
+                throw CancellationError()
+            } catch {
 				throw HDPIMInstallError.commandFailed(
 					command: command.commandName,
 					error: error,

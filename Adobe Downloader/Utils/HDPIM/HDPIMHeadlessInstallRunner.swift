@@ -45,59 +45,51 @@ enum HDPIMHeadlessInstallRunner {
 
     private static func runUninstall(request: HDPIMUninstallHelperRequest) {
         runOperation { cancellationState in
-            guard !cancellationState.isCancelled else {
-                throw CancellationError()
+            let cancellation = HDPIMOperationCancellation(externalCheck: { cancellationState.isCancelled })
+            defer { cancellation.stopMonitoring() }
+            try await HDPIMOperationContext.$cancellation.withValue(cancellation) {
+                do {
+                    if cancellationState.isCancelled { throw CancellationError() }
+                    let progress: (Double, String) -> Void = { emit("PROGRESS|\($0)|\(sanitize($1))") }
+                    let preserving = request.preservingUserPreferences ?? true
+                    let result: HDPIMUninstallResult
+                    switch request.target {
+                    case .product:
+                        result = try await HDPIMUninstaller.uninstall(sapCode: request.sapCode, version: request.version,
+                            processorFamily: request.resolvedProcessorFamily, preservingUserPreferences: preserving,
+                            progressHandler: progress)
+                    case .module:
+                        result = try await HDPIMUninstaller.uninstallModules(sapCode: request.sapCode, version: request.version,
+                            processorFamily: request.resolvedProcessorFamily, moduleIds: Set(request.moduleIds),
+                            preservingUserPreferences: preserving, progressHandler: progress)
+                    case .packages:
+                        result = try await HDPIMUninstaller.uninstallPackages(sapCode: request.sapCode, version: request.version,
+                            processorFamily: request.resolvedProcessorFamily,
+                            packageKeys: Set(request.packageKeys.map { .init(packageName: $0.packageName, packageVersion: $0.packageVersion) }),
+                            preservingUserPreferences: preserving, progressHandler: progress)
+                    }
+                    emitUninstallResult(result)
+                } catch {
+                    let result = (error as? HDPIMUninstallFailure)?.result ?? HDPIMUninstallResult(
+                        outcome: error is CancellationError ? .cancelled : .failed, warnings: [],
+                        details: error.localizedDescription, recoveryDirectory: nil)
+                    emitUninstallResult(result)
+                    throw error
+                }
             }
-
-            let progressHandler: (Double, String) -> Void = { progress, status in
-                emit("PROGRESS|\(progress)|\(sanitize(status))")
-            }
-
-            progressHandler(0.02, String(localized: "正在准备 HDPIM 卸载流程"))
-            switch request.target {
-            case .product:
-                try await HDPIMUninstaller.uninstall(
-                    sapCode: request.sapCode,
-                    version: request.version,
-                    processorFamily: request.resolvedProcessorFamily,
-                    progressHandler: progressHandler
-                )
-            case .module:
-                try await HDPIMUninstaller.uninstallModules(
-                    sapCode: request.sapCode,
-                    version: request.version,
-                    processorFamily: request.resolvedProcessorFamily,
-                    moduleIds: Set(request.moduleIds),
-                    progressHandler: progressHandler
-                )
-            case .packages:
-                try await HDPIMUninstaller.uninstallPackages(
-                    sapCode: request.sapCode,
-                    version: request.version,
-                    processorFamily: request.resolvedProcessorFamily,
-                    packageKeys: Set(request.packageKeys.map {
-                        HDPIMPackageUninstallKey(
-                            packageName: $0.packageName,
-                            packageVersion: $0.packageVersion
-                        )
-                    }),
-                    progressHandler: progressHandler
-                )
-            }
-            progressHandler(1.0, String(localized: "卸载完成"))
         }
     }
 
+    private static func emitUninstallResult(_ result: HDPIMUninstallResult) {
+        if let data = try? JSONEncoder().encode(result) { emit("UNINSTALL|\(data.base64EncodedString())") }
+    }
+
     private static func runOperation(_ operation: @escaping (HDPIMHeadlessCancellationState) async throws -> Void) {
-        let semaphore = DispatchSemaphore(value: 0)
         let cancellationState = HDPIMHeadlessCancellationState(cancelFileURL: cancelFileURL())
         let signalSources = installCancellationSignalHandlers(cancellationState)
-        var exitCode: Int32 = 0
-        defer {
-            signalSources.forEach { $0.cancel() }
-        }
 
         Task.detached(priority: .userInitiated) {
+            var exitCode: Int32 = 0
             do {
                 try await operation(cancellationState)
                 emit("RESULT|SUCCESS")
@@ -106,13 +98,14 @@ enum HDPIMHeadlessInstallRunner {
                 exitCode = 1
             }
 
-            semaphore.signal()
+            signalSources.forEach { $0.cancel() }
+            fflush(stdout)
+            fflush(stderr)
+            Darwin.exit(exitCode)
         }
 
-        semaphore.wait()
-        fflush(stdout)
-        fflush(stderr)
-        Darwin.exit(exitCode)
+        // 下载配置及系统 API 需要主队列；无界面入口也必须持续排空主队列。
+        dispatchMain()
     }
 
     private static func productDirectoryPath() -> String? {

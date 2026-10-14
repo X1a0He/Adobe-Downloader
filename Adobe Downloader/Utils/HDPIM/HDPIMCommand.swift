@@ -135,37 +135,7 @@ enum HDPIMCommandExecutor {
     }
 
     private static func executeLocalShellResult(_ command: String) async throws -> HDPIMShellExecutionResult {
-        return try await withCheckedThrowingContinuation { continuation in
-            DispatchQueue.global(qos: .userInitiated).async {
-                let task = Process()
-                let stdout = Pipe()
-                let stderr = Pipe()
-                task.executableURL = URL(fileURLWithPath: "/bin/sh")
-                task.arguments = ["-c", command]
-                task.standardOutput = stdout
-                task.standardError = stderr
-
-                do {
-                    try task.run()
-                    task.waitUntilExit()
-
-                    let outputData = stdout.fileHandleForReading.readDataToEndOfFile()
-                    let errorData = stderr.fileHandleForReading.readDataToEndOfFile()
-                    let output = String(data: outputData, encoding: .utf8) ?? ""
-                    let errorOutput = String(data: errorData, encoding: .utf8) ?? ""
-                    let resultOutput = [output, errorOutput]
-                        .filter { !$0.isEmpty }
-                        .joined(separator: "\n")
-                        .trimmingCharacters(in: .whitespacesAndNewlines)
-                    continuation.resume(returning: HDPIMShellExecutionResult(
-                        output: resultOutput,
-                        exitCode: task.terminationStatus
-                    ))
-                } catch {
-                    continuation.resume(throwing: error)
-                }
-            }
-        }
+        try await HDPIMProcessRunner.run(executable: "/bin/sh", arguments: ["-c", command])
     }
 
     private static func parseShellResult(output: String, marker: String) -> HDPIMShellExecutionResult {
@@ -215,7 +185,7 @@ class HDPIMCommandEngine {
                 return BlindCopyCommand(source: source, target: target, pimxTargetPath: pimxTarget)
             case .createDirectory(let path, let pimxPath):
                 return CreateDirectoryCommand(path: path, pimxPath: pimxPath)
-            case .deleteFile(let target):
+            case .deleteFile(let target, _):
                 return DeleteFileCommand(target: target)
             case .deleteDirectory(let source, let isRecursiveDelete, let isUserPreferences):
                 return DeleteDirectoryCommand(
@@ -225,6 +195,12 @@ class HDPIMCommandEngine {
                 )
             case .createSymlink(let source, let target, let pimxTarget):
                 return CreateSymlinkCommand(source: source, target: target, pimxTargetPath: pimxTarget)
+            case .unlockPath(let path, let active):
+                return UnlockPathCommand(path: path, active: active)
+            case .localizeFile(let source, let target):
+                return LocalizeFileCommand(source: source, target: target)
+            case .macAlias(let target, let path, let permanent):
+                return MacAliasCommand(target: target, path: path, isPermanent: permanent)
             case .permission(let path, let mode):
                 return ChmodCommand(path: path, mode: mode)
             case .owner(let path, let uid, let gid):
@@ -245,6 +221,8 @@ class HDPIMCommandEngine {
 
     func executeAll(
         commands: [HDPIMCommand],
+        commandWillExecute: ((HDPIMCommand) throws -> Void)? = nil,
+        commandDidExecute: ((HDPIMCommand) -> Void)? = nil,
         progressHandler: ((Int, Int, String) -> Void)? = nil
     ) async throws -> (
         executedCommands: [HDPIMCommand],
@@ -267,13 +245,19 @@ class HDPIMCommandEngine {
             }
 
             do {
+                try HDPIMOperationContext.checkCancellation()
+                try commandWillExecute?(command)
                 try await command.execute()
-                heartbeatTask.cancel()
                 executed.append(command)
+                commandDidExecute?(command)
+                try HDPIMOperationContext.checkCancellation()
+                heartbeatTask.cancel()
+                await heartbeatTask.value
                 deleteEntries.append(contentsOf: command.getDeleteEntries())
                 pimxFragments.append(contentsOf: command.getPimxCommandFragments())
             } catch {
                 heartbeatTask.cancel()
+                await heartbeatTask.value
                 let cmdError = error as? HDPIMCommandError
 
                 if cmdError?.isFatal ?? true {

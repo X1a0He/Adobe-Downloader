@@ -136,6 +136,9 @@ struct ParsedPackage: Codable, Equatable {
 
     var deltaPackages: [DeltaPackageInfo] = []
 
+    var material: HDPIMPackageMaterial?
+    var materialDecodingError: String?
+
     var systemRequirements: [String: String] = [:]
 
     var aliasPackageName: String = ""
@@ -228,8 +231,17 @@ class ApplicationJSONParser {
         return info
     }
 
-    private static func parsePackage(_ json: [String: Any]) -> ParsedPackage {
+    static func parsePackage(_ json: [String: Any]) -> ParsedPackage {
         var pkg = ParsedPackage()
+
+        if let material = json[HDPIMPackageMaterial.jsonKey] {
+            do {
+                let data = try JSONSerialization.data(withJSONObject: material)
+                pkg.material = try JSONDecoder().decode(HDPIMPackageMaterial.self, from: data)
+            } catch {
+                pkg.materialDecodingError = "材料描述解析失败：\(error.localizedDescription)"
+            }
+        }
 
         pkg.packageName = json["PackageName"] as? String ?? ""
         pkg.fullPackageName = json["fullPackageName"] as? String ?? ""

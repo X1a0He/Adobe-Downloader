@@ -10,7 +10,7 @@ enum DownloadFormatters {
     }()
 
     static func speed(_ bytesPerSecond: Double) -> String {
-        byteFormatter.string(fromByteCount: Int64(bytesPerSecond)) + "/s"
+        byteFormatter.string(fromByteCount: bytesPerSecond.isFinite && bytesPerSecond > 0 && bytesPerSecond < Double(Int64.max) ? Int64(bytesPerSecond) : 0) + "/s"
     }
 
     static func fileSize(_ bytes: Int64) -> String {
@@ -18,11 +18,18 @@ enum DownloadFormatters {
     }
 
     static func remainingTime(total: Int64, downloaded: Int64, speed: Double) -> String {
-        guard speed > 0 else { return "" }
-        let remainingSeconds = Int(Double(total - downloaded) / speed)
-        let minutes = remainingSeconds / 60
-        let seconds = remainingSeconds % 60
-        return String(format: "%02d:%02d", minutes, seconds)
+        remainingTime(seconds: DownloadTimeEstimate.seconds(remaining: max(total - downloaded, 0), speed: speed))
+    }
+
+    static func remainingTime(seconds: TimeInterval?) -> String {
+        guard let seconds, seconds.isFinite, seconds > 0, seconds < Double(Int.max) else { return "" }
+        let rounded = seconds.rounded(.up)
+        guard rounded < Double(Int.max) else { return "" }
+        let remaining = Int(rounded)
+        if remaining >= 3600 {
+            return String(format: "%d:%02d:%02d", remaining / 3600, remaining / 60 % 60, remaining % 60)
+        }
+        return String(format: "%02d:%02d", remaining / 60, remaining % 60)
     }
 
     static func shortenedPath(_ path: String) -> String {

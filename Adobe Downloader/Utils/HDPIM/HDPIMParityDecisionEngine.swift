@@ -160,6 +160,7 @@ struct HDPIMInstalledProductSnapshot {
     let baseVersion: String
     let buildVersion: String
     let modules: Set<String>
+    var canReuseInstallation: Bool = false
 }
 
 private struct HDPIMResolvedPlatformMatch {
@@ -409,13 +410,10 @@ final class HDPIMParityDecisionEngine {
             throw NetworkError.invalidData("找不到产品信息: \(productId) \(version)")
         }
 
-        let installedProducts = makeInstalledProductSnapshots()
-        let databaseAvailable = openDatabaseIfNeeded()
-        defer {
-            if databaseAvailable {
-                HDPIMDatabase.shared.close()
-            }
-        }
+        let database = try? HDPIMDatabase.shared.makeReadOnlyConnection()
+        defer { database?.close() }
+        let databaseAvailable = database != nil
+        let installedProducts = database.map { makeInstalledProductSnapshots(database: $0) } ?? []
 
         let mainMatch = try CatalogSelection.productCandidate(
             product, architecture: targetArchitecture, locale: requestedLanguage
@@ -507,6 +505,7 @@ final class HDPIMParityDecisionEngine {
                 sapCode: dependencySeed.sapCode,
                 targetVersion: resolvedVersion,
                 targetPlatform: dependencySeed.platform,
+                targetBaseVersion: resolvedBaseVersion,
                 installedProducts: installedProducts
             )
             let skipReason = shouldSkipProduct ? "已安装同版本或更高版本依赖" : nil
@@ -540,7 +539,7 @@ final class HDPIMParityDecisionEngine {
                 codexVersion: resolvedVersion,
                 platform: dependencySeed.platform,
                 expectedInstallDir: expandedInstallDirectory(for: applicationInfo),
-                databaseAvailable: databaseAvailable
+                database: database
             )
 
             log(
@@ -675,8 +674,8 @@ final class HDPIMParityDecisionEngine {
                     isAdobeDownloaderPreselected: packageDecision.isAdobeDownloaderPreselected,
                     isOfficiallyEligible: packageDecision.isOfficiallyEligible,
                     officialFilterReasons: packageDecision.officialFilterReasons,
-                    validationURL: parsed.validationURLType2,
-                    validationURLType1: delta.flatMap { $0.validationURL.isEmpty ? nil : $0.validationURL } ?? parsed.validationURLType1,
+                    validationURL: delta == nil ? parsed.validationURLType2 : nil,
+                    validationURLType1: delta.map { $0.validationURL } ?? parsed.validationURLType1,
                     packageHashKey: delta != nil ? "" : parsed.packageHashKey
                 )
                 package.hostValidation = nil
@@ -1147,6 +1146,7 @@ final class HDPIMParityDecisionEngine {
                     sapCode: package.sapCode,
                     targetVersion: package.version,
                     targetPlatform: package.platform,
+                    targetBaseVersion: package.applicationInfo.baseVersion,
                     installedProducts: installedProducts
                ) {
                 return false
@@ -1188,6 +1188,7 @@ final class HDPIMParityDecisionEngine {
                     sapCode: package.sapCode,
                     targetVersion: package.version,
                     targetPlatform: package.platform,
+                    targetBaseVersion: package.applicationInfo.baseVersion,
                     installedProducts: installedProducts
                ) {
                 continue
@@ -1581,7 +1582,7 @@ final class HDPIMParityDecisionEngine {
     }
 
     // HDPIM 遇到不支持的请求语言时加入 en_US，保留原请求供包条件判断。
-    private func languageWithEnglishFallback(
+    func languageWithEnglishFallback(
         _ requestedLanguage: String,
         applicationInfo: ApplicationInfo
     ) throws -> String {
@@ -1758,20 +1759,19 @@ final class HDPIMParityDecisionEngine {
     }
 
     func makeInstalledProductSnapshots(databaseAlreadyOpen: Bool = false) -> [HDPIMInstalledProductSnapshot] {
-        let shouldClose = databaseAlreadyOpen ? false : openDatabaseIfNeeded()
-        guard databaseAlreadyOpen || shouldClose else {
-            return []
+        if databaseAlreadyOpen {
+            return makeInstalledProductSnapshots(database: HDPIMDatabase.shared)
         }
-        defer {
-            if shouldClose {
-                HDPIMDatabase.shared.close()
-            }
-        }
+        guard let database = try? HDPIMDatabase.shared.makeReadOnlyConnection() else { return [] }
+        defer { database.close() }
+        return makeInstalledProductSnapshots(database: database)
+    }
 
-        return HDPIMDatabase.shared.getAllInstalledProducts().map { raw in
+    private func makeInstalledProductSnapshots(database: HDPIMDatabase) -> [HDPIMInstalledProductSnapshot] {
+        return database.getAllInstalledProducts().map { raw in
             let processorFamily = processorFamily(fromRawValue: raw.platform)
             let modules = Set(
-                (HDPIMDatabase.shared.getProductMeta(
+                (database.getProductMeta(
                     sapCode: raw.sapCode,
                     version: raw.version,
                     processorFamily: processorFamily,
@@ -1786,19 +1786,23 @@ final class HDPIMParityDecisionEngine {
                 sapCode: raw.sapCode,
                 version: raw.version,
                 processorFamily: processorFamily,
-                baseVersion: HDPIMDatabase.shared.getProductMeta(
+                baseVersion: database.getProductMeta(
                     sapCode: raw.sapCode,
                     version: raw.version,
                     processorFamily: processorFamily,
                     key: HDPIMProductMetaKey.baseVersion.rawValue
                 ) ?? "",
-                buildVersion: HDPIMDatabase.shared.getProductMeta(
+                buildVersion: database.getProductMeta(
                     sapCode: raw.sapCode,
                     version: raw.version,
                     processorFamily: processorFamily,
                     key: HDPIMProductMetaKey.buildVersion.rawValue
                 ) ?? "",
-                modules: modules
+                modules: modules,
+                canReuseInstallation: hasReusableInstalledPackages(
+                    sapCode: raw.sapCode, version: raw.version,
+                    processorFamily: processorFamily, database: database
+                )
             )
         }
     }
@@ -1827,23 +1831,48 @@ final class HDPIMParityDecisionEngine {
         return .intel
     }
 
-    private func shouldSkipInstalledProduct(
-        sapCode: String,
-        targetVersion: String,
-        targetPlatform: String,
-        installedProducts: [HDPIMInstalledProductSnapshot]
+    private func hasReusableInstalledPackages(
+        sapCode: String, version: String, processorFamily: HDPIMProcessorFamily,
+        database: HDPIMDatabase
     ) -> Bool {
-        let targetProcessorFamily = HDPIMProcessorFamily.from(platform: targetPlatform)
-        let matchingProducts = installedProducts.filter {
-            $0.sapCode == sapCode && $0.processorFamily == targetProcessorFamily
+        let packages = database.getInstalledPackageContexts(
+            sapCode: sapCode, version: version, processorFamily: processorFamily
+        )
+        let table = HDPIMPropertyTable()
+        table.setupSystemDirectories()
+        return !packages.isEmpty && packages.allSatisfy { package in
+            guard !package.installDir.isEmpty,
+                  FileManager.default.fileExists(atPath: package.installDir),
+                  let snapshot = database.getInstalledPackageSnapshots(
+                    sapCode: sapCode, processorFamily: processorFamily,
+                    packageName: package.packageName, expectedInstallDir: package.installDir
+                  ).first(where: { $0.productVersion == version && $0.packageVersion == package.packageVersion }) else {
+                return false
+            }
+            return (try? HDPIMMaterialIntegrity.validateReuse(snapshot, context: table)) != nil
         }
-        guard !matchingProducts.isEmpty else {
-            return false
-        }
+    }
 
-        return matchingProducts.contains { installed in
-            AppStatics.compareVersions(installed.version, targetVersion) >= 0
-        }
+    func reusableInstalledProduct(
+        sapCode: String, targetVersion: String, targetPlatform: String,
+        targetBaseVersion: String, installedProducts: [HDPIMInstalledProductSnapshot]
+    ) -> HDPIMInstalledProductSnapshot? {
+        let family = HDPIMProcessorFamily.from(platform: targetPlatform)
+        return installedProducts.filter {
+            $0.sapCode == sapCode && $0.processorFamily == family && $0.canReuseInstallation
+                && (targetBaseVersion.isEmpty || $0.baseVersion == targetBaseVersion)
+                && AppStatics.compareVersions($0.version, targetVersion) >= 0
+        }.sorted { AppStatics.compareVersions($0.version, $1.version) > 0 }.first
+    }
+
+    private func shouldSkipInstalledProduct(
+        sapCode: String, targetVersion: String, targetPlatform: String,
+        targetBaseVersion: String, installedProducts: [HDPIMInstalledProductSnapshot]
+    ) -> Bool {
+        reusableInstalledProduct(
+            sapCode: sapCode, targetVersion: targetVersion, targetPlatform: targetPlatform,
+            targetBaseVersion: targetBaseVersion, installedProducts: installedProducts
+        ) != nil
     }
 
     private func installedPackageVersion(
@@ -1873,16 +1902,16 @@ final class HDPIMParityDecisionEngine {
         codexVersion: String,
         platform: String,
         expectedInstallDir: String,
-        databaseAvailable: Bool
+        database: HDPIMDatabase?
     ) -> [HDPIMResolvedPackageDecision] {
-        guard databaseAvailable else {
+        guard let database else {
             log("【delta诊断】\(sapCode) enrich 跳过：databaseAvailable=false")
             return decisions
         }
 
         let processorFamily = HDPIMProcessorFamily.from(platform: platform)
         log("【delta诊断】\(sapCode) home=\(HDPIMRuntimeEnvironment.userHomeDirectory()) NSHome=\(NSHomeDirectory())")
-        let failedVersions = HDPIMDatabase.shared.getDeltaFailVersions(
+        let failedVersions = database.getDeltaFailVersions(
             sapCode: sapCode,
             version: codexVersion,
             processorFamily: processorFamily
@@ -1895,7 +1924,7 @@ final class HDPIMParityDecisionEngine {
                 continue
             }
 
-            let snapshots = HDPIMDatabase.shared.getInstalledPackageSnapshots(
+            let snapshots = database.getInstalledPackageSnapshots(
                 sapCode: sapCode,
                 processorFamily: processorFamily,
                 packageName: decision.parsedPackage.packageName,
@@ -2258,14 +2287,6 @@ final class HDPIMParityDecisionEngine {
             return "/Applications"
         }
         return propertyTable.expandPath(applicationInfo.installDir)
-    }
-
-    private func openDatabaseIfNeeded() -> Bool {
-        if (try? HDPIMDatabase.shared.open()) != nil {
-            return true
-        }
-        HDPIMDatabase.shared.close()
-        return (try? HDPIMDatabase.shared.openReadOnly()) != nil
     }
 
     private func processorFamily(fromRawValue rawValue: String) -> HDPIMProcessorFamily {

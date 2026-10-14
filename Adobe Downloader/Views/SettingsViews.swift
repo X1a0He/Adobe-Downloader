@@ -230,9 +230,11 @@ struct X1a0HeCCInstallStatus {
     let isInstalled: Bool
     let hdBoxVersion: String
     let ipcBoxVersion: String
+    let hasComponents: Bool
+    let issues: [String]
 
     var statusText: String {
-        isInstalled ? String(localized: "已安装") : String(localized: "未安装")
+        isInstalled ? String(localized: "已安装") : (hasComponents ? String(localized: "组件不完整") : String(localized: "未安装"))
     }
 
     var statusIcon: String {
@@ -245,23 +247,20 @@ struct X1a0HeCCInstallStatus {
 
     var subtitle: String {
         guard isInstalled else {
-            return String(localized: "下载 HDBox 和 IPCBox 组件")
+            return hasComponents ? (issues.first ?? String(localized: "组件不完整")) : String(localized: "下载 HDBox 和 IPCBox 组件")
         }
 
         return "HDBox \(displayVersion(hdBoxVersion)) / IPCBox \(displayVersion(ipcBoxVersion))"
     }
 
     static func detect() -> X1a0HeCCInstallStatus {
-        let baseURL = URL(fileURLWithPath: "/Library/Application Support/Adobe/Adobe Desktop Common", isDirectory: true)
-        let hdBoxURL = baseURL.appendingPathComponent("HDBox", isDirectory: true)
-        let ipcBoxURL = baseURL.appendingPathComponent("IPCBox", isDirectory: true)
-
-        let isInstalled = directoryExists(at: hdBoxURL) && directoryExists(at: ipcBoxURL)
-
+        let components = X1a0HeCCComponents.inspect()
         return X1a0HeCCInstallStatus(
-            isInstalled: isInstalled,
-            hdBoxVersion: PIMXParser.readPackageVersion(from: hdBoxURL.appendingPathComponent("HDBox.pimx")),
-            ipcBoxVersion: PIMXParser.readPackageVersion(from: ipcBoxURL.appendingPathComponent("IPCBox.pimx"))
+            isInstalled: components.allSatisfy(\.isComplete),
+            hdBoxVersion: components.first { $0.name == "HDBox" }?.version ?? "",
+            ipcBoxVersion: components.first { $0.name == "IPCBox" }?.version ?? "",
+            hasComponents: components.contains { $0.present },
+            issues: components.flatMap(\.issues)
         )
     }
 
@@ -269,11 +268,6 @@ struct X1a0HeCCInstallStatus {
         version.isEmpty ? String(localized: "未知 Setup 组件版本号") : version
     }
 
-    private static func directoryExists(at url: URL) -> Bool {
-        var isDirectory: ObjCBool = false
-        let exists = FileManager.default.fileExists(atPath: url.path, isDirectory: &isDirectory)
-        return exists && isDirectory.boolValue
-    }
 }
 
 struct ExternalLinkView: View {
@@ -1454,7 +1448,7 @@ struct ConcurrentDownloadsSettingRow: View {
     var body: some View {
         SettingRow(
             title: String(localized: "并发下载数"),
-            subtitle: String(format: String(localized: "同时进行的下载任务数（范围 1-10，推荐 %d）"), 3),
+            subtitle: String(format: String(localized: "所有下载任务共用的请求上限（范围 1-10，推荐 %d）"), 3),
             icon: "square.stack.3d.up.fill",
             iconTint: .teal
         ) {

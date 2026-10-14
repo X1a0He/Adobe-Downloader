@@ -20,6 +20,32 @@ final class HDPIMDeltaHelper {
 
     private let commandEngine = HDPIMDeltaCommandEngine()
 
+    struct Prepared {
+        let commands: [DeltaCommand]
+        let packageName: String
+        let uninstallManifest: [HDPIMDeleteEntry]
+        let literalPaths: [PIMXLiteralPath.Key: PIMXLiteralPath]
+    }
+
+    func prepare(diffJsonURL: URL, package: PackageToInstall, propertyTable: HDPIMPropertyTable,
+                 extractDir: URL) async throws -> Prepared {
+        commandEngine.propertyTable = propertyTable.cloned()
+        let plan = try commandEngine.generatePlan(from: diffJsonURL, installDir: package.productInstallDir,
+                                                 extractDir: extractDir.path)
+        let prepared = try await commandEngine.preparePatches(plan.commands, in: extractDir.appendingPathComponent("prepared-patches"))
+        return Prepared(commands: prepared, packageName: package.packageName,
+                        uninstallManifest: plan.uninstallManifest, literalPaths: plan.literalPaths)
+    }
+
+    func execute(_ prepared: Prepared, progressHandler: ((Double, String) -> Void)? = nil) async throws {
+        try HDPIMOperationContext.checkCancellation()
+        try commandEngine.validateBeforeExecution(prepared.commands)
+        try await commandEngine.executeCommands(prepared.commands) { fraction in
+            progressHandler?(fraction, "正在增量更新 \(prepared.packageName)... \(Int(fraction * 100))%")
+        }
+        progressHandler?(1, "增量文件处理完成：\(prepared.packageName)")
+    }
+
     func execute(
         sapCode: String,
         codexVersion: String,
@@ -31,7 +57,8 @@ final class HDPIMDeltaHelper {
         packageName: String,
         packageVersion: String,
         progressHandler: ((Double, String) -> Void)? = nil,
-        databaseAlreadyOpen: Bool = false
+        databaseAlreadyOpen: Bool = false,
+        parentPropertyTable: HDPIMPropertyTable? = nil
     ) async throws {
         progressHandler?(0.0, "Preparing delta update for \(packageName)...")
 
@@ -41,8 +68,8 @@ final class HDPIMDeltaHelper {
 
         progressHandler?(0.1, "Generating delta commands...")
 
-        let propertyTable = HDPIMPropertyTable()
-        propertyTable.setupSystemDirectories()
+        let propertyTable = parentPropertyTable?.cloned() ?? HDPIMPropertyTable()
+        if parentPropertyTable == nil { propertyTable.setupSystemDirectories() }
         propertyTable.setInstallDir(installDir)
         propertyTable.setProductInstallDir(installDir)
         propertyTable.setSourceFolder(extractDir)
@@ -56,6 +83,7 @@ final class HDPIMDeltaHelper {
                 installDir: installDir,
                 extractDir: extractDir
             )
+            try commandEngine.validateBeforeExecution(commands)
         } catch {
             markFailed(sapCode: sapCode, codexVersion: codexVersion, platform: platform, packageVersion: packageVersion)
             throw DeltaHelperError.commandGenerationFailed(error.localizedDescription)
@@ -78,37 +106,7 @@ final class HDPIMDeltaHelper {
             throw DeltaHelperError.executionFailed(error.localizedDescription)
         }
 
-        progressHandler?(0.9, "Updating database...")
-
-        let processorFamily = HDPIMProcessorFamily.from(platform: platform)
-        do {
-            let shouldCloseDatabase: Bool
-            if databaseAlreadyOpen {
-                shouldCloseDatabase = false
-            } else {
-                try HDPIMDatabase.shared.open()
-                shouldCloseDatabase = true
-            }
-            defer {
-                if shouldCloseDatabase {
-                    HDPIMDatabase.shared.close()
-                }
-            }
-
-            HDPIMDatabase.shared.setProductMeta(
-                sapCode: sapCode,
-                version: codexVersion,
-                processorFamily: processorFamily,
-                key: "autoPatchUpdate",
-                value: "true"
-            )
-        } catch {
-            throw DeltaHelperError.dbUpdateFailed(error.localizedDescription)
-        }
-
         progressHandler?(1.0, "Delta update complete for \(packageName)")
-
-        cleanupDiffJson(diffJsonURL)
     }
 
     private func markFailed(sapCode: String, codexVersion: String, platform: String, packageVersion: String) {
@@ -121,8 +119,4 @@ final class HDPIMDeltaHelper {
         )
     }
 
-    private func cleanupDiffJson(_ url: URL) {
-        let dir = url.deletingLastPathComponent()
-        try? FileManager.default.removeItem(at: dir)
-    }
 }

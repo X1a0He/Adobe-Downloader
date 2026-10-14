@@ -74,7 +74,7 @@ final class HDPIMDeltaSelector {
         let communicator = PDMHttpCommunicator()
         let headers = NetworkConstants.downloadHeaders.map { ($0.key, $0.value) }
 
-        let response = communicator.sendRequest(PDMHTTPRequestConfig(
+        let response = try await communicator.sendRequest(PDMHTTPRequestConfig(
             url: url.absoluteString,
             method: "GET",
             headers: headers,

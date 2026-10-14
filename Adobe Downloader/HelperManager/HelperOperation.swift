@@ -10,13 +10,15 @@ enum HelperOperation: Codable, Equatable {
     case hdpimUninstall(request: HDPIMUninstallHelperRequest, userHome: String, executablePath: String?)
     case triggerTCCPrompt
     case cancelOperation
+    case hdpimProgress(operationID: UUID)
+    case cancelHDPIMOperation(operationID: UUID)
     case getVersion
 
     var requiresValidation: Bool {
         switch self {
         case .installPackage, .uninstallPath, .copyFile, .setPermissions:
             return true
-        case .executeShell, .hdpimInstall, .hdpimUninstall, .triggerTCCPrompt, .cancelOperation, .getVersion:
+        case .executeShell, .hdpimInstall, .hdpimUninstall, .triggerTCCPrompt, .cancelOperation, .hdpimProgress, .cancelHDPIMOperation, .getVersion:
             return false
         }
     }
@@ -41,6 +43,10 @@ enum HelperOperation: Codable, Equatable {
             return "Trigger TCC"
         case .cancelOperation:
             return "Cancel operation"
+        case .hdpimProgress(let id):
+            return "HDPIM progress: \(id)"
+        case .cancelHDPIMOperation(let id):
+            return "Cancel HDPIM operation: \(id)"
         case .getVersion:
             return "Get version"
         }
@@ -65,6 +71,7 @@ struct HDPIMUninstallHelperRequest: Codable, Equatable {
     let target: Target
     let moduleIds: [String]
     let packageKeys: [PackageKey]
+    var preservingUserPreferences: Bool? = nil
 
     var description: String {
         switch target {
@@ -85,9 +92,10 @@ struct HelperOperationResult: Codable {
     let success: Bool
     let output: String
     let exitCode: Int32?
+    var operationID: UUID? = nil
 
-    static func success(_ output: String = "") -> HelperOperationResult {
-        HelperOperationResult(success: true, output: output, exitCode: 0)
+    static func success(_ output: String = "", operationID: UUID? = nil) -> HelperOperationResult {
+        HelperOperationResult(success: true, output: output, exitCode: 0, operationID: operationID)
     }
 
     static func failure(_ error: String, exitCode: Int32? = nil) -> HelperOperationResult {

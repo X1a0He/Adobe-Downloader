@@ -122,19 +122,11 @@ private struct ActiveDownloadsBanner: View {
     let onTap: () -> Void
 
     @State private var displaySpeed: Double = 0
-    @State private var displayRemaining: Int64 = 0
+    @State private var displayRemaining: TimeInterval?
     @State private var displayCount: Int = 0
 
     private var activeTasks: [NewDownloadTask] {
         tasks.filter { $0.status.isActive }
-    }
-
-    private var totalSpeed: Double {
-        activeTasks.reduce(0) { $0 + $1.totalSpeed }
-    }
-
-    private var remainingBytes: Int64 {
-        activeTasks.reduce(0) { $0 + max($1.totalSize - $1.totalDownloadedSize, 0) }
     }
 
     var body: some View {
@@ -167,18 +159,14 @@ private struct ActiveDownloadsBanner: View {
                                 }
                                 .foregroundColor(.blue.opacity(0.85))
 
-                                if displayRemaining > 0 {
-                                    let remaining = DownloadFormatters.remainingTime(
-                                        total: displayRemaining,
-                                        downloaded: 0,
-                                        speed: displaySpeed
-                                    )
+                                if displayRemaining != nil {
+                                    let remaining = DownloadFormatters.remainingTime(seconds: displayRemaining)
                                     if !remaining.isEmpty {
                                         Text("·")
                                             .foregroundColor(.secondary.opacity(0.4))
                                         HStack(spacing: 2) {
                                             Image(systemName: "clock").font(.system(size: 9))
-                                            Text("剩余 \(remaining)")
+                                            Text(String(format: String(localized: "下载剩余 %@"), remaining))
                                                 .font(.system(size: 11))
                                                 .monospacedDigit()
                                         }
@@ -186,7 +174,8 @@ private struct ActiveDownloadsBanner: View {
                                     }
                                 }
                             } else {
-                                Text("等待带宽…")
+                                Text(activeTasks.contains(where: { $0.isValidatingDownload })
+                                     ? String(localized: "正在校验下载文件") : String(localized: "等待带宽…"))
                                     .font(.system(size: 11))
                                     .foregroundColor(.secondary.opacity(0.75))
                             }
@@ -231,9 +220,10 @@ private struct ActiveDownloadsBanner: View {
     }
 
     private func updateDisplayValues() {
-        displayCount = activeTasks.count
-        displaySpeed = totalSpeed
-        displayRemaining = remainingBytes
+        let summary = DownloadTaskSummary(tasks: tasks)
+        displayCount = summary.activeCount
+        displaySpeed = summary.speed
+        displayRemaining = summary.remainingSeconds
     }
 }
 

@@ -53,6 +53,19 @@ extension HelperService: NSXPCListenerDelegate {
 }
 
 private final class HelperServiceImpl: NSObject, HelperXPCProtocol {
+    private let operationLock = NSLock()
+    private var clientOperationID: UUID?
+
+    private func rememberOperation(_ id: UUID) {
+        operationLock.lock(); defer { operationLock.unlock() }
+        clientOperationID = id
+    }
+
+    private func operationIDForClient() -> UUID? {
+        operationLock.lock(); defer { operationLock.unlock() }
+        return clientOperationID
+    }
+
     private let logger = Logger(subsystem: "com.x1a0he.macOS.Adobe-Downloader.helper", category: "ServiceImpl")
 
     func executeOperation(_ operationData: Data, withReply reply: @escaping (Data) -> Void) {
@@ -69,30 +82,41 @@ private final class HelperServiceImpl: NSObject, HelperXPCProtocol {
         switch operation {
         case .hdpimInstall(let productDir, let userHome, let executablePath):
             do {
-                try ProcessManager.shared.startHDPIMInstall(
+                let id = try ProcessManager.shared.startHDPIMInstall(
                     productDir: productDir,
                     userHome: userHome,
                     executablePath: executablePath
                 )
-                result = .success("Started")
+                rememberOperation(id)
+                result = .success("Started", operationID: id)
             } catch {
                 result = .failure("启动失败: \(error.localizedDescription)")
             }
 
         case .hdpimUninstall(let request, let userHome, let executablePath):
             do {
-                try ProcessManager.shared.startHDPIMUninstall(
+                let id = try ProcessManager.shared.startHDPIMUninstall(
                     request: request,
                     userHome: userHome,
                     executablePath: executablePath
                 )
-                result = .success("Started")
+                rememberOperation(id)
+                result = .success("Started", operationID: id)
             } catch {
                 result = .failure("启动失败: \(error.localizedDescription)")
             }
 
+        case .hdpimProgress(let id):
+            let progress = ProcessManager.shared.getProgress(operationID: id)
+            let data = (try? JSONEncoder().encode(progress)) ?? Data()
+            result = .success(String(decoding: data, as: UTF8.self))
+
+        case .cancelHDPIMOperation(let id):
+            ProcessManager.shared.cancel(operationID: id)
+            result = .success("Cancelled")
+
         case .cancelOperation:
-            ProcessManager.shared.cancel()
+            ProcessManager.shared.cancel(operationID: operationIDForClient())
             result = .success("Cancelled")
 
         default:
@@ -108,13 +132,13 @@ private final class HelperServiceImpl: NSObject, HelperXPCProtocol {
     }
 
     func getInstallationProgress(withReply reply: @escaping (Data) -> Void) {
-        let progress = ProcessManager.shared.getProgress()
+        let progress = ProcessManager.shared.getProgress(operationID: operationIDForClient())
         let data = (try? JSONEncoder().encode(progress)) ?? Data()
         reply(data)
     }
 
     func cancelCurrentOperation(withReply reply: @escaping (Bool) -> Void) {
-        ProcessManager.shared.cancel()
+        ProcessManager.shared.cancel(operationID: operationIDForClient())
         reply(true)
     }
 

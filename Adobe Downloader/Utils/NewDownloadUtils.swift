@@ -7,10 +7,10 @@
 import Foundation
 
 actor TaskProgressPublishLimiter {
-    private var lastPublishTimes: [UUID: Date] = [:]
+    private var lastPublishTimes: [UUID: TimeInterval] = [:]
 
     func shouldPublish(taskId: UUID, force: Bool) -> Bool {
-        let now = Date()
+        let now = ProcessInfo.processInfo.systemUptime
 
         if force {
             lastPublishTimes[taskId] = now
@@ -22,7 +22,7 @@ actor TaskProgressPublishLimiter {
             return true
         }
 
-        guard now.timeIntervalSince(lastPublishTime) >= NetworkConstants.progressUpdateInterval else {
+        guard now - lastPublishTime >= NetworkConstants.progressUpdateInterval else {
             return false
         }
 
@@ -160,7 +160,8 @@ class NewDownloadUtils {
         return String(hash, radix: 16)
     }
 
-    func handleCustomDownload(task: NewDownloadTask, customDependencies: [DependenciesToDownload]) async throws {
+    func handleCustomDownload(task: NewDownloadTask, customDependencies: [DependenciesToDownload], generation: UUID) async throws {
+        guard task.execution.accepts(generation) else { throw NetworkError.cancelled }
         await MainActor.run {
             task.setStatus(.preparing(DownloadStatus.PrepareInfo(
                 message: String(localized: "正在准备自定义下载..."),
@@ -169,11 +170,40 @@ class NewDownloadUtils {
             )))
         }
 
+        if task.requiredDependencies == nil {
+            let decision = try await HDPIMParityDecisionEngine.shared.resolveDownloadDecision(
+                productId: task.productId, version: task.productVersion,
+                requestedLanguage: task.language, catalogSnapshot: task.catalogSnapshot
+            )
+            guard task.execution.accepts(generation) else { throw NetworkError.cancelled }
+            let requirements = decision.dependencies.map { dependency in
+                DependenciesToDownload(
+                    sapCode: dependency.sapCode, version: dependency.version,
+                    buildGuid: dependency.buildGuid, applicationJson: dependency.applicationInfo.rawJSON,
+                    isSoftDependency: dependency.isSoftDependency, platform: dependency.platform,
+                    baseVersion: dependency.baseVersion, buildVersion: dependency.buildVersion
+                )
+            }
+            await MainActor.run { task.requiredDependencies = requirements }
+        }
+
         let mergedDependencies = await makeMergedCustomDependencies(
             task: task,
             customDependencies: customDependencies
         )
+        guard task.execution.accepts(generation) else { throw NetworkError.cancelled }
 
+        for requirement in task.requiredDependencies ?? [] where
+            !mergedDependencies.contains(where: { dependencyIdentity($0) == dependencyIdentity(requirement) }) {
+            guard let json = requirement.applicationJson, !json.isEmpty,
+                  HDPIMPackageMaterial.isLeafName(requirement.sapCode) else {
+                throw NetworkError.invalidData("依赖材料不完整：\(requirement.sapCode)，请重新选择下载")
+            }
+            let directory = task.directory.appendingPathComponent(requirement.sapCode)
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+            try json.write(to: directory.appendingPathComponent("application.json"),
+                           atomically: true, encoding: .utf8)
+        }
         try writeApplicationJSONs(for: task, dependencies: mergedDependencies)
 
         let totalSize = mergedDependencies.reduce(0) { productSum, product in
@@ -183,6 +213,7 @@ class NewDownloadUtils {
         }
 
         await MainActor.run {
+            guard task.execution.accepts(generation) else { return }
             task.dependenciesToDownload = mergedDependencies
             task.totalSize = totalSize
             task.totalDownloadedSize = mergedDependencies.reduce(0) { productSum, product in
@@ -392,7 +423,7 @@ class NewDownloadUtils {
                     if var packages = appInfo["Packages"] as? [String: Any],
                        let packageArray = packages["Package"] as? [[String: Any]] {
 
-                        let filteredPackages = packageArray.compactMap { package -> [String: Any]? in
+                        let filteredPackages = try packageArray.compactMap { package -> [String: Any]? in
                             let logicalName = (package["PackageName"] as? String) ?? ""
                             let derivedFullName = logicalName.hasSuffix(".zip") ? logicalName : "\(logicalName).zip"
                             let nodeFullName = (package["fullPackageName"] as? String) ?? derivedFullName
@@ -401,14 +432,27 @@ class NewDownloadUtils {
                                 : selectedPackageNames.contains(nodeFullName)
                             guard isSelected else { return nil }
 
+                            let original = ApplicationJSONParser.parsePackage(package)
+                            let selected = deltaPackagesByBaseline[logicalName]
+                            let material = try HDPIMPackageMaterial.recording(
+                                original: original,
+                                selectedFileName: selected?.fullPackageName ?? original.fullPackageName,
+                                deltaBaseVersion: selected?.deltaBasePackageVersion ?? "",
+                                compressionType: appInfo["CompressionType"] as? String ?? "",
+                                sourceBaseURL: dependencyToDownload.catalogCDN ?? task.catalogSnapshot?.cdn
+                            )
+                            var materialNode = package
+                            materialNode[HDPIMPackageMaterial.jsonKey] = try material.jsonObject()
+
                             if let deltaPackage = deltaPackagesByBaseline[logicalName] {
-                                var deltaNode = package
+                                var deltaNode = materialNode
                                 deltaNode["fullPackageName"] = deltaPackage.fullPackageName
                                 deltaNode["Path"] = deltaPackage.downloadURL
                                 deltaNode["DownloadSize"] = deltaPackage.downloadSize
+                                deltaNode["ExtractSize"] = material.selected.extractSize
                                 return deltaNode
                             }
-                            return package
+                            return materialNode
                         }
                         
                         packages["Package"] = filteredPackages
@@ -445,7 +489,9 @@ class NewDownloadUtils {
     }
 
     private func startConcurrentDownloadProcess(task: NewDownloadTask) async {
-        let maxConcurrency = StorageData.shared.maxConcurrentDownloads
+        let generation = task.execution.generation
+        guard task.execution.accepts(generation) else { return }
+        let maxConcurrency = await MainActor.run { max(1, StorageData.shared.maxConcurrentDownloads) }
 
         let isCancelled = await globalCancelTracker.isCancelled(task.id)
         let isPaused = await globalCancelTracker.isPaused(task.id)
@@ -456,6 +502,7 @@ class NewDownloadUtils {
 
         await rebuildTaskPackages(task: task, inactiveStatus: .waiting)
         await prepareDownloadEnvironment(task: task)
+        guard task.execution.accepts(generation) else { return }
 
         var allPackages: [(package: Package, dependency: DependenciesToDownload, originalIndex: Int)] = []
         var currentIndex = 0
@@ -524,6 +571,8 @@ class NewDownloadUtils {
 
                         await MainActor.run {
                             package.status = .downloading
+                            package.speed = 0
+                            package.downloadPhase = .waiting
                             task.currentPackage = package
                             let currentPackageIndex = self.packageIndexInTask(task: task, package: package)
                             let totalPackages = task.dependenciesToDownload.reduce(0) { $0 + $1.packages.count }
@@ -543,6 +592,7 @@ class NewDownloadUtils {
                             product: dependency
                         )
 
+                        guard task.execution.accepts(generation) else { return }
                         switch result {
                         case .completed:
                             await MainActor.run {
@@ -587,6 +637,7 @@ class NewDownloadUtils {
             }
         }
 
+        guard task.execution.accepts(generation) else { return }
         let allCompleted = task.dependenciesToDownload.flatMap { $0.packages }.allSatisfy { $0.downloaded }
         if allCompleted {
             await MainActor.run {
@@ -639,7 +690,8 @@ class NewDownloadUtils {
                 productInfo: productInfo,
                 dependencies: task.dependenciesToDownload,
                 targetArchitecture: task.targetArchitecture,
-                modules: selectedModules
+                modules: selectedModules,
+                requiredDependencies: task.requiredDependencies
             )
             do {
                 try driverXml.write(to: driverPath, atomically: true, encoding: String.Encoding.utf8)
@@ -675,10 +727,7 @@ class NewDownloadUtils {
     }
 
     private func generatePackageIdentifier(package: Package, task: NewDownloadTask, dependency: DependenciesToDownload) -> String {
-        if isManifestInstallerProduct(task.productId) {
-            return "AdobeDownloader|\(task.productId)|\(task.productVersion)|\(task.language)|\(task.platform)|\(task.directory.standardizedFileURL.path)"
-        }
-        return "AdobeDownloader|\(task.productId)|\(task.productVersion)|\(task.language)|\(task.platform)|\(dependency.sapCode)|\(package.id.uuidString)"
+        "AdobeDownloader|\(task.id.uuidString)|\(dependencyIdentity(dependency))|\(packageIdentity(package))"
     }
 
     private func normalizedProgress(downloadedSize: Int64, totalSize: Int64) -> Double {
@@ -769,7 +818,7 @@ class NewDownloadUtils {
     }
 
     private func metadataDirectory(for task: NewDownloadTask, dependency: DependenciesToDownload, package: Package) -> URL? {
-        isManifestInstallerProduct(task.productId) ? aproPDMWorkingDirectory(for: task).appendingPathComponent("Metadata", isDirectory: true) : nil
+        isManifestInstallerProduct(task.productId) ? DownloadArtifactStore.specialMetadataDirectory(for: task) : nil
     }
 
     private func aamdFileManager(task: NewDownloadTask, dependency: DependenciesToDownload, package: Package, destinationURL: URL) -> AAMDFileManager {
@@ -777,111 +826,24 @@ class NewDownloadUtils {
     }
 
     private func restoredDownloadedSize(task: NewDownloadTask, dependency: DependenciesToDownload, package: Package, destinationURL: URL) -> Int64? {
-        let aamd = aamdFileManager(task: task, dependency: dependency, package: package, destinationURL: destinationURL)
-        guard aamd.exists(), aamd.validateAAMDFile() else {
-            return nil
-        }
-
-        let aamdHeaders = aamd.readHeaders()
-        let segmentSize = Int64(aamdHeaders?["SEGMENT_SIZE"] ?? "") ?? (2 * 1024 * 1024)
-        let fileSize = Int64(aamdHeaders?["FILE_SIZE"] ?? "") ?? package.downloadSize
-        let expectedSize = max(fileSize, package.downloadSize)
-        let segmentCount = max(1, Int((expectedSize + segmentSize - 1) / segmentSize))
-        let resumedBytes = aamd.getTotalBytesDownloaded(segmentCount: segmentCount)
-        return min(max(resumedBytes, 0), expectedSize)
-    }
-
-    private func packageArchiveValidationError(package: Package, destinationURL: URL) -> PDMDownloadError? {
-        if !package.manifestURL.isEmpty {
-            return nil
-        }
-
-        do {
-            let attributes = try FileManager.default.attributesOfItem(atPath: destinationURL.path)
-            let actualSize = (attributes[.size] as? NSNumber)?.int64Value ?? 0
-
-            if package.downloadSize > 0, actualSize != package.downloadSize {
-                return PDMDownloadError(
-                    code: .signatureValidationFailed,
-                    message: "\(package.fullPackageName) 大小不一致，期望 \(package.downloadSize)，实际 \(actualSize)"
-                )
-            }
-
-            return nil
-        } catch {
-            return PDMDownloadError(
-                code: .signatureValidationFailed,
-                message: "\(package.fullPackageName) 完整性校验失败: \(error.localizedDescription)",
-                underlying: error
-            )
-        }
+        aamdFileManager(task: task, dependency: dependency, package: package, destinationURL: destinationURL)
+            .resumeSnapshot()?.downloadedBytes
     }
 
     private func isPackageArchiveValidForCompletion(package: Package, destinationURL: URL) -> Bool {
-        guard FileManager.default.fileExists(atPath: destinationURL.path) else {
-            return false
-        }
-
-        return packageArchiveValidationError(package: package, destinationURL: destinationURL) == nil
+        DownloadArtifactStore.inspect(fileURL: destinationURL, identity: DownloadArtifactStore.identity(for: package),
+                                      expectedSize: package.manifestURL.isEmpty ? package.downloadSize : 0).verifiedSize != nil
     }
 
     private func shouldTreatPackageAsCompleted(package: Package, destinationURL: URL) -> Bool {
-        guard FileManager.default.fileExists(atPath: destinationURL.path) else {
-            return false
-        }
-
-        let hasCompletedState = package.downloaded
-            || package.status == .completed
-            || (package.downloadSize > 0 && package.downloadedSize >= package.downloadSize)
-            || package.progress >= 1.0
-
-        return hasCompletedState && isPackageArchiveValidForCompletion(package: package, destinationURL: destinationURL)
-    }
-
-    private func resetPackageArchiveResumeState(task: NewDownloadTask, dependency: DependenciesToDownload, package: Package, destinationURL: URL) {
-        let aamd = aamdFileManager(task: task, dependency: dependency, package: package, destinationURL: destinationURL)
-        if aamd.exists(), let headers = aamd.readHeaders() {
-            let segmentSize = Int64(headers["SEGMENT_SIZE"] ?? "") ?? (2 * 1024 * 1024)
-            let fileSize = Int64(headers["FILE_SIZE"] ?? "") ?? package.downloadSize
-            let expectedSize = max(fileSize, package.downloadSize)
-            let segmentCount = max(1, Int((expectedSize + segmentSize - 1) / segmentSize))
-
-            for segment in 0..<segmentCount {
-                aamd.updateSegmentData(segment: segment, bytesDownloaded: 0)
-            }
-        }
-
-        if FileManager.default.fileExists(atPath: destinationURL.path),
-           let fileHandle = try? FileHandle(forWritingTo: destinationURL) {
-            fileHandle.truncateFile(atOffset: UInt64(max(package.downloadSize, 0)))
-            try? fileHandle.close()
-        }
+        isPackageArchiveValidForCompletion(package: package, destinationURL: destinationURL)
     }
 
     private func resetFailedPackageArchive(task: NewDownloadTask, package: Package) {
-        var destinationURL: URL?
-
-        for dependency in task.dependenciesToDownload {
-            if let candidate = dependency.packages.first(where: {
-                $0.id == package.id || $0.fullPackageName == package.fullPackageName
-            }) {
-                destinationURL = packageDestinationURL(task: task, dependency: dependency, package: candidate)
-                break
-            }
-        }
-
-        let resolvedURL = destinationURL
-            ?? task.directory
-                .appendingPathComponent(task.productId)
-                .appendingPathComponent(package.fullPackageName)
-
-        AAMDFileManager(downloadFileURL: resolvedURL).remove()
-
-        if FileManager.default.fileExists(atPath: resolvedURL.path),
-           let fileHandle = try? FileHandle(forWritingTo: resolvedURL) {
-            fileHandle.truncateFile(atOffset: 0)
-            try? fileHandle.close()
-        }
+        guard let dependency = task.dependenciesToDownload.first(where: { $0.packages.contains(where: { $0.id == package.id }) }) else { return }
+        let url = packageDestinationURL(task: task, dependency: dependency, package: package)
+        do { try DownloadArtifactStore.preserveForRetry(url) }
+        catch { print("保留失败下载材料失败：\(error.localizedDescription)") }
     }
 
     private func rebuildTaskPackages(task: NewDownloadTask, inactiveStatus: PackageStatus) async {
@@ -896,13 +858,17 @@ class NewDownloadUtils {
 
                 let destinationURL = packageDestinationURL(task: task, dependency: dependency, package: package)
                 let restoredBytes = restoredDownloadedSize(task: task, dependency: dependency, package: package, destinationURL: destinationURL)
-                let restoredIsCompleted = (restoredBytes ?? 0) >= package.downloadSize
-                    && package.downloadSize > 0
-                    && isPackageArchiveValidForCompletion(package: package, destinationURL: destinationURL)
-                let savedIsCompleted = restoredBytes == nil && shouldTreatPackageAsCompleted(package: package, destinationURL: destinationURL)
+                let inspection = DownloadArtifactStore.restore(
+                    fileURL: destinationURL, identity: DownloadArtifactStore.identity(for: package),
+                    expectedSize: package.manifestURL.isEmpty ? package.downloadSize : 0,
+                    metadataDirectory: metadataDirectory(for: task, dependency: dependency, package: package),
+                    allowLegacy: package.downloaded || package.status == .completed
+                )
+                let verifiedSize = inspection.verifiedSize
 
                 await MainActor.run {
-                    if restoredIsCompleted || savedIsCompleted {
+                    if let verifiedSize {
+                        package.downloadSize = verifiedSize
                         package.downloaded = true
                         package.status = .completed
                         package.downloadedSize = package.downloadSize
@@ -914,7 +880,10 @@ class NewDownloadUtils {
                     }
 
                     package.downloaded = false
+                    package.isBaselineDownloaded = false
                     package.status = inactiveStatus
+                    package.speed = 0
+                    package.downloadPhase = .waiting
 
                     if let restoredBytes {
                         let normalizedDownloadedSize = min(max(restoredBytes, 0), package.downloadSize)
@@ -951,32 +920,18 @@ class NewDownloadUtils {
     }
 
     private func cleanupCompletedPackageMetadata(task: NewDownloadTask) {
-        for dependency in task.dependenciesToDownload {
-            for package in dependency.packages where package.downloaded {
-                let destinationURL = packageDestinationURL(task: task, dependency: dependency, package: package)
-                aamdFileManager(task: task, dependency: dependency, package: package, destinationURL: destinationURL).remove()
-            }
-        }
+        // 保留已校验断点；完成记录已原子落盘，重启不再依赖清空断点表示完成。
     }
 
-    private func waitForTaskDownloadsToSettle(task: NewDownloadTask, timeout: TimeInterval = 5) async {
-        let deadline = Date().addingTimeInterval(timeout)
-
-        while Date() < deadline {
-            let hasRunningPackage = await MainActor.run {
-                task.dependenciesToDownload.contains { dependency in
-                    dependency.packages.contains { package in
-                        package.status == .downloading
-                    }
-                }
+    private func waitForTaskDownloadsToSettle(task: NewDownloadTask) async {
+        for dependency in task.dependenciesToDownload {
+            for package in dependency.packages {
+                await PDMDownloadEngine.shared.pauseAndWait(
+                    packageId: generatePackageIdentifier(package: package, task: task, dependency: dependency)
+                )
             }
-
-            if !hasRunningPackage {
-                return
-            }
-
-            try? await Task.sleep(nanoseconds: 100_000_000)
         }
+        await task.execution.waitUntilStopped()
     }
 
     private func downloadPackageWithPDM(
@@ -984,9 +939,11 @@ class NewDownloadUtils {
         task: NewDownloadTask,
         product: DependenciesToDownload
     ) async -> PDMDownloadResult {
+        let generation = task.execution.generation
+        guard task.execution.accepts(generation) else { return .cancelled }
         guard !package.fullPackageName.isEmpty,
               (!package.downloadURL.isEmpty || !package.manifestURL.isEmpty) else {
-            return .completed
+            return .error(PDMDownloadError(code: .downloadFailed, message: "下载材料缺少包名或有效地址"))
         }
 
         let snapshot = product.catalogSnapshot ?? task.catalogSnapshot
@@ -1013,75 +970,61 @@ class NewDownloadUtils {
             }
 
             do {
+                let workspace = task.directory.appendingPathComponent(product.sapCode)
+                    .appendingPathComponent(".pdm", isDirectory: true)
+                    .appendingPathComponent(self.stableDirectoryToken(packageId), isDirectory: true)
                 let workflow = PDMWorkflowManager(
-                    tempDirectory: task.directory.appendingPathComponent(product.sapCode),
+                    tempDirectory: workspace,
                     validationServiceBaseURL: validationServiceBaseURL ?? pdmValidationServiceBaseURL
                 )
                 let manifestURL = self.normalizedPackageURL(package.manifestURL, cdn: cleanCdn)
-                let downloadedURL = try await workflow.execute(
-                    manifestURL: manifestURL,
-                    cdnBaseURL: cleanCdn,
-                    headers: NetworkConstants.downloadHeaders,
-                    destinationDirectory: task.directory.appendingPathComponent(product.sapCode),
-                    packageIdentifier: packageId,
-                    progressHandler: { state, progress in
-                        Task {
-                            await MainActor.run {
-                                if state == .downloadAssetBits {
-                                    let normalizedProgress = min(max(progress, 0), 1)
-                                    package.progress = normalizedProgress
-                                    package.downloadedSize = Int64(Double(max(package.downloadSize, 0)) * normalizedProgress)
+                let downloadedURL = try await task.execution.runThrowing(generation: generation) {
+                    try await workflow.execute(
+                        manifestURL: manifestURL,
+                        cdnBaseURL: cleanCdn,
+                        headers: NetworkConstants.downloadHeaders,
+                        destinationDirectory: workspace,
+                        packageIdentifier: packageId,
+                        artifactIdentity: DownloadArtifactStore.identity(for: package),
+                        progressHandler: { state, _ in
+                            self.receiveWorkflowProgress(task: task, package: package, generation: generation, state: state)
+                        },
+                        assetInfoHandler: { _, assetSize in
+                            guard assetSize > 0 else { return }
+                            Task { [weak self] in
+                                await MainActor.run {
+                                    guard task.execution.accepts(generation) else { return }
+                                    package.downloadSize = assetSize
+                                    package.downloadedSize = min(max(package.downloadedSize, 0), assetSize)
+                                    package.objectWillChange.send()
                                 }
-                                package.objectWillChange.send()
+                                await self?.updateTaskProgressDirect(task: task, force: true)
                             }
-                            await self.updateTaskProgressDirect(task: task)
-                        }
-                    },
-                    assetInfoHandler: { _, assetSize in
-                        guard assetSize > 0 else { return }
-                        Task { [weak self] in
-                            await MainActor.run {
-                                package.downloadSize = assetSize
-                                package.downloadedSize = min(max(package.downloadedSize, 0), assetSize)
-                                package.objectWillChange.send()
+                        },
+                        downloadProgressHandler: { downloadedBytes, totalBytes, speed, phase in
+                            self.receiveDownloadProgress(task: task, package: package, generation: generation,
+                                                          downloaded: downloadedBytes, total: totalBytes, speed: speed, phase: phase)
+                        },
+                        cancellationCheck: {
+                            let isCancelled = await globalCancelTracker.isCancelled(task.id)
+                            if isCancelled {
+                                return true
                             }
-                            await self?.updateTaskProgressDirect(task: task, force: true)
+                            return await globalCancelTracker.isPaused(task.id)
                         }
-                    },
-                    downloadProgressHandler: { downloadedBytes, totalBytes, speed in
-                        Task { [weak self] in
-                            await MainActor.run {
-                                let normalizedTotalBytes = totalBytes > 0 ? totalBytes : package.downloadSize
-                                if normalizedTotalBytes > 0 {
-                                    package.downloadSize = normalizedTotalBytes
-                                }
-                                package.downloadedSize = min(max(downloadedBytes, 0), max(package.downloadSize, 0))
-                                package.progress = self?.normalizedProgress(
-                                    downloadedSize: package.downloadedSize,
-                                    totalSize: package.downloadSize
-                                ) ?? 0
-                                package.speed = speed
-                                package.status = .downloading
-                                package.objectWillChange.send()
-                            }
-                            await self?.updateTaskProgressDirect(task: task, force: true)
-                        }
-                    },
-                    cancellationCheck: {
-                        let isCancelled = await globalCancelTracker.isCancelled(task.id)
-                        if isCancelled {
-                            return true
-                        }
-                        return await globalCancelTracker.isPaused(task.id)
-                    }
-                )
+                    )
+                }
 
+                guard task.execution.accepts(generation) else { return .cancelled }
                 let finalURL = destinationURL
                 if downloadedURL.path != finalURL.path {
-                    try self.prepareCompletedWorkflowDownload(from: downloadedURL, to: finalURL)
+                    try await PDMDownloadIO.run {
+                        try self.prepareCompletedWorkflowDownload(from: downloadedURL, to: finalURL)
+                    }
                 }
                 if let completedSize = self.fileSizeIfExists(finalURL), completedSize > 0 {
                     await MainActor.run {
+                        guard task.execution.accepts(generation) else { return }
                         package.downloadSize = completedSize
                         package.downloadedSize = completedSize
                         package.progress = 1.0
@@ -1104,56 +1047,44 @@ class NewDownloadUtils {
                 return .error(PDMDownloadError(code: .downloadFailed, message: "Invalid package download URL"))
             }
 
-            return await PDMDownloadEngine.shared.downloadFile(
-                packageId: packageId,
-                url: url,
-                destinationURL: destinationURL,
-                headers: NetworkConstants.downloadHeaders,
-                expectedTotalSize: package.downloadSize,
-                validationURL: validationURLs.first,
-                validationURLs: validationURLs,
-                progressHandler: { [weak self] downloadedBytes, totalBytes, speed in
-                    Task {
-                        await MainActor.run {
-                            let normalizedDownloadedBytes = totalBytes > 0
-                                ? min(max(downloadedBytes, 0), totalBytes)
-                                : max(downloadedBytes, 0)
-                            package.downloadedSize = normalizedDownloadedBytes
-                            package.progress = self?.normalizedProgress(
-                                downloadedSize: normalizedDownloadedBytes,
-                                totalSize: totalBytes
-                            ) ?? 0
-                            package.speed = speed
-                            package.objectWillChange.send()
+            return await task.execution.run(generation: generation) {
+                await PDMDownloadEngine.shared.downloadFile(
+                    packageId: packageId,
+                    url: url,
+                    destinationURL: destinationURL,
+                    headers: NetworkConstants.downloadHeaders,
+                    expectedTotalSize: package.downloadSize,
+                    validationURL: validationURLs.first,
+                    validationURLs: validationURLs,
+                    artifactIdentity: DownloadArtifactStore.identity(for: package),
+                    progressHandler: { downloadedBytes, totalBytes, speed, phase in
+                        self.receiveDownloadProgress(task: task, package: package, generation: generation,
+                                                          downloaded: downloadedBytes, total: totalBytes, speed: speed, phase: phase)
                         }
-                        await self?.updateTaskProgressDirect(task: task)
-                    }
-                }
-            )
+                )
+            }
         }
 
         let result = package.manifestURL.isEmpty ? await startDirectDownload() : await startWorkflowDownload()
-        if package.manifestURL.isEmpty,
-           case .completed = result,
-           packageArchiveValidationError(package: package, destinationURL: destinationURL) != nil {
-            resetPackageArchiveResumeState(task: task, dependency: product, package: package, destinationURL: destinationURL)
-
-            await MainActor.run {
-                package.downloadedSize = 0
-                package.progress = 0
-                package.speed = 0
-                package.status = .downloading
-            }
-
-            let retryResult = package.manifestURL.isEmpty ? await startDirectDownload() : await startWorkflowDownload()
-            if case .completed = retryResult,
-               let retryValidationError = packageArchiveValidationError(package: package, destinationURL: destinationURL) {
-                return .error(retryValidationError)
-            }
-
-            return retryResult
+        guard task.execution.accepts(generation) else {
+            return await globalCancelTracker.isPaused(task.id)
+                ? .paused(bytesDownloaded: package.downloadedSize) : .cancelled
         }
-
+        if case .completed = result {
+            await markDownloadValidating(task: task, package: package, generation: generation)
+            do {
+                try await PDMDownloadIO.validate { [self] in
+                    try DownloadArtifactStore.recordCompletion(
+                        fileURL: destinationURL, identity: DownloadArtifactStore.identity(for: package),
+                        expectedSize: package.manifestURL.isEmpty ? package.downloadSize : 0,
+                        metadataDirectory: metadataDirectory(for: task, dependency: product, package: package),
+                        cancellationCheck: { !task.execution.accepts(generation) }
+                    )
+                }
+            } catch {
+                return .error(PDMDownloadError(code: .signatureValidationFailed, message: error.localizedDescription, underlying: error))
+            }
+        }
         return result
     }
 
@@ -1176,35 +1107,15 @@ class NewDownloadUtils {
     }
 
     private func prepareCompletedWorkflowDownload(from sourceURL: URL, to destinationURL: URL) throws {
-        try FileManager.default.createDirectory(at: destinationURL.deletingLastPathComponent(), withIntermediateDirectories: true)
-
-        if !FileManager.default.fileExists(atPath: destinationURL.path) {
-            FileManager.default.createFile(atPath: destinationURL.path, contents: nil)
-        }
-
-        let sourceHandle = try FileHandle(forReadingFrom: sourceURL)
-        let destinationHandle = try FileHandle(forWritingTo: destinationURL)
-
-        defer {
-            try? sourceHandle.close()
-            try? destinationHandle.close()
-        }
-
-        destinationHandle.truncateFile(atOffset: 0)
-
-        while true {
-            let shouldContinue = autoreleasepool { () -> Bool in
-                let data = sourceHandle.readData(ofLength: 1024 * 1024)
-                if data.isEmpty {
-                    return false
-                }
-                destinationHandle.write(data)
-                return true
-            }
-            if !shouldContinue {
-                break
-            }
-        }
+        let manager = FileManager.default
+        try manager.createDirectory(at: destinationURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        let staging = destinationURL.deletingLastPathComponent().appendingPathComponent(".download-final-\(UUID().uuidString)")
+        try manager.copyItem(at: sourceURL, to: staging)
+        let handle = try FileHandle(forWritingTo: staging)
+        try handle.synchronize()
+        try handle.close()
+        try DownloadArtifactStore.preserveForRetry(destinationURL)
+        try manager.moveItem(at: staging, to: destinationURL)
     }
 
     private func normalizedValidationURLs(
@@ -1305,30 +1216,71 @@ class NewDownloadUtils {
         return nil
     }
 
+    private func receiveWorkflowProgress(task: NewDownloadTask, package: Package, generation: UUID?, state: PDMState) {
+        guard state == .checkDownloadedBits || state == .assetSignatureValidation || state == .executeAsset else { return }
+        DispatchQueue.main.async {
+            guard task.execution.accepts(generation), package.status == .downloading else { return }
+            package.downloadPhase = .validating
+            package.speed = 0
+            Task { await self.updateTaskProgressDirect(task: task, force: true) }
+        }
+    }
+
+    private func receiveDownloadProgress(task: NewDownloadTask, package: Package, generation: UUID?,
+                                         downloaded: Int64, total: Int64, speed: Double, phase: PDMDownloadPhase) {
+        DispatchQueue.main.async {
+            guard task.execution.accepts(generation), package.status == .downloading else { return }
+            if total > 0 { package.downloadSize = total }
+            package.downloadedSize = package.downloadSize > 0
+                ? min(max(downloaded, 0), package.downloadSize) : max(downloaded, 0)
+            package.progress = self.normalizedProgress(downloadedSize: package.downloadedSize, totalSize: package.downloadSize)
+            package.downloadPhase = phase
+            package.speed = phase == .transferring && speed.isFinite ? max(speed, 0) : 0
+            Task { await self.updateTaskProgressDirect(task: task, force: true) }
+        }
+    }
+
+    private func markDownloadValidating(task: NewDownloadTask, package: Package, generation: UUID?) async {
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            DispatchQueue.main.async {
+                if task.execution.accepts(generation) {
+                    package.downloadPhase = .validating
+                    package.speed = 0
+                }
+                continuation.resume()
+            }
+        }
+        await updateTaskProgressDirect(task: task, force: true)
+    }
+
+    @MainActor
+    private func clearDownloadSpeeds(_ task: NewDownloadTask) {
+        task.totalSpeed = 0
+        for package in task.dependenciesToDownload.flatMap({ $0.packages }) {
+            package.speed = 0
+            package.downloadPhase = .waiting
+        }
+        globalNetworkManager.updateDockBadge()
+    }
+
     private func updateTaskProgressDirect(task: NewDownloadTask, force: Bool = false) async {
+        let generation = task.execution.generation
         let shouldPublish = await taskProgressPublishLimiter.shouldPublish(taskId: task.id, force: force)
         guard shouldPublish else { return }
-
-        let isActive = await MainActor.run { task.status.isActive }
-        guard isActive else { return }
-
-        let allPackages = task.dependenciesToDownload.flatMap { $0.packages }
-        let totalSize = allPackages.reduce(Int64(0)) { $0 + $1.downloadSize }
-        let totalDownloaded = allPackages.reduce(Int64(0)) { partialResult, package in
-            partialResult + min(max(package.downloadedSize, 0), package.downloadSize)
-        }
-        let clampedDownloaded = totalSize > 0 ? min(max(totalDownloaded, 0), totalSize) : 0
-        let totalSpeed = allPackages.reduce(0.0) { partialResult, package in
-            guard package.status == .downloading || package.status == .paused else { return partialResult }
-            return partialResult + package.speed
-        }
-        let totalProgress = normalizedProgress(downloadedSize: clampedDownloaded, totalSize: totalSize)
-
         await MainActor.run {
+            guard task.execution.isCurrent(generation), task.status.isActive else { return }
+            let allPackages = task.dependenciesToDownload.flatMap { $0.packages }
+            let totalSize = allPackages.reduce(Int64(0)) { $0 + max($1.downloadSize, 0) }
+            let totalDownloaded = allPackages.reduce(Int64(0)) {
+                $0 + ($1.downloadSize > 0 ? min(max($1.downloadedSize, 0), $1.downloadSize) : max($1.downloadedSize, 0))
+            }
             task.totalSize = totalSize
-            task.totalDownloadedSize = clampedDownloaded
-            task.totalProgress = totalProgress
-            task.totalSpeed = totalSpeed
+            task.totalDownloadedSize = totalDownloaded
+            task.totalProgress = task.hasUnknownDownloadSize ? 0
+                : normalizedProgress(downloadedSize: totalDownloaded, totalSize: totalSize)
+            task.totalSpeed = task.execution.accepts(generation) ? allPackages.reduce(0.0) {
+                $0 + ($1.status == .downloading && $1.downloadPhase == .transferring ? $1.speed : 0)
+            } : 0
             task.objectWillChange.send()
             globalNetworkManager.updateDockBadge()
             globalNetworkManager.objectWillChange.send()
@@ -1357,8 +1309,10 @@ class NewDownloadUtils {
             return
         }
 
+        let wasActive = task.status.isActive
+        await pauseDownloadTask(taskId: task.id, reason: .userRequested)
         let packageIdentifier = generatePackageIdentifier(package: package, task: task, dependency: dependency)
-        PDMDownloadEngine.shared.cancelDownload(packageId: packageIdentifier)
+        await PDMDownloadEngine.shared.cancelAndWait(packageId: packageIdentifier)
         let destinationURL = packageDestinationURL(task: task, dependency: dependency, package: package)
 
         await MainActor.run {
@@ -1375,6 +1329,7 @@ class NewDownloadUtils {
             globalNetworkManager.updateDockBadge()
             globalNetworkManager.objectWillChange.send()
         }
+        if wasActive { await resumeDownloadTask(taskId: task.id) }
     }
 
     func removeIncrementalDependency(taskId: UUID, dependencySapCode: String) async {
@@ -1391,9 +1346,11 @@ class NewDownloadUtils {
             return
         }
 
+        let wasActive = task.status.isActive
+        await pauseDownloadTask(taskId: task.id, reason: .userRequested)
         for package in removablePackages {
             let packageIdentifier = generatePackageIdentifier(package: package, task: task, dependency: dependency)
-            PDMDownloadEngine.shared.cancelDownload(packageId: packageIdentifier)
+            await PDMDownloadEngine.shared.cancelAndWait(packageId: packageIdentifier)
             let destinationURL = packageDestinationURL(task: task, dependency: dependency, package: package)
             await MainActor.run {
                 if package.downloaded || package.downloadedSize > 0 || package.status == .downloading || package.status == .paused {
@@ -1414,21 +1371,28 @@ class NewDownloadUtils {
             globalNetworkManager.updateDockBadge()
             globalNetworkManager.objectWillChange.send()
         }
+        if wasActive { await resumeDownloadTask(taskId: task.id) }
     }
 
-    func handleError(_ taskId: UUID, _ error: Error) async {
+    private func handleError(_ taskId: UUID, _ error: Error, generation: UUID) async {
         let task = await globalNetworkManager.downloadTasks.first(where: { $0.id == taskId })
-        guard let task = task else { return }
+        guard let task, task.execution.isCurrent(generation) else { return }
 
-        if case NetworkError.cancelled = error,
-           await globalCancelTracker.isPaused(taskId) {
-            await rebuildTaskPackages(task: task, inactiveStatus: .paused)
+        if !task.execution.accepts(generation) || Task.isCancelled || DownloadTaskExecution.isCancellation(error) {
+            let paused = await globalCancelTracker.isPaused(taskId)
+            if paused { await rebuildTaskPackages(task: task, inactiveStatus: .paused) }
             await MainActor.run {
-                task.setStatus(.paused(DownloadStatus.PauseInfo(
-                    reason: .userRequested,
-                    timestamp: Date(),
-                    resumable: true
-                )))
+                guard task.execution.isCurrent(generation) else { return }
+                if paused {
+                    task.setStatus(.paused(DownloadStatus.PauseInfo(
+                        reason: .userRequested, timestamp: Date(), resumable: true
+                    )))
+                } else {
+                    task.setStatus(.failed(DownloadStatus.FailureInfo(
+                        message: NetworkError.cancelled.localizedDescription, error: NetworkError.cancelled,
+                        timestamp: Date(), recoverable: true
+                    )))
+                }
                 globalNetworkManager.updateDockBadge()
                 globalNetworkManager.objectWillChange.send()
             }
@@ -1440,6 +1404,7 @@ class NewDownloadUtils {
         let (errorMessage, isRecoverable) = classifyError(error)
 
         if isRecoverable && task.retryCount < NetworkConstants.maxRetryAttempts {
+            await MainActor.run { clearDownloadSpeeds(task) }
             task.retryCount += 1
             let nextRetryDate = Date().addingTimeInterval(TimeInterval(NetworkConstants.retryDelay / 1_000_000_000))
             task.setStatus(.retrying(DownloadStatus.RetryInfo(
@@ -1487,9 +1452,18 @@ class NewDownloadUtils {
             return 
         }
 
+        if let running = task.execution.generation, task.execution.accepts(running) { return }
+        await task.execution.waitUntilStopped()
+        let startedGeneration = await MainActor.run { () -> UUID? in
+            guard globalNetworkManager.downloadTasks.contains(where: { $0 === task }) else { return nil }
+            return task.execution.begin()
+        }
+        guard let generation = startedGeneration else { return }
+        defer { task.execution.finish(generation) }
         do {
             try await MainActor.run {
                 try globalNetworkManager.validateDownloadDestination(task.directory, excluding: task.id)
+                clearDownloadSpeeds(task)
                 task.totalStatus = .preparing(DownloadStatus.PrepareInfo(
                     message: "正在恢复下载...", timestamp: Date(), stage: .initializing
                 ))
@@ -1504,8 +1478,10 @@ class NewDownloadUtils {
             await globalNetworkManager.saveTask(task)
             return
         }
-        await globalCancelTracker.resume(taskId)
+        await globalCancelTracker.reset(taskId)
+        guard task.execution.accepts(generation) else { return }
         await rebuildTaskPackages(task: task, inactiveStatus: .waiting)
+        guard task.execution.accepts(generation) else { return }
 
         let hasPendingPackages = await MainActor.run {
             task.dependenciesToDownload.flatMap { $0.packages }.contains { !$0.downloaded }
@@ -1550,24 +1526,9 @@ class NewDownloadUtils {
                 guard let productInfo = task.catalogSnapshot?.product(id: task.productId, version: task.productVersion) else {
                     throw NetworkError.invalidData("找不到 \(task.productId) 产品信息")
                 }
-                try await downloadAPRO(task: task, productInfo: productInfo)
-            } catch NetworkError.cancelled {
-                if await globalCancelTracker.isPaused(task.id) {
-                    await rebuildTaskPackages(task: task, inactiveStatus: .paused)
-                    await MainActor.run {
-                        task.setStatus(.paused(DownloadStatus.PauseInfo(
-                            reason: .userRequested,
-                            timestamp: Date(),
-                            resumable: true
-                        )))
-                        globalNetworkManager.updateDockBadge()
-                        globalNetworkManager.objectWillChange.send()
-                    }
-                    await taskProgressPublishLimiter.reset(taskId: task.id)
-                    await globalNetworkManager.saveTask(task)
-                }
+                try await performAPRODownload(task: task, productInfo: productInfo)
             } catch {
-                await handleError(task.id, error)
+                await handleError(task.id, error, generation: generation)
             }
         } else {
             await startConcurrentDownloadProcess(task: task)
@@ -1667,7 +1628,7 @@ class NewDownloadUtils {
         return nil
     }
 
-    func generateDriverXML(version: String, language: String, productInfo: Product, dependencies: [DependenciesToDownload], targetArchitecture: String, modules: [[String: Any]] = []) -> String {
+    func generateDriverXML(version: String, language: String, productInfo: Product, dependencies: [DependenciesToDownload], targetArchitecture: String, modules: [[String: Any]] = [], requiredDependencies: [DependenciesToDownload]? = nil) -> String {
         guard let mainDependency = dependencies.first(where: { $0.sapCode == productInfo.id }) else {
             return ""
         }
@@ -1679,7 +1640,7 @@ class NewDownloadUtils {
         let buildVersion = mainDependency.buildVersion.isEmpty ? version : mainDependency.buildVersion
         let baseVersion = mainDependency.baseVersion.isEmpty ? version : mainDependency.baseVersion
 
-        let dependencyXML = dependencies
+        let dependencyXML = (requiredDependencies ?? dependencies)
             .filter { $0.sapCode != productInfo.id }
             .map { dependency in
                 let dependencyBuildVersion = dependency.buildVersion.isEmpty ? dependency.version : dependency.buildVersion
@@ -1688,6 +1649,7 @@ class NewDownloadUtils {
                 return """
                 <Dependency>
                     <SapCode>\(dependency.sapCode)</SapCode>
+                    <ReuseInstalled>\(!dependencies.contains { dependencyIdentity($0) == dependencyIdentity(dependency) })</ReuseInstalled>
                     <CodexVersion>\(dependency.version)</CodexVersion>
                     <BaseVersion>\(dependencyBaseVersion)</BaseVersion>
                     <BuildVersion>\(dependencyBuildVersion)</BuildVersion>
@@ -1737,7 +1699,14 @@ class NewDownloadUtils {
         """
     }
 
-    func downloadAPRO(task: NewDownloadTask, productInfo: Product) async throws {
+    func downloadAPRO(task: NewDownloadTask, productInfo: Product, generation: UUID) async throws {
+        guard task.execution.accepts(generation) else { throw NetworkError.cancelled }
+        try await performAPRODownload(task: task, productInfo: productInfo)
+    }
+
+    private func performAPRODownload(task: NewDownloadTask, productInfo: Product) async throws {
+        let generation = task.execution.generation
+        guard task.execution.accepts(generation) else { throw NetworkError.cancelled }
         let architecture = HDPIMParityTargetArchitecture(rawValue: task.targetArchitecture)
             ?? task.catalogSnapshot?.context.architecture ?? .intel
         let match = try catalogInstallerMatch(
@@ -1783,7 +1752,7 @@ class NewDownloadUtils {
         aproPackage.isSelected = true
         aproPackage.downloadedSize = min(max(existingPackage?.downloadedSize ?? 0, 0), max(aproPackage.downloadSize, 0))
         aproPackage.progress = normalizedProgress(downloadedSize: aproPackage.downloadedSize, totalSize: aproPackage.downloadSize)
-        aproPackage.speed = existingPackage?.speed ?? task.totalSpeed
+        aproPackage.speed = 0
         aproPackage.status = .downloading
 
         let product = DependenciesToDownload(
@@ -1799,9 +1768,9 @@ class NewDownloadUtils {
         if let restoredBytes = restoredDownloadedSize(task: task, dependency: product, package: aproPackage, destinationURL: outputURL) {
             aproPackage.downloadedSize = min(max(restoredBytes, 0), max(aproPackage.downloadSize, 0))
             aproPackage.progress = normalizedProgress(downloadedSize: aproPackage.downloadedSize, totalSize: aproPackage.downloadSize)
-        } else if let existingSize = fileSizeIfExists(outputURL), existingSize > 0, aproPackage.downloadSize > 0 {
-            aproPackage.downloadedSize = min(existingSize, aproPackage.downloadSize)
-            aproPackage.progress = normalizedProgress(downloadedSize: aproPackage.downloadedSize, totalSize: aproPackage.downloadSize)
+        } else {
+            aproPackage.downloadedSize = 0
+            aproPackage.progress = 0
         }
 
         await MainActor.run {
@@ -1838,39 +1807,23 @@ class NewDownloadUtils {
                 throw NetworkError.invalidURL(downloadURL)
             }
 
-            let result = await PDMDownloadEngine.shared.downloadFile(
-                packageId: packageId,
-                url: url,
-                destinationURL: outputURL,
-                headers: NetworkConstants.downloadHeaders,
-                expectedTotalSize: aproPackage.downloadSize,
-                validationURL: nil,
-                validationURLs: [],
-                progressHandler: { downloadedBytes, totalBytes, speed in
-                    Task {
-                        await MainActor.run {
-                            guard task.status.isActive else { return }
-                            let normalizedTotalBytes = totalBytes > 0 ? totalBytes : aproPackage.downloadSize
-                            if normalizedTotalBytes > 0 {
-                                aproPackage.downloadSize = normalizedTotalBytes
-                                task.totalSize = normalizedTotalBytes
-                            }
-                            aproPackage.status = .downloading
-                            aproPackage.downloadedSize = min(max(downloadedBytes, 0), max(aproPackage.downloadSize, 0))
-                            aproPackage.progress = self.normalizedProgress(
-                                downloadedSize: aproPackage.downloadedSize,
-                                totalSize: aproPackage.downloadSize
-                            )
-                            aproPackage.speed = speed
-                            task.totalDownloadedSize = aproPackage.downloadedSize
-                            task.totalProgress = aproPackage.progress
-                            task.totalSpeed = speed
-                            task.objectWillChange.send()
+            let result = await task.execution.run(generation: generation) {
+                await PDMDownloadEngine.shared.downloadFile(
+                    packageId: packageId,
+                    url: url,
+                    destinationURL: outputURL,
+                    metadataDirectory: metadataDirectory,
+                    headers: NetworkConstants.downloadHeaders,
+                    expectedTotalSize: 0,
+                    validationURL: nil,
+                    validationURLs: [],
+                    artifactIdentity: DownloadArtifactStore.identity(for: aproPackage),
+                    progressHandler: { downloadedBytes, totalBytes, speed, phase in
+                        self.receiveDownloadProgress(task: task, package: aproPackage, generation: generation,
+                                                          downloaded: downloadedBytes, total: totalBytes, speed: speed, phase: phase)
                         }
-                        await self.updateTaskProgressDirect(task: task, force: true)
-                    }
-                }
-            )
+                )
+            }
             switch result {
             case .completed:
                 completedURL = outputURL
@@ -1885,96 +1838,63 @@ class NewDownloadUtils {
                 validationServiceBaseURL: pdmValidationServiceBaseURL
             )
 
-            completedURL = try await workflow.execute(
-                manifestURL: manifestURL,
-                cdnBaseURL: cleanCdn,
-                headers: NetworkConstants.downloadHeaders,
-                destinationDirectory: outputURL.deletingLastPathComponent(),
-                packageIdentifier: packageId,
-                returnExecutedAsset: true,
-                skipAssetActions: true,
-                outputAssetURL: outputURL,
-                assetMetadataDirectory: metadataDirectory,
-                progressHandler: { state, progress in
-                    Task {
-                        await MainActor.run {
-                            guard task.status.isActive else { return }
-                            let normalizedProgress = min(max(progress, 0), 1)
-                            switch state {
-                            case .downloadAssetBits:
-                                aproPackage.status = .downloading
-                                aproPackage.progress = normalizedProgress
-                                if aproPackage.downloadSize > 0 {
-                                    aproPackage.downloadedSize = Int64(Double(aproPackage.downloadSize) * normalizedProgress)
-                                }
-                            case .executeAsset:
-                                task.setStatus(.preparing(DownloadStatus.PrepareInfo(
-                                    message: "正在校验 \(task.displayName) 安装镜像...",
-                                    timestamp: Date(),
-                                    stage: .creatingInstaller
-                                )))
-                            default:
-                                break
+            completedURL = try await task.execution.runThrowing(generation: generation) {
+                try await workflow.execute(
+                    manifestURL: manifestURL,
+                    cdnBaseURL: cleanCdn,
+                    headers: NetworkConstants.downloadHeaders,
+                    destinationDirectory: outputURL.deletingLastPathComponent(),
+                    packageIdentifier: packageId,
+                    artifactIdentity: DownloadArtifactStore.identity(for: aproPackage),
+                    returnExecutedAsset: true,
+                    skipAssetActions: true,
+                    outputAssetURL: outputURL,
+                    assetMetadataDirectory: metadataDirectory,
+                    progressHandler: { state, _ in
+                        self.receiveWorkflowProgress(task: task, package: aproPackage, generation: generation, state: state)
+                    },
+                    assetInfoHandler: { _, assetSize in
+                        guard assetSize > 0 else { return }
+                        Task {
+                            await MainActor.run {
+                                guard task.execution.accepts(generation), task.status.isActive else { return }
+                                aproPackage.downloadSize = assetSize
+                                aproPackage.downloadedSize = min(max(aproPackage.downloadedSize, 0), assetSize)
+                                task.totalSize = assetSize
+                                task.totalDownloadedSize = min(max(task.totalDownloadedSize, 0), assetSize)
+                                task.objectWillChange.send()
                             }
-                            task.totalDownloadedSize = aproPackage.downloadedSize
-                            task.totalProgress = aproPackage.progress
-                            task.objectWillChange.send()
+                            await self.updateTaskProgressDirect(task: task, force: true)
                         }
-                        await self.updateTaskProgressDirect(task: task)
-                    }
-                },
-                assetInfoHandler: { _, assetSize in
-                    guard assetSize > 0 else { return }
-                    Task {
-                        await MainActor.run {
-                            guard task.status.isActive else { return }
-                            aproPackage.downloadSize = assetSize
-                            aproPackage.downloadedSize = min(max(aproPackage.downloadedSize, 0), assetSize)
-                            task.totalSize = assetSize
-                            task.totalDownloadedSize = min(max(task.totalDownloadedSize, 0), assetSize)
-                            task.objectWillChange.send()
+                    },
+                    downloadProgressHandler: { downloadedBytes, totalBytes, speed, phase in
+                            self.receiveDownloadProgress(task: task, package: aproPackage, generation: generation,
+                                                          downloaded: downloadedBytes, total: totalBytes, speed: speed, phase: phase)
+                        },
+                    cancellationCheck: {
+                        let isCancelled = await globalCancelTracker.isCancelled(task.id)
+                        if isCancelled {
+                            return true
                         }
-                        await self.updateTaskProgressDirect(task: task, force: true)
+                        return await globalCancelTracker.isPaused(task.id)
                     }
-                },
-                downloadProgressHandler: { downloadedBytes, totalBytes, speed in
-                    Task {
-                        await MainActor.run {
-                            guard task.status.isActive else { return }
-                            let normalizedTotalBytes = totalBytes > 0 ? totalBytes : aproPackage.downloadSize
-                            if normalizedTotalBytes > 0 {
-                                aproPackage.downloadSize = normalizedTotalBytes
-                                task.totalSize = normalizedTotalBytes
-                            }
-                            aproPackage.status = .downloading
-                            aproPackage.downloadedSize = min(max(downloadedBytes, 0), max(aproPackage.downloadSize, 0))
-                            aproPackage.progress = self.normalizedProgress(
-                                downloadedSize: aproPackage.downloadedSize,
-                                totalSize: aproPackage.downloadSize
-                            )
-                            aproPackage.speed = speed
-                            task.totalDownloadedSize = aproPackage.downloadedSize
-                            task.totalProgress = aproPackage.progress
-                            task.totalSpeed = speed
-                            task.objectWillChange.send()
-                        }
-                        await self.updateTaskProgressDirect(task: task, force: true)
-                    }
-                },
-                cancellationCheck: {
-                    let isCancelled = await globalCancelTracker.isCancelled(task.id)
-                    if isCancelled {
-                        return true
-                    }
-                    return await globalCancelTracker.isPaused(task.id)
-                }
-            )
+                )
+            }
         }
 
+        guard task.execution.accepts(generation) else { throw NetworkError.cancelled }
         guard completedURL.path == outputURL.path else {
             throw NetworkError.fileSystemError("\(task.productId) 下载输出路径不一致", nil)
         }
 
+        await markDownloadValidating(task: task, package: aproPackage, generation: generation)
+        try await PDMDownloadIO.validate {
+            try DownloadArtifactStore.recordCompletion(
+                fileURL: outputURL, identity: DownloadArtifactStore.identity(for: aproPackage),
+                metadataDirectory: metadataDirectory,
+                cancellationCheck: { !task.execution.accepts(generation) }
+            )
+        }
         if let completedSize = fileSizeIfExists(outputURL), completedSize > 0 {
             aproPackage.downloadSize = completedSize
         }
@@ -2061,6 +1981,8 @@ class NewDownloadUtils {
             return
         }
 
+        task.execution.requestStop()
+        await MainActor.run { self.clearDownloadSpeeds(task) }
         for dependency in task.dependenciesToDownload {
             for package in dependency.packages where !package.downloaded {
                 let packageId = generatePackageIdentifier(package: package, task: task, dependency: dependency)
@@ -2152,196 +2074,42 @@ class NewDownloadUtils {
         progressHandler: @escaping (Double, String) -> Void,
         cancellationHandler: @escaping () -> Bool
     ) async throws {
-        let baseUrl = "https://cdn-ffc.oobesaas.adobe.com/core/v1/applications?name=CreativeCloud&platform=\(AppStatics.isAppleSilicon ? "macarm64" : "osx10")"
-
-        let tempDirectory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
-        try FileManager.default.createDirectory(at: tempDirectory, withIntermediateDirectories: true)
-
-        let configuration = URLSessionConfiguration.default
-        configuration.timeoutIntervalForRequest = 30
-        configuration.timeoutIntervalForResource = 300
-        configuration.httpAdditionalHeaders = NetworkConstants.downloadHeaders
-        let session = URLSession(configuration: configuration)
-
         do {
-            var request = URLRequest(url: URL(string: baseUrl)!)
-            NetworkConstants.downloadHeaders.forEach { request.setValue($0.value, forHTTPHeaderField: $0.key) }
-            let (data, response) = try await session.data(for: request)
-
-            guard let httpResponse = response as? HTTPURLResponse,
-                  (200...299).contains(httpResponse.statusCode) else {
-                throw NetworkError.invalidResponse
-            }
-
-            let xmlDoc = try XMLDocument(data: data)
-
-            let packageSets = try xmlDoc.nodes(forXPath: "//packageSet[name='ADC']")
-            guard let adcPackageSet = packageSets.first else {
-                throw NetworkError.invalidData("找不到ADC包集")
-            }
-
-            let targetPackages = ["HDBox", "IPCBox"]
-            var packagesToDownload: [(name: String, url: URL, size: Int64)] = []
-
-            for packageName in targetPackages {
-                let packageNodes = try adcPackageSet.nodes(forXPath: ".//package[name='\(packageName)']")
-                guard let package = packageNodes.first else {
-                    print("未找到包: \(packageName)")
-                    continue
-                }
-
-                guard let manifestUrl = try package.nodes(forXPath: ".//manifestUrl").first?.stringValue,
-                      let cdnBase = try xmlDoc.nodes(forXPath: "//cdn/secure").first?.stringValue else {
-                    print("无法获取manifest URL或CDN基础URL")
-                    continue
-                }
-
-                let manifestFullUrl = cdnBase + manifestUrl
-                print(manifestFullUrl)
-
-                var manifestRequest = URLRequest(url: URL(string: manifestFullUrl)!)
-                NetworkConstants.downloadHeaders.forEach { manifestRequest.setValue($0.value, forHTTPHeaderField: $0.key) }
-                let (manifestData, manifestResponse) = try await session.data(for: manifestRequest)
-
-                guard let manifestHttpResponse = manifestResponse as? HTTPURLResponse,
-                      (200...299).contains(manifestHttpResponse.statusCode) else {
-                    print("获取manifest失败: HTTP \(String(describing: (manifestResponse as? HTTPURLResponse)?.statusCode))")
-                    continue
-                }
-
-                let manifestDoc = try XMLDocument(data: manifestData)
-                let assetPathNodes = try manifestDoc.nodes(forXPath: "//asset_path")
-                let sizeNodes = try manifestDoc.nodes(forXPath: "//asset_size")
-                guard let assetPath = assetPathNodes.first?.stringValue,
-                      let sizeStr = sizeNodes.first?.stringValue,
-                      let size = Int64(sizeStr),
-                      let downloadUrl = URL(string: assetPath) else {
-                    continue
-                }
-                packagesToDownload.append((packageName, downloadUrl, size))
-            }
-
-            guard !packagesToDownload.isEmpty else {
-                throw NetworkError.invalidData("没有找到可下载的包")
-            }
-
-            let totalCount = packagesToDownload.count
-            for (index, package) in packagesToDownload.enumerated() {
-                if cancellationHandler() {
-                    try? FileManager.default.removeItem(at: tempDirectory)
-                    throw NetworkError.cancelled
-                }
-
-                await MainActor.run {
-                    progressHandler(Double(index) / Double(totalCount), "正在下载 \(package.name)...")
-                }
-
-                let destinationURL = tempDirectory.appendingPathComponent("\(package.name).zip")
-                var downloadRequest = URLRequest(url: package.url)
-                print(downloadRequest)
-                NetworkConstants.downloadHeaders.forEach { downloadRequest.setValue($0.value, forHTTPHeaderField: $0.key) }
-                let (downloadURL, downloadResponse) = try await session.download(for: downloadRequest)
-
-                guard let httpResponse = downloadResponse as? HTTPURLResponse,
-                      (200...299).contains(httpResponse.statusCode) else {
-                    print("下载失败: HTTP \(String(describing: (downloadResponse as? HTTPURLResponse)?.statusCode))")
-                    continue
-                }
-
-                try FileManager.default.moveItem(at: downloadURL, to: destinationURL)
-            }
-
-            await MainActor.run {
-                progressHandler(0.9, "正在完成下载...")
-            }
-
-            let targetDirectory = "/Library/Application\\ Support/Adobe/Adobe\\ Desktop\\ Common"
-            let rawTargetDirectory = "/Library/Application Support/Adobe/Adobe Desktop Common"
-
-            if !FileManager.default.fileExists(atPath: rawTargetDirectory) {
-                let createDirResult = await executePrivilegedCommand("/bin/mkdir -p \(targetDirectory)")
-                if createDirResult.starts(with: "Error:") {
-                    try? FileManager.default.removeItem(at: tempDirectory)
-                    throw NetworkError.installError("创建目录失败: \(createDirResult)")
-                }
-
-                let chmodResult = await executePrivilegedCommand("/bin/chmod 755 \(targetDirectory)")
-                if chmodResult.starts(with: "Error:") {
-                    try? FileManager.default.removeItem(at: tempDirectory)
-                    throw NetworkError.installError("设置权限失败: \(chmodResult)")
-                }
-            }
-
-            for package in packagesToDownload {
-                let packageDir = "\(rawTargetDirectory)/\(package.name)"
-                let packageExtractDir = tempDirectory.appendingPathComponent("\(package.name)-extract", isDirectory: true)
-
-                try? FileManager.default.removeItem(at: packageExtractDir)
-                try await ZIPAssetExtractor.extract(
-                    zipURL: tempDirectory.appendingPathComponent("\(package.name).zip"),
-                    to: packageExtractDir
-                )
-
-                let removeResult = await executePrivilegedCommand("/bin/rm -rf '\(packageDir)'")
-                if removeResult.starts(with: "Error:") {
-                    print("移除旧目录失败: \(removeResult)")
-                }
-
-                let mkdirResult = await executePrivilegedCommand("/bin/mkdir -p '\(packageDir)'")
-                if mkdirResult.starts(with: "Error:") {
-                    try? FileManager.default.removeItem(at: tempDirectory)
-                    throw NetworkError.installError("创建 \(package.name) 目录失败")
-                }
-
-                let copyResult = await executePrivilegedCommand("/usr/bin/ditto '\(packageExtractDir.path)' '\(packageDir)'")
-                if copyResult.starts(with: "Error:") {
-                    try? FileManager.default.removeItem(at: tempDirectory)
-                    throw NetworkError.installError("复制 \(package.name) 解压结果失败: \(copyResult)")
-                }
-
-                let chmodResult = await executePrivilegedCommand("/bin/chmod -R 755 '\(packageDir)'")
-                if chmodResult.starts(with: "Error:") {
-                    try? FileManager.default.removeItem(at: tempDirectory)
-                    throw NetworkError.installError("设置 \(package.name) 权限失败: \(chmodResult)")
-                }
-
-                let chownResult = await executePrivilegedCommand("/usr/sbin/chown -R root:wheel '\(packageDir)'")
-                if chownResult.starts(with: "Error:") {
-                    try? FileManager.default.removeItem(at: tempDirectory)
-                    throw NetworkError.installError("设置 \(package.name) 所有者失败: \(chownResult)")
-                }
-            }
-
-            try? FileManager.default.removeItem(at: tempDirectory)
-
-            await MainActor.run {
-                progressHandler(1.0, "下载完成")
-            }
-        } catch {
-            print("发生错误: \(error.localizedDescription)")
-            throw error
+            try await X1a0HeCCInstaller.shared.install(
+                force: true,
+                progress: { progress, status in
+                    Task { @MainActor in progressHandler(progress, status) }
+                },
+                log: { print($0) },
+                cancellationCheck: cancellationHandler
+            )
+        } catch is CancellationError {
+            throw NetworkError.cancelled
         }
     }
 
-    func stopActiveDownloads(for task: NewDownloadTask) {
+    func stopActiveDownloads(for task: NewDownloadTask) async {
+        task.execution.requestStop()
+        await MainActor.run { self.clearDownloadSpeeds(task) }
         for dependency in task.dependenciesToDownload {
             for package in dependency.packages where !package.downloaded {
                 let packageId = generatePackageIdentifier(package: package, task: task, dependency: dependency)
                 PDMDownloadEngine.shared.cancelDownload(packageId: packageId)
             }
         }
+        for dependency in task.dependenciesToDownload {
+            for package in dependency.packages {
+                await PDMDownloadEngine.shared.cancelAndWait(packageId: generatePackageIdentifier(package: package, task: task, dependency: dependency))
+            }
+        }
+        await task.execution.waitUntilStopped()
     }
 
     func cancelDownloadTask(taskId: UUID, removeFiles: Bool = false) async {
         await globalCancelTracker.cancel(taskId)
 
         if let task = await globalNetworkManager.downloadTasks.first(where: { $0.id == taskId }) {
-            for dependency in task.dependenciesToDownload {
-                for package in dependency.packages where !package.downloaded {
-                    let packageId = generatePackageIdentifier(package: package, task: task, dependency: dependency)
-                    PDMDownloadEngine.shared.cancelDownload(packageId: packageId)
-                }
-            }
+            await stopActiveDownloads(for: task)
 
             if removeFiles {
                 try? FileManager.default.removeItem(at: task.directory)

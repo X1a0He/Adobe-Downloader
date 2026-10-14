@@ -4,162 +4,114 @@ import Darwin
 final class ProcessManager {
     static let shared = ProcessManager()
 
-    private var currentProcess: Process?
-    private var outputPipe: Pipe?
-    private var errorPipe: Pipe?
-    private var cancelFileURL: URL?
-    private var outputBuffer = ""
+    private struct RunningOperation {
+        let id: UUID
+        let process: Process
+        let directory: URL
+        let cancelFileURL: URL
+        let output: FileHandle
+    }
+
+    private var running: RunningOperation?
+    private var terminalResults: [UUID: HDPIMInstallProgress] = [:]
+    private var terminalOrder: [UUID] = []
     private let queue = DispatchQueue(label: "com.helper.process")
 
-    private init() {}
+    init() {}
 
-    func startHDPIMInstall(
-        productDir: String,
-        userHome: String,
-        executablePath: String?
-    ) throws {
-        try startHDPIMProcess(
-            arguments: ["--hdpim-install", productDir],
-            userHome: userHome,
-            executablePath: executablePath
-        )
+    func startHDPIMInstall(productDir: String, userHome: String, executablePath: String?) throws -> UUID {
+        try startHDPIMProcess(arguments: ["--hdpim-install", productDir], userHome: userHome, executablePath: executablePath)
     }
 
-    func startHDPIMUninstall(
-        request: HDPIMUninstallHelperRequest,
-        userHome: String,
-        executablePath: String?
-    ) throws {
+    func startHDPIMUninstall(request: HDPIMUninstallHelperRequest, userHome: String, executablePath: String?) throws -> UUID {
         let requestData = try JSONEncoder().encode(request)
-        try startHDPIMProcess(
-            arguments: ["--hdpim-uninstall", requestData.base64EncodedString()],
-            userHome: userHome,
-            executablePath: executablePath
-        )
+        return try startHDPIMProcess(arguments: ["--hdpim-uninstall", requestData.base64EncodedString()], userHome: userHome,
+                                    executablePath: executablePath)
     }
 
-    private func startHDPIMProcess(
-        arguments: [String],
-        userHome: String,
-        executablePath: String?
-    ) throws {
-        let executableURL: URL
-        if let path = executablePath {
-            executableURL = URL(fileURLWithPath: path)
-        } else {
-            executableURL = try locateMainAppExecutable()
+    private func startHDPIMProcess(arguments: [String], userHome: String, executablePath: String?) throws -> UUID {
+        let executableURL = try executablePath.map { URL(fileURLWithPath: $0) } ?? locateMainAppExecutable()
+        return try queue.sync {
+            finishExitedOperation()
+            guard running == nil else {
+                throw NSError(domain: "ProcessManager", code: 2, userInfo: [
+                    NSLocalizedDescriptionKey: "上一安装或卸载操作尚未完成收尾"
+                ])
+            }
+            let id = UUID()
+            let directory = FileManager.default.temporaryDirectory.appendingPathComponent("adobe-hdpim-\(id)", isDirectory: true)
+            try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: false,
+                                                    attributes: [.posixPermissions: 0o700])
+            let logURL = directory.appendingPathComponent("output.log")
+            let descriptor = open(logURL.path, O_CREAT | O_EXCL | O_WRONLY | O_CLOEXEC, 0o600)
+            guard descriptor >= 0 else {
+                throw NSError(domain: NSPOSIXErrorDomain, code: Int(errno))
+            }
+            let writer = FileHandle(fileDescriptor: descriptor, closeOnDealloc: true)
+            defer { try? writer.close() }
+            let reader = try FileHandle(forReadingFrom: logURL)
+            let cancelURL = directory.appendingPathComponent("cancel")
+            let process = Process()
+            process.executableURL = executableURL
+            process.arguments = arguments
+            process.environment = createEnvironment(userHome: userHome, cancelFileURL: cancelURL)
+            // 共用文件偏移保留 stdout/stderr 的写出顺序，终态不再与管道回调争抢剩余输出。
+            process.standardOutput = writer
+            process.standardError = writer
+            process.terminationHandler = { [weak self] _ in
+                guard let self else { return }
+                self.queue.async { self.finishExitedOperation(expectedID: id) }
+            }
+            running = RunningOperation(id: id, process: process, directory: directory, cancelFileURL: cancelURL, output: reader)
+            do {
+                try process.run()
+            } catch {
+                running = nil
+                try? reader.close()
+                try? FileManager.default.removeItem(at: directory)
+                throw error
+            }
+            return id
         }
+    }
 
+    func getProgress(operationID: UUID?) -> HDPIMInstallProgress {
         queue.sync {
-            cleanup()
+            finishExitedOperation()
+            guard let operationID else { return missingOperationProgress() }
+            if let terminal = terminalResults[operationID] { return terminal }
+            guard let operation = running, operation.id == operationID else { return missingOperationProgress() }
+            return HDPIMInstallProgress(output: readOutput(operation.output), isComplete: false, exitCode: nil)
         }
+    }
 
-        let process = Process()
-        let outPipe = Pipe()
-        let errPipe = Pipe()
-        let cancelURL = makeCancelFileURL()
-        try? FileManager.default.removeItem(at: cancelURL)
-
-        process.executableURL = executableURL
-        process.arguments = arguments
-        process.environment = createEnvironment(userHome: userHome, cancelFileURL: cancelURL)
-        process.standardOutput = outPipe
-        process.standardError = errPipe
-
-        outPipe.fileHandleForReading.readabilityHandler = { [weak self] handle in
-            self?.handleOutput(handle)
-        }
-
-        errPipe.fileHandleForReading.readabilityHandler = { [weak self] handle in
-            self?.handleOutput(handle)
-        }
-
-        try process.run()
-
+    func cancel(operationID: UUID?) {
         queue.sync {
-            currentProcess = process
-            outputPipe = outPipe
-            errorPipe = errPipe
-            cancelFileURL = cancelURL
+            guard let operationID, let operation = running, operation.id == operationID else { return }
+            try? Data([1]).write(to: operation.cancelFileURL, options: .atomic)
+            if operation.process.isRunning { operation.process.terminate() }
         }
     }
 
-    func getProgress() -> HDPIMInstallProgress {
-        queue.sync {
-            guard let process = currentProcess else {
-                return HDPIMInstallProgress(output: "", isComplete: true, exitCode: nil)
-            }
-
-            if !process.isRunning {
-                let remaining = drainOutput()
-                let exitCode = process.terminationStatus
-                let finalOutput = outputBuffer + remaining
-                cleanup()
-                return HDPIMInstallProgress(
-                    output: finalOutput,
-                    isComplete: true,
-                    exitCode: exitCode
-                )
-            }
-
-            let output = outputBuffer
-            outputBuffer = ""
-            return HDPIMInstallProgress(output: output, isComplete: false, exitCode: nil)
-        }
+    private func finishExitedOperation(expectedID: UUID? = nil) {
+        guard let operation = running, expectedID == nil || expectedID == operation.id,
+              !operation.process.isRunning else { return }
+        terminalResults[operation.id] = HDPIMInstallProgress(output: readOutput(operation.output), isComplete: true,
+                                                           exitCode: operation.process.terminationStatus)
+        terminalOrder.append(operation.id)
+        while terminalOrder.count > 32 { terminalResults.removeValue(forKey: terminalOrder.removeFirst()) }
+        try? operation.output.close()
+        try? FileManager.default.removeItem(at: operation.directory)
+        running = nil
     }
 
-    func cancel() {
-        queue.sync {
-            guard let process = currentProcess else { return }
-            if let cancelFileURL {
-                try? Data([1]).write(to: cancelFileURL, options: .atomic)
-            }
-            if process.isRunning {
-                process.terminate()
-            }
-        }
+    private func readOutput(_ handle: FileHandle) -> String {
+        do { return String(decoding: try handle.readToEnd() ?? Data(), as: UTF8.self) }
+        catch { return "LOG|读取安装输出失败：\(error.localizedDescription)\n" }
     }
 
-    private func handleOutput(_ handle: FileHandle) {
-        let data = handle.availableData
-        guard !data.isEmpty, let text = String(data: data, encoding: .utf8) else {
-            return
-        }
-        queue.async {
-            self.outputBuffer += text
-        }
-    }
-
-    private func drainOutput() -> String {
-        var result = ""
-        if let pipe = outputPipe {
-            pipe.fileHandleForReading.readabilityHandler = nil
-            let data = pipe.fileHandleForReading.readDataToEndOfFile()
-            if let text = String(data: data, encoding: .utf8) {
-                result += text
-            }
-        }
-        if let pipe = errorPipe {
-            pipe.fileHandleForReading.readabilityHandler = nil
-            let data = pipe.fileHandleForReading.readDataToEndOfFile()
-            if let text = String(data: data, encoding: .utf8) {
-                result += text
-            }
-        }
-        return result
-    }
-
-    private func cleanup() {
-        outputPipe?.fileHandleForReading.readabilityHandler = nil
-        errorPipe?.fileHandleForReading.readabilityHandler = nil
-        if let cancelFileURL {
-            try? FileManager.default.removeItem(at: cancelFileURL)
-        }
-        currentProcess = nil
-        outputPipe = nil
-        errorPipe = nil
-        cancelFileURL = nil
-        outputBuffer = ""
+    private func missingOperationProgress() -> HDPIMInstallProgress {
+        HDPIMInstallProgress(output: "ERROR|安装操作不存在或终态已过期，请核对安装状态后重试\n", isComplete: true, exitCode: 1)
     }
 
     private func createEnvironment(userHome: String, cancelFileURL: URL) -> [String: String] {
@@ -167,13 +119,13 @@ final class ProcessManager {
         env["ADOBE_DOWNLOADER_LOCAL_INSTALL"] = "1"
         env["ADOBE_DOWNLOADER_USER_HOME"] = userHome
         env["ADOBE_DOWNLOADER_CANCEL_FILE"] = cancelFileURL.path
-        env["HOME"] = userHome
+        // 安装进程保持自己的身份；用户路径仅通过显式安装上下文传递。
+        if let account = getpwuid(geteuid()) {
+            env["HOME"] = String(cString: account.pointee.pw_dir)
+            env["USER"] = String(cString: account.pointee.pw_name)
+            env["LOGNAME"] = env["USER"]
+        }
         return env
-    }
-
-    private func makeCancelFileURL() -> URL {
-        FileManager.default.temporaryDirectory
-            .appendingPathComponent("adobe-downloader-hdpim-\(UUID().uuidString).cancel", isDirectory: false)
     }
 
     private func locateMainAppExecutable() throws -> URL {

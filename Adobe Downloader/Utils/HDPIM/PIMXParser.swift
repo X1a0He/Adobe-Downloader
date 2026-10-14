@@ -4,6 +4,7 @@
 //
 
 import Foundation
+import Darwin
 
 enum PIMXCommandDescriptor {
     case moveFile(source: String, target: String, pimxTarget: String)
@@ -11,9 +12,13 @@ enum PIMXCommandDescriptor {
     case blindCopy(source: String, target: String, pimxTarget: String)
     case createDirectory(path: String, pimxPath: String)
     case mergeDirectory(source: String, target: String, pimxTarget: String)
-    case deleteFile(target: String)
+    case deleteFile(target: String, isUserPreferences: Bool = false)
     case deleteDirectory(source: String, isRecursiveDelete: Bool, isUserPreferences: Bool)
     case createSymlink(source: String, target: String, pimxTarget: String)
+
+    case unlockPath(path: String, active: Bool)
+    case localizeFile(source: String, target: String)
+    case macAlias(target: String, path: String, isPermanent: Bool)
 
     case permission(path: String, mode: String)
     case owner(path: String, uid: String, gid: String)
@@ -45,6 +50,10 @@ struct PIMXAssetReference {
     let sourceTemplate: String
     let targetTemplate: String
     let isDirectoryLike: Bool
+    var isRecursiveDelete: Bool = false
+    var isUserPreferences: Bool = false
+    var isSymbolicLink: Bool = false
+    var isPermanent: Bool = false
 }
 
 private enum AssetCommandStyle {
@@ -53,10 +62,52 @@ private enum AssetCommandStyle {
     case blindCopy
 }
 
+/// 应用生成的卸载材料保留模板根与枚举名称，避免把字面 [Locale] 等重新解释为属性。
+struct PIMXLiteralPath {
+    struct Key: Hashable {
+        let actualTarget: String
+        let targetTemplate: String
+
+        init(actualTarget: String, targetTemplate: String) {
+            self.actualTarget = actualTarget
+            self.targetTemplate = targetTemplate.hasSuffix("/") ? String(targetTemplate.dropLast()) : targetTemplate
+        }
+    }
+
+    static let templateAttribute = "adobeDownloaderPathTemplate"
+    static let relativePathAttribute = "adobeDownloaderLiteralPath"
+
+    let template: String
+    let relativePath: String
+
+    var targetPath: String {
+        (template as NSString).appendingPathComponent(relativePath)
+    }
+
+    func matches(_ path: String) -> Bool {
+        path == targetPath || path == targetPath + "/"
+    }
+
+    func resolve(using propertyTable: HDPIMPropertyTable) throws -> String {
+        let components = relativePath.split(separator: "/", omittingEmptySubsequences: false)
+        guard !relativePath.isEmpty, !relativePath.contains("\0"),
+              components.allSatisfy({ !$0.isEmpty && $0 != "." && $0 != ".." }) else {
+            throw PIMXError.invalidXML("卸载材料的字面相对路径无效")
+        }
+        let root = try propertyTable.expandPathForInstallation(template)
+        try HDPIMFileChange.validate(root)
+        let resolved = URL(fileURLWithPath: root, isDirectory: true).appendingPathComponent(relativePath).path
+        try HDPIMFileChange.validate(resolved)
+        return resolved
+    }
+}
+
 struct PIMXPackageInfo {
     let packageName: String
     let commands: [PIMXCommandDescriptor]
     let assetReferences: [PIMXAssetReference]
+    let literalPaths: [PIMXLiteralPath.Key: PIMXLiteralPath]
+    var uninstallManifest: [HDPIMDeleteEntry]? = nil
 }
 
 class PIMXParser {
@@ -72,7 +123,7 @@ class PIMXParser {
         return try parse(pimxURL: pimxURL, xmlData: xmlData, extractDir: extractDir)
     }
 
-    func parse(pimxURL: URL, xmlData: Data, extractDir: URL) throws -> PIMXPackageInfo {
+    func parse(pimxURL: URL, xmlData: Data, extractDir: URL, collectUninstallManifest: Bool = true) throws -> PIMXPackageInfo {
         let xmlDoc = try XMLDocument(data: xmlData, options: [])
 
         guard let root = xmlDoc.rootElement() else {
@@ -86,25 +137,69 @@ class PIMXParser {
 
         let assetsResult = try parseAssets(root: root)
         var commands = assetsResult.commands
+        var literalPaths = assetsResult.literalPaths
+        let uninstallManifest = collectUninstallManifest
+            ? try makeUninstallManifest(from: assetsResult.assetReferences, literalPaths: &literalPaths)
+            : nil
 
         commands += try parseCommands(root: root)
 
         return PIMXPackageInfo(
             packageName: packageName,
             commands: commands,
-            assetReferences: assetsResult.assetReferences
+            assetReferences: assetsResult.assetReferences,
+            literalPaths: literalPaths,
+            uninstallManifest: uninstallManifest
         )
     }
 
-    func parseUninstallCommands(pimxURL: URL) throws -> [PIMXCommandDescriptor] {
-        let xmlData = try Self.loadXMLData(from: pimxURL)
+    func parseUninstallCommands(pimxURL: URL, xmlData: Data? = nil, preservingUserPreferences: Bool = false) throws -> [PIMXCommandDescriptor] {
+        let descriptors = try parseStoredCommands(pimxURL: pimxURL, xmlData: xmlData).compactMap { descriptor -> PIMXCommandDescriptor? in
+            if preservingUserPreferences {
+                switch descriptor {
+                case .deleteDirectory(_, _, true), .deleteFile(_, true): return nil
+                default: break
+                }
+            }
+            return uninstallCommand(from: descriptor)
+        }
+        return orderedDeletionCommands(descriptors)
+    }
+
+    func parseRepairCommands(pimxURL: URL, xmlData: Data? = nil) throws -> [PIMXCommandDescriptor] {
+        try parseStoredCommands(pimxURL: pimxURL, xmlData: xmlData)
+    }
+
+    /// 完整性检查使用清单声明的类型，不补入卸载父目录，也不按当前磁盘状态重分类。
+    func parseInstalledPayload(pimxURL: URL, xmlData: Data) throws -> [PIMXCommandDescriptor] {
+        try parseStoredCommands(pimxURL: pimxURL, xmlData: xmlData, orderDeletions: false).filter {
+            switch $0 {
+            case .deleteFile(_, false), .deleteDirectory(_, _, false): return true
+            default: return false
+            }
+        }
+    }
+
+    /// 包清单目录及文件的直接父目录，包含偏好；不使用卸载执行时按磁盘状态补齐的目录。
+    func parseInstalledDirectories(pimxURL: URL, xmlData: Data) throws -> [String] {
+        try parseStoredCommands(pimxURL: pimxURL, xmlData: xmlData, orderDeletions: false).compactMap {
+            switch $0 {
+            case .deleteDirectory(let path, _, _): return path
+            case .deleteFile(let path, _): return (path as NSString).deletingLastPathComponent
+            default: return nil
+            }
+        }
+    }
+
+    private func parseStoredCommands(pimxURL: URL, xmlData: Data?, orderDeletions: Bool = true) throws -> [PIMXCommandDescriptor] {
+        let xmlData = try xmlData ?? Self.loadXMLData(from: pimxURL, writeBackIfNeeded: false)
         let xmlDoc = try XMLDocument(data: xmlData, options: [])
 
         guard let root = xmlDoc.rootElement() else {
             throw PIMXError.invalidXML("PIMX 根节点不存在: \(pimxURL.path)")
         }
 
-        return try parseCommands(root: root).compactMap(uninstallCommand)
+        return try parseCommands(root: root, isStoredMaterial: true, orderDeletions: orderDeletions)
     }
 
     private func uninstallCommand(from descriptor: PIMXCommandDescriptor) -> PIMXCommandDescriptor? {
@@ -119,9 +214,10 @@ class PIMXParser {
         }
     }
 
-    private func parseAssets(root: XMLElement) throws -> (commands: [PIMXCommandDescriptor], assetReferences: [PIMXAssetReference]) {
+    private func parseAssets(root: XMLElement) throws -> (commands: [PIMXCommandDescriptor], assetReferences: [PIMXAssetReference], literalPaths: [PIMXLiteralPath.Key: PIMXLiteralPath]) {
         var commands: [PIMXCommandDescriptor] = []
         var assetReferences: [PIMXAssetReference] = []
+        var literalPaths: [PIMXLiteralPath.Key: PIMXLiteralPath] = [:]
 
         let assets = try root.nodes(forXPath: "Assets/Asset")
         for node in assets {
@@ -135,8 +231,8 @@ class PIMXParser {
                 continue
             }
 
-            let expandedSource = propertyTable.expandPath(source)
-            let expandedTarget = propertyTable.expandPath(target)
+            let expandedSource = try propertyTable.expandPathForInstallation(source)
+            let expandedTarget = try propertyTable.expandPathForInstallation(target)
             let normalizedTargetTemplate = normalizePIMXPath(target, isDirectoryLike: type.lowercased() == "directory")
 
             let isDirectoryLike = isDirectoryAsset(
@@ -148,14 +244,15 @@ class PIMXParser {
 
             switch type.lowercased() {
             case "directory":
-                appendAssetCommands(
+                try appendAssetCommands(
                     source: expandedSource,
                     target: expandedTarget,
                     sourceTemplate: source,
                     targetTemplate: normalizedTargetTemplate,
                     isDirectoryLike: true,
                     style: .move,
-                    to: &commands
+                    to: &commands,
+                    literalPaths: &literalPaths
                 )
                 let appTarget = wrappedDirectoryRootTarget(source: expandedSource, target: expandedTarget)
                 let appTargetTemplate = wrappedDirectoryRootTarget(source: source, target: target)
@@ -164,29 +261,43 @@ class PIMXParser {
                     target: appTarget ?? expandedTarget,
                     sourceTemplate: source,
                     targetTemplate: normalizePIMXPath(appTargetTemplate ?? target, isDirectoryLike: true),
-                    isDirectoryLike: true
+                    isDirectoryLike: true,
+                    isRecursiveDelete: boolAttribute(element.attribute(forName: "isRecursiveDelete")?.stringValue),
+                    isUserPreferences: boolAttribute(element.attribute(forName: "isUserPreferences")?.stringValue),
+                    isPermanent: boolAttribute(element.attribute(forName: "isPermanent")?.stringValue)
                 ))
             case "symlink":
                 let linkTarget = element.attribute(forName: "targetLinkPath")?.stringValue ?? source
                 commands.append(
                     .createSymlink(
-                        source: propertyTable.expandPath(linkTarget),
+                        source: try propertyTable.expandPathForInstallation(linkTarget),
                         target: expandedTarget,
                         pimxTarget: normalizePIMXPath(target, isDirectoryLike: false)
                     )
                 )
+                assetReferences.append(PIMXAssetReference(
+                    source: expandedSource,
+                    target: expandedTarget,
+                    sourceTemplate: source,
+                    targetTemplate: normalizePIMXPath(target, isDirectoryLike: false),
+                    isDirectoryLike: false,
+                    isUserPreferences: boolAttribute(element.attribute(forName: "isUserPreferences")?.stringValue),
+                    isSymbolicLink: true,
+                    isPermanent: boolAttribute(element.attribute(forName: "isPermanent")?.stringValue)
+                ))
             default:
                 let normalizedPimxTarget = isDirectoryLike
                     ? normalizePIMXPath(target, isDirectoryLike: true)
                     : resolvedFileTarget(source: source, target: target)
-                appendAssetCommands(
+                try appendAssetCommands(
                     source: expandedSource,
                     target: expandedTarget,
                     sourceTemplate: source,
                     targetTemplate: target,
                     isDirectoryLike: isDirectoryLike,
                     style: .move,
-                    to: &commands
+                    to: &commands,
+                    literalPaths: &literalPaths
                 )
                 let appTarget = wrappedDirectoryRootTarget(source: expandedSource, target: expandedTarget)
                 let appTargetTemplate = wrappedDirectoryRootTarget(source: source, target: target)
@@ -197,7 +308,10 @@ class PIMXParser {
                         : resolvedFileTarget(source: expandedSource, target: expandedTarget),
                     sourceTemplate: source,
                     targetTemplate: normalizePIMXPath(appTargetTemplate ?? normalizedPimxTarget, isDirectoryLike: isDirectoryLike),
-                    isDirectoryLike: isDirectoryLike
+                    isDirectoryLike: isDirectoryLike,
+                    isRecursiveDelete: boolAttribute(element.attribute(forName: "isRecursiveDelete")?.stringValue),
+                    isUserPreferences: boolAttribute(element.attribute(forName: "isUserPreferences")?.stringValue),
+                    isPermanent: boolAttribute(element.attribute(forName: "isPermanent")?.stringValue)
                 ))
             }
         }
@@ -213,21 +327,22 @@ class PIMXParser {
                 continue
             }
 
-            let expandedSource = propertyTable.expandPath(source)
-            let expandedTarget = propertyTable.expandPath(target)
+            let expandedSource = try propertyTable.expandPathForInstallation(source)
+            let expandedTarget = try propertyTable.expandPathForInstallation(target)
             let isDirectoryLike = expandedSource.hasSuffix("/") || isExistingDirectory(expandedSource)
             let normalizedPimxTarget = isDirectoryLike
                 ? normalizePIMXPath(target, isDirectoryLike: true)
                 : resolvedFileTarget(source: source, target: target)
 
-            appendAssetCommands(
+            try appendAssetCommands(
                 source: expandedSource,
                 target: expandedTarget,
                 sourceTemplate: source,
                 targetTemplate: target,
                 isDirectoryLike: isDirectoryLike,
                 style: .blindCopy,
-                to: &commands
+                to: &commands,
+                literalPaths: &literalPaths
             )
             let appTarget = wrappedDirectoryRootTarget(source: expandedSource, target: expandedTarget)
             let appTargetTemplate = wrappedDirectoryRootTarget(source: source, target: target)
@@ -236,14 +351,78 @@ class PIMXParser {
                 target: isDirectoryLike ? (appTarget ?? expandedTarget) : resolvedFileTarget(source: expandedSource, target: expandedTarget),
                 sourceTemplate: source,
                 targetTemplate: normalizePIMXPath(appTargetTemplate ?? normalizedPimxTarget, isDirectoryLike: isDirectoryLike),
-                isDirectoryLike: isDirectoryLike
+                isDirectoryLike: isDirectoryLike,
+                isRecursiveDelete: boolAttribute(element.attribute(forName: "isRecursiveDelete")?.stringValue),
+                isUserPreferences: boolAttribute(element.attribute(forName: "isUserPreferences")?.stringValue),
+                isPermanent: boolAttribute(element.attribute(forName: "isPermanent")?.stringValue)
             ))
         }
 
-        return (commands, assetReferences)
+        return (commands, assetReferences, literalPaths)
     }
 
-    private func parseCommands(root: XMLElement) throws -> [PIMXCommandDescriptor] {
+    /// 清单来自安装源；不枚举目标目录，避免把其他包或用户新增文件登记为本包所有。
+    private func makeUninstallManifest(
+        from assets: [PIMXAssetReference],
+        literalPaths: inout [PIMXLiteralPath.Key: PIMXLiteralPath]
+    ) throws -> [HDPIMDeleteEntry] {
+        var entries: [HDPIMDeleteEntry] = []
+        for asset in assets where !asset.isPermanent {
+            let sourceURL = URL(fileURLWithPath: asset.source)
+            let targetURL = URL(fileURLWithPath: asset.target)
+            let template = normalizePIMXPath(asset.targetTemplate, isDirectoryLike: asset.isDirectoryLike)
+
+            if asset.isSymbolicLink {
+                entries.append(HDPIMDeleteEntry(targetPath: template, isDirectory: false,
+                    isRecursiveDelete: false, isUserPreferences: asset.isUserPreferences,
+                    actualTargetPath: targetURL.path))
+                continue
+            }
+
+            var sourceInfo = stat()
+            guard lstat(sourceURL.path, &sourceInfo) == 0 else {
+                throw PIMXError.invalidXML("无法读取卸载清单的安装源：\(sourceURL.path)")
+            }
+            let isDirectory = (sourceInfo.st_mode & S_IFMT) == S_IFDIR
+            entries.append(HDPIMDeleteEntry(targetPath: template, isDirectory: isDirectory,
+                isRecursiveDelete: isDirectory && asset.isRecursiveDelete,
+                isUserPreferences: asset.isUserPreferences, actualTargetPath: targetURL.path))
+            guard isDirectory else { continue }
+
+            // 使用相对名称构建目标，避免 /tmp 与 /private/tmp 等同一目录的别名影响边界判断。
+            var descendants: [(relativePath: String, isDirectory: Bool)] = []
+            var pending = [""]
+            while let parent = pending.popLast() {
+                try HDPIMOperationContext.checkCancellation()
+                let directory = parent.isEmpty ? sourceURL : sourceURL.appendingPathComponent(parent)
+                for name in try FileManager.default.contentsOfDirectory(atPath: directory.path) {
+                    let relativePath = parent.isEmpty ? name : parent + "/" + name
+                    let item = sourceURL.appendingPathComponent(relativePath)
+                    var info = stat()
+                    guard lstat(item.path, &info) == 0 else {
+                        throw PIMXError.invalidXML("无法读取卸载清单源条目：\(item.path)")
+                    }
+                    let childIsDirectory = info.st_mode & S_IFMT == S_IFDIR
+                    descendants.append((relativePath, childIsDirectory))
+                    if childIsDirectory { pending.append(relativePath) }
+                }
+            }
+            for descendant in descendants.sorted(by: { $0.relativePath < $1.relativePath }) {
+                let actual = targetURL.appendingPathComponent(descendant.relativePath).path
+                let target = appendPIMXPathComponent(template, descendant.relativePath)
+                entries.append(HDPIMDeleteEntry(targetPath: target, isDirectory: descendant.isDirectory,
+                    isRecursiveDelete: false, isUserPreferences: asset.isUserPreferences,
+                    actualTargetPath: actual))
+                if descendant.relativePath.contains("[") || descendant.relativePath.contains(":x0D") {
+                    literalPaths[PIMXLiteralPath.Key(actualTarget: actual, targetTemplate: target)] =
+                        PIMXLiteralPath(template: template, relativePath: descendant.relativePath)
+                }
+            }
+        }
+        return entries
+    }
+
+    private func parseCommands(root: XMLElement, isStoredMaterial: Bool = false, orderDeletions: Bool = true) throws -> [PIMXCommandDescriptor] {
         var commands: [PIMXCommandDescriptor] = []
 
         guard let commandsNode = try root.nodes(forXPath: "Commands").first as? XMLElement else {
@@ -261,7 +440,7 @@ class PIMXParser {
                     ?? element.attribute(forName: "mode")?.stringValue ?? ""
                 if !path.isEmpty && !mode.isEmpty {
                     commands.append(.permission(
-                        path: propertyTable.expandPath(path),
+                        path: try propertyTable.expandPathForInstallation(path),
                         mode: mode
                     ))
                 }
@@ -275,7 +454,7 @@ class PIMXParser {
                     ?? element.attribute(forName: "gid")?.stringValue ?? "0"
                 if !path.isEmpty {
                     commands.append(.owner(
-                        path: propertyTable.expandPath(path),
+                        path: try propertyTable.expandPathForInstallation(path),
                         uid: uid, gid: gid
                     ))
                 }
@@ -288,7 +467,7 @@ class PIMXParser {
                         .runProgram(
                             execution: try installElement.flatMap(parseProgramInvocation),
                             repair: try installElement.flatMap(parseProgramInvocation),
-                            uninstall: try uninstallElement.flatMap(parseProgramInvocation)
+                            uninstall: try uninstallElement.flatMap { try parseProgramInvocation(from: $0, workflowType: "uninstall") }
                         )
                     )
                     continue
@@ -299,7 +478,7 @@ class PIMXParser {
                 }
 
             case "UninstallCommand":
-                if let uninstallInvocation = try parseProgramInvocation(from: element) {
+                if let uninstallInvocation = try parseProgramInvocation(from: element, workflowType: "uninstall") {
                     commands.append(.runProgram(execution: nil, repair: nil, uninstall: uninstallInvocation))
                 }
 
@@ -307,7 +486,7 @@ class PIMXParser {
                 let path = (try element.nodes(forXPath: "Path").first?.stringValue)
                     ?? element.attribute(forName: "path")?.stringValue ?? ""
                 if !path.isEmpty {
-                    commands.append(.registerApplication(path: propertyTable.expandPath(path)))
+                    commands.append(.registerApplication(path: try propertyTable.expandPathForInstallation(path)))
                 }
 
             case "SetDisplayAttributes":
@@ -317,16 +496,17 @@ class PIMXParser {
                     ?? element.attribute(forName: "icon")?.stringValue ?? ""
                 if !target.isEmpty && !icon.isEmpty {
                     commands.append(.setDisplayAttributes(
-                        target: propertyTable.expandPath(target),
-                        icon: propertyTable.expandPath(icon)
+                        target: try propertyTable.expandPathForInstallation(target),
+                        icon: try propertyTable.expandPathForInstallation(icon)
                     ))
                 }
 
             case "DeleteFile":
                 let target = (try element.nodes(forXPath: "Target").first?.stringValue)
                     ?? element.attribute(forName: "target")?.stringValue ?? ""
-                if !target.isEmpty {
-                    commands.append(.deleteFile(target: propertyTable.expandPath(target)))
+                let resolved = try resolveDeletePath(target, element: element, isStoredMaterial: isStoredMaterial)
+                if !resolved.isEmpty {
+                    commands.append(.deleteFile(target: resolved, isUserPreferences: boolAttribute(element.attribute(forName: "isUserPreferences")?.stringValue)))
                 }
 
             case "DeleteDirectory":
@@ -335,11 +515,12 @@ class PIMXParser {
                 let target = (try element.nodes(forXPath: "Target").first?.stringValue)
                     ?? element.attribute(forName: "target")?.stringValue ?? ""
                 let path = source.isEmpty ? target : source
-                if !path.isEmpty {
+                let resolved = try resolveDeletePath(path, element: element, isStoredMaterial: isStoredMaterial)
+                if !resolved.isEmpty {
                     let isRecursiveDelete = boolAttribute(element.attribute(forName: "isRecursiveDelete")?.stringValue)
                     let isUserPreferences = boolAttribute(element.attribute(forName: "isUserPreferences")?.stringValue)
                     commands.append(.deleteDirectory(
-                        source: propertyTable.expandPath(path),
+                        source: resolved,
                         isRecursiveDelete: isRecursiveDelete,
                         isUserPreferences: isUserPreferences
                     ))
@@ -349,7 +530,7 @@ class PIMXParser {
                 let path = (try element.nodes(forXPath: "Path").first?.stringValue)
                     ?? element.attribute(forName: "path")?.stringValue ?? ""
                 if !path.isEmpty {
-                    commands.append(.touch(path: propertyTable.expandPath(path)))
+                    commands.append(.touch(path: try propertyTable.expandPathForInstallation(path)))
                 }
 
             case "FolderIcon":
@@ -359,19 +540,39 @@ class PIMXParser {
                     ?? element.attribute(forName: "IconPath")?.stringValue ?? ""
                 if !folderPath.isEmpty && !iconPath.isEmpty {
                     commands.append(.folderIcon(
-                        folderPath: propertyTable.expandPath(folderPath),
-                        iconPath: propertyTable.expandPath(iconPath)
+                        folderPath: try propertyTable.expandPathForInstallation(folderPath),
+                        iconPath: try propertyTable.expandPathForInstallation(iconPath)
                     ))
                 }
 
+            case "UnlockPath":
+                let path = try commandPath("Path", attribute: "path", element: element)
+                if !path.isEmpty {
+                    commands.append(.unlockPath(path: path, active: propertyTable.getProperty("workflowType") == "uninstall"))
+                }
+
+            case "LocalizeFileName":
+                let source = try commandPath("Path", attribute: "path", element: element)
+                if !source.isEmpty, let name = try localizedName(element) {
+                    guard HDPIMPackageMaterial.isLeafName(name) else { throw PIMXError.invalidXML("本地化文件名无效") }
+                    let target = URL(fileURLWithPath: source).deletingLastPathComponent().appendingPathComponent(name).path
+                    if source != target { commands.append(.localizeFile(source: source, target: target)) }
+                }
+
             case "Shortcut":
-                if let source = element.attribute(forName: "source")?.stringValue,
-                   let target = element.attribute(forName: "target")?.stringValue {
-                    commands.append(.createSymlink(
-                        source: propertyTable.expandPath(source),
-                        target: propertyTable.expandPath(target),
-                        pimxTarget: normalizePIMXPath(target, isDirectoryLike: false)
-                    ))
+                let target = try commandPath("Target", attribute: "source", element: element)
+                let directory = try commandPath("Directory", attribute: "directory", element: element)
+                let path: String
+                if !directory.isEmpty {
+                    let name = try localizedName(element) ?? URL(fileURLWithPath: target).lastPathComponent
+                    guard HDPIMPackageMaterial.isLeafName(name) else { throw PIMXError.invalidXML("快捷入口名称无效") }
+                    path = URL(fileURLWithPath: directory).appendingPathComponent(name).path
+                } else {
+                    path = try commandPath("", attribute: "target", element: element)
+                }
+                if !target.isEmpty && !path.isEmpty {
+                    commands.append(.macAlias(target: target, path: path,
+                                              isPermanent: boolAttribute(element.attribute(forName: "isPermanent")?.stringValue)))
                 }
 
             default:
@@ -379,7 +580,82 @@ class PIMXParser {
             }
         }
 
-        return commands
+        return orderDeletions ? orderedDeletionCommands(commands) : commands
+    }
+
+    private func commandPath(_ child: String, attribute: String, element: XMLElement) throws -> String {
+        let value = (child.isEmpty ? nil : element.elements(forName: child).first?.stringValue)
+            ?? element.attribute(forName: attribute)?.stringValue ?? ""
+        return value.isEmpty ? "" : try propertyTable.expandPathForInstallation(value)
+    }
+
+    private func localizedName(_ element: XMLElement) throws -> String? {
+        let language = propertyTable.getProperty("uiDisplayLanguage")
+            ?? propertyTable.getProperty("InstallLang")?.split(separator: ",").first.map(String.init) ?? ""
+        let nodes = try element.nodes(forXPath: "Name/Language").compactMap { $0 as? XMLElement }
+        return nodes.last {
+            ($0.attribute(forName: "locale")?.stringValue ?? "") == language
+        }?.stringValue
+    }
+
+    /// 显式删除在普通命令之后执行，子路径先于父目录；重复目标不扩大递归权限。
+    private func orderedDeletionCommands(_ descriptors: [PIMXCommandDescriptor]) -> [PIMXCommandDescriptor] {
+        var regular: [PIMXCommandDescriptor] = []
+        var deletes: [String: (recursive: Bool, preferences: Bool)] = [:]
+        for descriptor in descriptors {
+            let path: String
+            let flags: (Bool, Bool)
+            switch descriptor {
+            case .deleteFile(let target, let preferences): path = target; flags = (false, preferences)
+            case .deleteDirectory(let target, let recursive, let preferences): path = target; flags = (recursive, preferences)
+            default: regular.append(descriptor); continue
+            }
+            let normalized = URL(fileURLWithPath: path).standardizedFileURL.path
+            if let previous = deletes[normalized] {
+                deletes[normalized] = (previous.recursive && flags.0, previous.preferences || flags.1)
+            } else {
+                deletes[normalized] = flags
+            }
+        }
+        let removalPolicy = HDPIMRemovalPolicy.PreflightChecker()
+        let explicit = deletes
+        for (path, flags) in explicit {
+            var parent = URL(fileURLWithPath: path).deletingLastPathComponent()
+            while !removalPolicy.isProtected(parent.path) {
+                if deletes[parent.path] != nil { break }
+                deletes[parent.path] = (false, flags.preferences)
+                let next = parent.deletingLastPathComponent()
+                if next == parent { break }
+                parent = next
+            }
+        }
+        let unlocking = regular.filter { if case .unlockPath(_, true) = $0 { return true }; return false }
+        let remaining = regular.filter { if case .unlockPath(_, true) = $0 { return false }; return true }
+        return unlocking + remaining + deletes.keys.filter { !removalPolicy.isProtected($0) }.sorted(by: >).map { path in
+            let flags = deletes[path]!
+            var info = stat()
+            if lstat(path, &info) == 0, info.st_mode & S_IFMT == S_IFDIR {
+                return .deleteDirectory(source: path, isRecursiveDelete: flags.recursive, isUserPreferences: flags.preferences)
+            }
+            return .deleteFile(target: path, isUserPreferences: flags.preferences)
+        }
+    }
+
+    private func resolveDeletePath(_ path: String, element: XMLElement, isStoredMaterial: Bool) throws -> String {
+        let template = element.attribute(forName: PIMXLiteralPath.templateAttribute)?.stringValue
+        let relativePath = element.attribute(forName: PIMXLiteralPath.relativePathAttribute)?.stringValue
+        guard template != nil || relativePath != nil else {
+            // 仅解码 PIMX 文件路径，不改写属性值、枚举出的字面名称或 Hook 参数。
+            return try propertyTable.expandPathForInstallation(path.replacingOccurrences(of: ":x0D", with: "\r"))
+        }
+        guard isStoredMaterial, let template, let relativePath else {
+            throw PIMXError.invalidXML("卸载材料的字面路径属性不完整或来源无效")
+        }
+        let literalPath = PIMXLiteralPath(template: template, relativePath: relativePath)
+        guard literalPath.matches(path) else {
+            throw PIMXError.invalidXML("卸载材料的字面路径与目标不一致")
+        }
+        return try literalPath.resolve(using: propertyTable)
     }
 
     private func isDirectoryAsset(
@@ -415,8 +691,17 @@ class PIMXParser {
         targetTemplate: String,
         isDirectoryLike: Bool,
         style: AssetCommandStyle,
-        to commands: inout [PIMXCommandDescriptor]
-    ) {
+        to commands: inout [PIMXCommandDescriptor],
+        literalPaths: inout [PIMXLiteralPath.Key: PIMXLiteralPath]
+    ) throws {
+        var sourceInfo = stat()
+        if isDirectoryLike, lstat(source, &sourceInfo) == 0, (sourceInfo.st_mode & S_IFMT) == S_IFLNK {
+            let linkTarget = wrappedDirectoryRootTarget(source: source, target: target) ?? target
+            let linkTemplate = wrappedDirectoryRootTarget(source: sourceTemplate, target: targetTemplate) ?? targetTemplate
+            commands.append(commandDescriptor(for: style, source: source, target: linkTarget,
+                                               pimxTarget: normalizePIMXPath(linkTemplate, isDirectoryLike: false)))
+            return
+        }
         guard isDirectoryLike else {
             let fileTarget = resolvedFileTarget(source: source, target: target)
             let pimxTarget = normalizePIMXPath(
@@ -472,24 +757,28 @@ class PIMXParser {
             let itemURL = sourceURL.appendingPathComponent(relativePath)
             let targetURL = targetRootURL.appendingPathComponent(relativePath)
             let pimxTargetPath = appendPIMXPathComponent(normalizedTemplateTarget, relativePath)
-            let resourceValues = try? itemURL.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey])
-            let isSymbolicLink = resourceValues?.isSymbolicLink ?? false
-            let isDirectory = resourceValues?.isDirectory ?? false
+            if relativePath.contains("[") {
+                let key = PIMXLiteralPath.Key(actualTarget: targetURL.path, targetTemplate: pimxTargetPath)
+                literalPaths[key] = PIMXLiteralPath(template: normalizedTemplateTarget, relativePath: relativePath)
+            }
+            let resourceValues = try itemURL.resourceValues(forKeys: [.isDirectoryKey, .isSymbolicLinkKey])
+            let isSymbolicLink = resourceValues.isSymbolicLink == true
+            let isDirectory = resourceValues.isDirectory == true
 
             if isSymbolicLink {
+                // DirectoryEnumerator 不跟随符号链接；跳过后代会误跳过同级的真实载荷。
                 appendCreateDirectory(
                     targetURL.deletingLastPathComponent().path,
                     pimxPath: deleteLastPIMXPathComponent(pimxTargetPath)
                 )
-                if let linkTarget = try? FileManager.default.destinationOfSymbolicLink(atPath: itemURL.path) {
-                    commands.append(
-                        .createSymlink(
-                            source: linkTarget,
-                            target: targetURL.path,
-                            pimxTarget: normalizePIMXPath(pimxTargetPath, isDirectoryLike: false)
-                        )
+                let linkTarget = try FileManager.default.destinationOfSymbolicLink(atPath: itemURL.path)
+                commands.append(
+                    .createSymlink(
+                        source: linkTarget,
+                        target: targetURL.path,
+                        pimxTarget: normalizePIMXPath(pimxTargetPath, isDirectoryLike: false)
                     )
-                }
+                )
                 continue
             }
 
@@ -622,6 +911,10 @@ class PIMXParser {
     }
 
     private func parseProgramInvocation(from element: XMLElement) throws -> PIMXProgramInvocation? {
+        try parseProgramInvocation(from: element, workflowType: nil)
+    }
+
+    private func parseProgramInvocation(from element: XMLElement, workflowType: String?) throws -> PIMXProgramInvocation? {
         let pimxPath = (try element.nodes(forXPath: "Path").first?.stringValue)
             ?? element.attribute(forName: "path")?.stringValue
             ?? ""
@@ -639,10 +932,12 @@ class PIMXParser {
         }
 
         let runInUserMode = boolAttribute(element.attribute(forName: "runInUserMode")?.stringValue)
+        let context = propertyTable.cloned()
+        if let workflowType { context.setProperty("workflowType", workflowType) }
 
         return PIMXProgramInvocation(
-            path: propertyTable.expandPath(pimxPath),
-            arguments: pimxArguments.map(propertyTable.expandPath),
+            path: try context.expandPathForInstallation(pimxPath),
+            arguments: pimxArguments.map(context.expandString),
             successExitCodes: successExitCodes,
             hasExplicitSuccessExitCodes: !exitCodeNodes.isEmpty,
             pimxPath: pimxPath,
@@ -687,7 +982,14 @@ class PIMXParser {
     }
 
     static func loadXMLData(from pimxURL: URL, writeBackIfNeeded: Bool = true) throws -> Data {
-        var xmlData = try Data(contentsOf: pimxURL)
+        let original = try Data(contentsOf: pimxURL)
+        let xmlData = try decodeXMLData(original, sourceURL: pimxURL)
+        if writeBackIfNeeded, xmlData != original { try xmlData.write(to: pimxURL) }
+        return xmlData
+    }
+
+    static func decodeXMLData(_ data: Data, sourceURL pimxURL: URL) throws -> Data {
+        var xmlData = data
         let firstChunk = String(data: xmlData.prefix(200), encoding: .utf8) ?? ""
 
         if !firstChunk.contains("<") {
@@ -697,9 +999,6 @@ class PIMXParser {
                     throw PIMXError.invalidXML("PIMX 解压结果为空: \(pimxURL.path)")
                 }
                 xmlData = decompressed
-                if writeBackIfNeeded {
-                    try xmlData.write(to: pimxURL)
-                }
             } catch let error as PIMXError {
                 throw error
             } catch {

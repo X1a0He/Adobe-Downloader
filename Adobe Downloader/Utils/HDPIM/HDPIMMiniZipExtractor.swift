@@ -482,26 +482,8 @@ final class HDPIMMiniZipExtractor {
         chunkHandler: ((Int) -> Void)? = nil,
         cancellationCheck: (() -> Bool)? = nil
     ) throws {
-        if entry.compressionMethod == 0 {
-            _ = try extractStoredLZMA2Entry(
-                entry,
-                in: archive,
-                to: fullPath,
-                path: entry.normalizedPath,
-                chunkHandler: chunkHandler,
-                cancellationCheck: cancellationCheck
-            )
-            return
-        }
-
-        let decodedSize = try extractHDPIMLZMA2Entry(
-            entry,
-            in: archive,
-            to: fullPath,
-            path: entry.normalizedPath,
-            cancellationCheck: cancellationCheck
-        )
-        chunkHandler?(Int(decodedSize))
+        _ = try extractHDPIMLZMA2Entry(entry, in: archive, to: fullPath, path: entry.normalizedPath,
+                                      chunkHandler: chunkHandler, cancellationCheck: cancellationCheck)
     }
 
     @discardableResult
@@ -510,54 +492,70 @@ final class HDPIMMiniZipExtractor {
         in archive: unzFile,
         to fullPath: String,
         path: String,
+        chunkHandler: ((Int) -> Void)? = nil,
         cancellationCheck: (() -> Bool)? = nil
     ) throws -> UInt64 {
+        let stored = entry.compressionMethod == 0
         var method: Int32 = 0
-        guard unzOpenCurrentFile3(archive, &method, nil, 1, nil) == UNZ_OK else {
-            throw HDPIMMiniZipError.openCurrentFileFailed(path)
-        }
-
+        let status = stored ? unzOpenCurrentFile(archive) : unzOpenCurrentFile3(archive, &method, nil, 1, nil)
+        guard status == UNZ_OK else { throw HDPIMMiniZipError.openCurrentFileFailed(path) }
         var shouldClose = true
-        defer {
-            if shouldClose {
-                _ = unzCloseCurrentFile(archive)
-            }
-        }
-
+        defer { if shouldClose { _ = unzCloseCurrentFile(archive) } }
         let outputSize = try readHDPIMLZMA2OutputSize(in: archive, path: path)
-
         let dictionaryByte = try readHDPIMLZMA2PropertyByte(in: archive, path: path)
-        let compressedBodySize = entry.compressedSize > 0 ? entry.compressedSize - 1 : 0
-        let decoder = try HDPIMSevenZipLZMA2Decoder(
-            propertyByte: dictionaryByte,
-            expectedSize: outputSize,
-            compressedBodySize: compressedBodySize
-        )
-
-        let bufferSize = 64 * 1024
-        var buffer = [UInt8](repeating: 0, count: bufferSize)
-
-        while try autoreleasepool(invoking: { () -> Bool in
-            try throwIfCancelled(cancellationCheck)
-            let readBytes = unzReadCurrentFile(archive, &buffer, UInt32(bufferSize))
-            if readBytes < 0 {
-                throw HDPIMMiniZipError.readFailed(path)
-            }
-            if readBytes == 0 {
+        let dictionarySize = dictionaryByte == 40 ? UInt64(UInt32.max) :
+            (dictionaryByte < 40 ? UInt64(2 | (dictionaryByte & 1)) << (UInt64(dictionaryByte >> 1) + 11) : 0)
+        let reservation = min(dictionarySize, max(outputSize, 1))
+        try HDPIMExtractionConcurrency.dictionaryBudget.acquire(reservation, cancellationCheck: cancellationCheck)
+        defer { HDPIMExtractionConcurrency.dictionaryBudget.release(reservation) }
+        let decoder = try HDPIMLZMA2FileDecoder(propertyByte: dictionaryByte, expectedSize: outputSize,
+                                               compressedBodySize: entry.compressedSize > 0 ? entry.compressedSize - 1 : 0)
+        let handle = try openOutputHandle(at: fullPath)
+        defer { try? handle.close() }
+        var outputCRC: UInt32 = 0
+        var rawCRC = HDPIMCRC32(0, Data([dictionaryByte]))
+        var rawSize: UInt64 = 1
+        let outputHandler: HDPIMLZMA2OutputHandler = { data, errorPointer in
+            do {
+                try self.throwIfCancelled(cancellationCheck)
+                try handle.write(contentsOf: data)
+                if !stored {
+                    outputCRC = HDPIMCRC32(outputCRC, data)
+                    chunkHandler?(data.count)
+                }
+                return true
+            } catch {
+                errorPointer?.pointee = error as NSError
                 return false
             }
-            try decoder.processChunk(Data(buffer.prefix(Int(readBytes))))
+        }
+        let bufferSize = 128 * 1024
+        var buffer = [UInt8](repeating: 0, count: bufferSize)
+        while try autoreleasepool(invoking: { () -> Bool in
+            try throwIfCancelled(cancellationCheck)
+            let count = unzReadCurrentFile(archive, &buffer, UInt32(bufferSize))
+            if count < 0 { throw HDPIMMiniZipError.readFailed(path) }
+            if count == 0 { return false }
+            let data = Data(buffer.prefix(Int(count)))
+            if stored {
+                rawCRC = HDPIMCRC32(rawCRC, data)
+                rawSize += UInt64(count)
+                chunkHandler?(Int(count))
+            }
+            try decoder.processChunk(data, outputHandler: outputHandler)
             return true
         }) {}
-
-        let decodedSize = try decoder.finish(withExpectedSize: outputSize, writingToPath: fullPath)
-
-        _ = unzCloseCurrentFile(archive)
+        try decoder.finish(outputHandler: outputHandler)
+        let closeStatus = unzCloseCurrentFile(archive)
         shouldClose = false
-
-        try validateExtractedEntryFile(entry, at: fullPath, actualSize: decodedSize.uint64Value)
-
-        return decodedSize.uint64Value
+        if stored {
+            guard closeStatus == UNZ_OK else { throw HDPIMMiniZipError.closeCurrentFileFailed(path) }
+            try validateEntryIntegrity(entry, actualSize: rawSize, actualCRC: rawCRC)
+            chunkHandler?(1)
+        } else {
+            try validateEntryIntegrity(entry, actualSize: decoder.decodedSize, actualCRC: outputCRC)
+        }
+        return decoder.decodedSize
     }
 
     private func readHDPIMLZMA2OutputSize(in archive: unzFile, path: String) throws -> UInt64 {
@@ -608,80 +606,8 @@ final class HDPIMMiniZipExtractor {
         chunkHandler: ((Int) -> Void)? = nil,
         cancellationCheck: (() -> Bool)? = nil
     ) throws -> UInt64 {
-        guard unzOpenCurrentFile(archive) == UNZ_OK else {
-            throw HDPIMMiniZipError.openCurrentFileFailed(path)
-        }
-
-        var shouldClose = true
-        defer {
-            if shouldClose {
-                _ = unzCloseCurrentFile(archive)
-            }
-        }
-
-        let handle = try openOutputHandle(at: fullPath)
-        defer {
-            try? handle.close()
-        }
-
-        let bufferSize = 64 * 1024
-        var buffer = [UInt8](repeating: 0, count: bufferSize)
-        var decoder: HDPIMNativeLZMA2StreamDecoder?
-        var rawSize: UInt64 = 0
-        var rawCRC: UInt32 = 0
-        var decodedSize: UInt64 = 0
-
-        while try autoreleasepool(invoking: { () -> Bool in
-            try throwIfCancelled(cancellationCheck)
-            let readBytes = unzReadCurrentFile(archive, &buffer, UInt32(bufferSize))
-            if readBytes < 0 {
-                throw HDPIMMiniZipError.readFailed(path)
-            }
-            if readBytes == 0 {
-                return false
-            }
-
-            let data = Data(buffer.prefix(Int(readBytes)))
-            rawSize += UInt64(readBytes)
-            rawCRC = HDPIMCRC32(rawCRC, data)
-            chunkHandler?(Int(readBytes))
-
-            if decoder == nil {
-                guard let propertyByte = data.first else {
-                    throw HDPIMMiniZipError.invalidEntry(path)
-                }
-                decoder = try HDPIMNativeLZMA2StreamDecoder(dictionaryByte: propertyByte)
-                let body = data.dropFirst()
-                if !body.isEmpty {
-                    let output = try decoder!.process(chunk: Data(body), finish: false)
-                    try handle.write(contentsOf: output)
-                    decodedSize += UInt64(output.count)
-                }
-            } else {
-                let output = try decoder!.process(chunk: data, finish: false)
-                try handle.write(contentsOf: output)
-                decodedSize += UInt64(output.count)
-            }
-            return true
-        }) {}
-
-        if let decoder {
-            let output = try decoder.process(chunk: Data(), finish: true)
-            try handle.write(contentsOf: output)
-            decodedSize += UInt64(output.count)
-        } else {
-            throw HDPIMMiniZipError.invalidEntry(path)
-        }
-
-        let closeStatus = unzCloseCurrentFile(archive)
-        shouldClose = false
-        guard closeStatus == UNZ_OK else {
-            throw HDPIMMiniZipError.closeCurrentFileFailed(path)
-        }
-
-        try validateEntryIntegrity(entry, actualSize: rawSize, actualCRC: rawCRC)
-
-        return decodedSize
+        try extractHDPIMLZMA2Entry(entry, in: archive, to: fullPath, path: path,
+                                  chunkHandler: chunkHandler, cancellationCheck: cancellationCheck)
     }
 
     private func openOutputHandle(at fullPath: String) throws -> FileHandle {

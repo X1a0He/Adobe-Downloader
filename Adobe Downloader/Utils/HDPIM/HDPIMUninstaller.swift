@@ -1,4 +1,6 @@
 import Foundation
+import CryptoKit
+import Darwin
 
 struct HDPIMInstalledProductForUninstall: Identifiable, Equatable {
 	let sapCode: String
@@ -57,46 +59,6 @@ enum HDPIMUninstallTarget: Hashable {
 	}
 }
 
-private struct HDPIMUninstallCompletionSnapshot {
-	let sapCode: String
-	let version: String
-	let processorFamily: HDPIMProcessorFamily
-	let installDir: String
-	let appLaunchPath: String
-	let modulesToRemove: Set<String>
-	let buildGuid: String
-	let amtConfigAppID: String
-	let amtConfigLEID: String
-	let uninstallPIMXPaths: Set<String>
-	let repairPIMXPaths: Set<String>
-
-	var appGuid: String {
-		HDPIMARPNaming.appGuid(sapCode: sapCode, version: version)
-	}
-
-	var uninstallAppPath: String {
-		"/Library/Application Support/Adobe/Uninstall/\(appGuid).app"
-	}
-
-	var uninstallAdbargPath: String {
-		"/Library/Application Support/Adobe/Uninstall/\(appGuid).adbarg"
-	}
-
-	var amtConfigPath: String? {
-		let appID = amtConfigAppID.trimmingCharacters(in: .whitespacesAndNewlines)
-		let leid = amtConfigLEID.trimmingCharacters(in: .whitespacesAndNewlines)
-		guard !appID.isEmpty, !leid.isEmpty else {
-			return nil
-		}
-		return "/Library/Application Support/Adobe/PCF/\(appID).\(leid).xml"
-	}
-}
-
-private struct HDPIMPackageUninstallPlan {
-	let package: HDPIMNativePackageContext
-	let pimxPlan: HDPIMRollbackHelper.UninstallPIMXPlan?
-}
-
 private final class HDPIMUninstallProgressReporter {
 	private static let chunkSize: Int64 = 2 * 1024 * 1024
 	private let progressHandler: ((Double, String) -> Void)?
@@ -106,7 +68,9 @@ private final class HDPIMUninstallProgressReporter {
 	private var currentPackageWorkSize: Int64 = 0
 	private var currentPackageId: String?
 	private var lastProgress = 0.0
-	private var lastStatus = ""
+	private var lastUpdateTime = -Double.infinity
+	private var packageStartTime = 0.0
+	private var completedCommands = 0
 
 	init(packages: [HDPIMNativePackageContext], progressHandler: ((Double, String) -> Void)?) {
 		self.progressHandler = progressHandler
@@ -119,7 +83,7 @@ private final class HDPIMUninstallProgressReporter {
 	}
 
 	func reportPreparation(_ status: String) {
-		emit(0.04, status)
+		emit(0.04, status, force: true)
 	}
 
 	func reportPackageSelection(packageCount: Int) {
@@ -129,27 +93,32 @@ private final class HDPIMUninstallProgressReporter {
 		} else {
 			status = String(localized: "未找到需要删除的包，正在更新 HDPIM 模块状态")
 		}
-		emit(0.08, status)
+		emit(0.055, status, force: true)
 	}
 
 	func beginPackage(_ package: HDPIMNativePackageContext, index: Int, total: Int) {
 		currentPackageId = Self.packageId(package)
 		currentPackageWorkSize = 0
-		emitPackageProgress(status: String(format: String(localized: "正在卸载 %@ (%d/%d)"), package.packageName, index, total))
+		packageStartTime = ProcessInfo.processInfo.systemUptime
+		completedCommands = 0
+		emitPackageProgress(status: String(format: String(localized: "正在卸载 %@ (%d/%d)"), package.packageName, index, total), force: true)
 	}
 
 	func packageWorkSize(for package: HDPIMNativePackageContext) -> Int64 {
 		packageWorkSizes[Self.packageId(package)] ?? Self.workSize(for: package)
 	}
 
-	func reportPackageProgress(_ package: HDPIMNativePackageContext, processedBytes: Int64, detail: String) {
+	func reportPackageProgress(_ package: HDPIMNativePackageContext, completedCommands: Int, totalCommands: Int) {
 		let size = packageWorkSize(for: package)
 		guard size > 0 else {
 			return
 		}
 		currentPackageId = Self.packageId(package)
+		self.completedCommands = completedCommands
+		let processedBytes = Int64(Double(size) * Double(completedCommands) / Double(max(totalCommands, 1)))
 		currentPackageWorkSize = min(max(processedBytes, currentPackageWorkSize), size)
-		emitPackageProgress(status: String(format: String(localized: "正在卸载 %@: %@"), package.packageName, detail))
+		emitPackageProgress(status: String(format: String(localized: "正在卸载 %@... %d/%d 步"),
+                                              package.packageName, completedCommands, totalCommands))
 	}
 
 	func completePackage(_ package: HDPIMNativePackageContext) {
@@ -157,24 +126,26 @@ private final class HDPIMUninstallProgressReporter {
 		completedWorkSize += size
 		currentPackageId = nil
 		currentPackageWorkSize = 0
-		emitPackageProgress(status: String(format: String(localized: "已完成 %@ 卸载"), package.packageName))
+		let elapsed = ProcessInfo.processInfo.systemUptime - packageStartTime
+		emitPackageProgress(status: String(format: String(localized: "已完成 %@ 卸载（%d 步，耗时 %.1f 秒）"),
+                                              package.packageName, completedCommands, elapsed), force: true)
 	}
 
 	func reportCompletion(_ status: String) {
-		emit(totalWorkSize > 0 ? 0.95 : 0.85, status)
+		emit(totalWorkSize > 0 ? 0.95 : 0.85, status, force: true)
 	}
 
 	func reportFinished() {
 		emit(1.0, String(localized: "卸载完成"), force: true)
 	}
 
-	private func emitPackageProgress(status: String) {
+	private func emitPackageProgress(status: String, force: Bool = false) {
 		guard totalWorkSize > 0 else {
-			emit(0.6, status)
+			emit(0.6, status, force: force)
 			return
 		}
 		let packageFraction = min(max(Double(completedWorkSize + currentPackageWorkSize) / Double(totalWorkSize), 0), 1)
-		emit(0.08 + packageFraction * 0.84, status)
+		emit(0.08 + packageFraction * 0.84, status, force: force)
 	}
 
 	private func emit(_ progress: Double, _ status: String, force: Bool = false) {
@@ -182,13 +153,14 @@ private final class HDPIMUninstallProgressReporter {
 			return
 		}
 		let clampedProgress = min(max(progress, lastProgress), 1.0)
-		let statusChanged = status != lastStatus
+		let now = ProcessInfo.processInfo.systemUptime
+		let elapsed = now - lastUpdateTime
 		let progressedEnough = clampedProgress - lastProgress >= 0.005
-		guard force || statusChanged || progressedEnough else {
+		guard force || (elapsed >= 0.25 && (progressedEnough || elapsed >= 1)) else {
 			return
 		}
 		lastProgress = clampedProgress
-		lastStatus = status
+		lastUpdateTime = now
 		progressHandler(clampedProgress, status)
 	}
 
@@ -208,509 +180,536 @@ private final class HDPIMUninstallProgressReporter {
 	}
 }
 
+struct HDPIMUninstallResult: Codable {
+    enum Outcome: String, Codable { case completed, warnings, cancelled, failed, partial }
+    let outcome: Outcome
+    let warnings: [String]
+    let details: String?
+    let recoveryDirectory: String?
+    var diagnostics: [String]? = nil
+}
+
+struct HDPIMUninstallFailure: Error, LocalizedError {
+    let result: HDPIMUninstallResult
+    var errorDescription: String? { result.details }
+}
+
+private struct HDPIMPreparedUninstallPackage {
+    let package: HDPIMNativePackageContext
+    let descriptors: [PIMXCommandDescriptor]
+    let commands: [HDPIMCommand]
+    let repair: [HDPIMCommand]
+}
+
+private struct HDPIMPreparedUninstallProduct {
+    let product: HDPIMUninstallProductState
+    let target: HDPIMUninstallTarget
+    let packages: [HDPIMPreparedUninstallPackage]
+}
+
 final class HDPIMUninstaller {
+    static func installedProducts(sapCode: String? = nil, version: String? = nil) -> [HDPIMInstalledProductForUninstall] {
+        do {
+            let database = try HDPIMDatabase.shared.makeReadOnlyConnection()
+            defer { database.close() }
+            return try database.loadUninstallState().products.values
+                .filter { (sapCode == nil || $0.identity.sapCode == sapCode) && (version == nil || $0.identity.version == version) }
+                .map { product in
+                    HDPIMInstalledProductForUninstall(sapCode: product.identity.sapCode, version: product.identity.version,
+                        processorFamily: product.identity.processorFamily,
+                        installDir: product.metadata[HDPIMProductExtraMetaKey.installDir] ?? "",
+                        modules: product.modules.sorted(), packages: product.packages)
+                }.sorted { $0.sapCode == $1.sapCode ? AppStatics.compareVersions($0.version, $1.version) > 0 : $0.sapCode < $1.sapCode }
+        } catch {
+            print("[HDPIM] 读取卸载状态失败：\(error.localizedDescription)")
+            return []
+        }
+    }
 
-	static func installedProducts(
-		sapCode: String? = nil,
-		version: String? = nil
-	) -> [HDPIMInstalledProductForUninstall] {
-		let database = HDPIMDatabase.shared
-		let shouldClose = !database.isOpen
-		do {
-			if shouldClose {
-				try database.openReadOnly()
-			}
-			defer {
-				if shouldClose {
-					database.close()
-				}
-			}
+    @discardableResult
+    static func uninstall(sapCode: String, version: String, processorFamily: HDPIMProcessorFamily,
+                          preservingUserPreferences: Bool = true,
+                          progressHandler: ((Double, String) -> Void)? = nil) async throws -> HDPIMUninstallResult {
+        try await perform(sapCode: sapCode, version: version, processorFamily: processorFamily, target: .product,
+                          preservingUserPreferences: preservingUserPreferences, progressHandler: progressHandler)
+    }
 
-			return database.getAllInstalledProducts()
-				.filter { product in
-					if let sapCode, product.sapCode != sapCode {
-						return false
-					}
-					if let version, product.version != version {
-						return false
-					}
-					return true
-				}
-				.map { product in
-					let processorFamily = HDPIMProcessorFamily.from(platform: product.platform)
-					let packages = database.getInstalledPackageContexts(
-						sapCode: product.sapCode,
-						version: product.version,
-						processorFamily: processorFamily
-					)
-					let modules = installedModuleIds(
-						database: database,
-						sapCode: product.sapCode,
-						version: product.version,
-						processorFamily: processorFamily,
-						packages: packages
-					)
-					return HDPIMInstalledProductForUninstall(
-						sapCode: product.sapCode,
-						version: product.version,
-						processorFamily: processorFamily,
-						installDir: database.getProductMeta(
-							sapCode: product.sapCode,
-							version: product.version,
-							processorFamily: processorFamily,
-							key: HDPIMProductExtraMetaKey.installDir
-						) ?? "",
-						modules: modules,
-						packages: packages
-					)
-				}
-				.sorted { lhs, rhs in
-					if lhs.sapCode != rhs.sapCode {
-						return lhs.sapCode < rhs.sapCode
-					}
-					return AppStatics.compareVersions(lhs.version, rhs.version) > 0
-				}
-		} catch {
-			return []
-		}
-	}
+    @discardableResult
+    static func uninstallModules(sapCode: String, version: String, processorFamily: HDPIMProcessorFamily,
+                                 moduleIds: Set<String>, preservingUserPreferences: Bool = true,
+                                 progressHandler: ((Double, String) -> Void)? = nil) async throws -> HDPIMUninstallResult {
+        try await perform(sapCode: sapCode, version: version, processorFamily: processorFamily, target: .modules(moduleIds),
+                          preservingUserPreferences: preservingUserPreferences, progressHandler: progressHandler)
+    }
 
-	static func uninstall(
-		sapCode: String,
-		version: String,
-		processorFamily: HDPIMProcessorFamily,
-		progressHandler: ((Double, String) -> Void)? = nil
-	) async throws {
-		try await uninstall(
-			sapCode: sapCode,
-			version: version,
-			processorFamily: processorFamily,
-			target: .product,
-			progressHandler: progressHandler
-		)
-	}
+    @discardableResult
+    static func uninstallPackages(sapCode: String, version: String, processorFamily: HDPIMProcessorFamily,
+                                  packageKeys: Set<HDPIMPackageUninstallKey>, preservingUserPreferences: Bool = true,
+                                  progressHandler: ((Double, String) -> Void)? = nil) async throws -> HDPIMUninstallResult {
+        try await perform(sapCode: sapCode, version: version, processorFamily: processorFamily, target: .packages(packageKeys),
+                          preservingUserPreferences: preservingUserPreferences, progressHandler: progressHandler)
+    }
 
-	static func uninstallModules(
-		sapCode: String,
-		version: String,
-		processorFamily: HDPIMProcessorFamily,
-		moduleIds: Set<String>,
-		progressHandler: ((Double, String) -> Void)? = nil
-	) async throws {
-		try await uninstall(
-			sapCode: sapCode,
-			version: version,
-			processorFamily: processorFamily,
-			target: .modules(moduleIds),
-			progressHandler: progressHandler
-		)
-	}
+    private static func perform(sapCode: String, version: String, processorFamily: HDPIMProcessorFamily,
+                                target: HDPIMUninstallTarget, preservingUserPreferences: Bool,
+                                progressHandler: ((Double, String) -> Void)?) async throws -> HDPIMUninstallResult {
+        let database = HDPIMDatabase.shared
+        let shouldClose = !database.isOpen
+        if shouldClose { try database.open() }
+        defer { if shouldClose { database.close() } }
+        try database.beginUninstallTransaction()
+        var transactionOpen = true
+        let backup = HDPIMBackupManager()
+        var wroteFiles = false
+        var attemptedHooks: [HDPIMPreparedUninstallPackage] = []
+        var plans: [HDPIMPreparedUninstallProduct] = []
+        var warnings: [String] = []
+        var diagnostics: [String] = []
+        var retainedARPTargets: Set<URL> = []
+        var pcd: HDPIMPCDCompletion?
+        do {
+            try HDPIMOperationContext.checkCancellation()
+            let preparationStart = ProcessInfo.processInfo.systemUptime
+            progressHandler?(0.02, "正在读取卸载状态")
+            let state = try database.loadUninstallState()
+            let stateElapsed = ProcessInfo.processInfo.systemUptime - preparationStart
+            progressHandler?(0.022, String(format: "卸载状态读取完成（%.2f 秒），正在校验产品依赖", stateElapsed))
+            let root = try state.resolve(sapCode: sapCode, version: version, processorFamily: processorFamily)
+            let products: [HDPIMUninstallProductState]
+            if case .product = target {
+                products = try productPlan(root: root, state: state, warnings: &warnings)
+            } else { products = [root] }
+            let dependencyElapsed = ProcessInfo.processInfo.systemUptime - preparationStart - stateElapsed
+            progressHandler?(0.025, String(format: "产品依赖校验完成（%.2f 秒），正在准备卸载材料", dependencyElapsed))
+            for (productIndex, product) in products.enumerated() {
+                try HDPIMOperationContext.checkCancellation()
+                let productTarget: HDPIMUninstallTarget = product.identity == root.identity ? target : .product
+                let productProgress = 0.025 + 0.025 * Double(productIndex) / Double(max(products.count, 1))
+                progressHandler?(productProgress, "正在检查冲突进程：\(product.identity.sapCode)")
+                try validateConflicts(product)
+                let selected = try selectedPackages(product, target: productTarget)
+                var prepared: [HDPIMPreparedUninstallPackage] = []
+                prepared.reserveCapacity(selected.count)
+                for (packageIndex, package) in selected.enumerated() {
+                    try HDPIMOperationContext.checkCancellation()
+                    let packageStart = ProcessInfo.processInfo.systemUptime
+                    let fraction = Double(packageIndex) / Double(max(selected.count, 1))
+                    let packageProgress = productProgress + 0.025 * fraction / Double(max(products.count, 1))
+                    progressHandler?(packageProgress, "正在校验卸载材料：\(package.packageName)（\(packageIndex + 1)/\(selected.count)）")
+                    prepared.append(try preparePackage(package, product: product, preservingUserPreferences: preservingUserPreferences))
+                    let elapsed = ProcessInfo.processInfo.systemUptime - packageStart
+                    progressHandler?(packageProgress, String(format: "已校验 %@（%.2f 秒）", package.packageName, elapsed))
+                }
+                plans.append(.init(product: product, target: productTarget, packages: prepared))
+            }
+            progressHandler?(0.05, "正在准备卸载登记")
+            let removedIdentities = Set(plans.compactMap { plan -> HDPIMUninstallIdentity? in
+                if case .product = plan.target { return plan.product.identity }
+                return nil
+            })
+            retainedARPTargets = Set(state.products.values.filter { !removedIdentities.contains($0.identity) }
+                .flatMap { arpTargets(for: $0) })
+            let needsPCD = plans.contains {
+                if case .product = $0.target {
+                    return !($0.product.metadata[HDPIMProductExtraMetaKey.amtConfigAppID] ?? "").isEmpty
+                        || !($0.product.metadata[HDPIMProductMetaKey.amtConfigLEID.rawValue] ?? "").isEmpty
+                }
+                return false
+            }
+            if needsPCD { pcd = try HDPIMPCDCompletion() }
+            let packages = plans.flatMap(\.packages)
+            let reporter = HDPIMUninstallProgressReporter(packages: packages.map(\.package), progressHandler: progressHandler)
+            reporter.reportPackageSelection(packageCount: packages.count)
+            progressHandler?(0.056, "正在检查卸载路径")
+            let changes = try packages.flatMap { try HDPIMFileChange.from($0.descriptors) }
+            let removalPolicy = HDPIMRemovalPolicy.PreflightChecker()
+            for package in packages {
+                for descriptor in package.descriptors {
+                    switch descriptor {
+                    case .deleteFile(let path, _), .deleteDirectory(let path, _, _): try validateRemovalPath(path, using: removalPolicy)
+                    default: break
+                    }
+                }
+            }
+            let preparationElapsed = ProcessInfo.processInfo.systemUptime - preparationStart
+            progressHandler?(0.06, String(format: "卸载预检完成（%.2f 秒），正在保存卸载恢复记录", preparationElapsed))
+            try await backup.capture(changes)
+            for (index, package) in packages.enumerated() {
+                try HDPIMOperationContext.checkCancellation()
+                reporter.beginPackage(package.package, index: index + 1, total: packages.count)
+                var hookRecorded = false
+                for (commandIndex, command) in package.commands.enumerated() {
+                    try HDPIMOperationContext.checkCancellation()
+                    if command is RunProgramCommand, !hookRecorded {
+                        attemptedHooks.append(package)
+                        hookRecorded = true
+                    }
+                    wroteFiles = true
+                    try await command.execute()
+                    try HDPIMOperationContext.checkCancellation()
+                    reporter.reportPackageProgress(package.package,
+                        completedCommands: commandIndex + 1, totalCommands: package.commands.count)
+                }
+                reporter.completePackage(package.package)
+            }
+            reporter.reportCompletion("正在提交卸载记录")
+            for plan in plans {
+                try HDPIMOperationContext.checkCancellation()
+                let modules: Set<String>
+                let entire: Bool
+                switch plan.target {
+                case .product: modules = []; entire = true
+                case .modules(let values): modules = values; entire = false
+                case .packages: modules = []; entire = false
+                }
+                try database.commitUninstallProduct(plan.product, removedPackages: plan.packages.map(\.package),
+                                                     removingModules: modules, entireProduct: entire)
+            }
+            // 最后一次取消仍属于可恢复阶段；提交成功后的请求不得把成功改成取消。
+            try HDPIMOperationContext.checkCancellation()
+            try database.commitUninstallTransaction()
+            transactionOpen = false
+        } catch {
+            let original = error
+            var recoveryErrors: [String] = []
+            await HDPIMOperationContext.$isRecovering.withValue(true) {
+                if wroteFiles {
+                    do { try await backup.restoreAll() }
+                    catch { recoveryErrors.append("文件恢复失败：\(error.localizedDescription)") }
+                }
+                if transactionOpen {
+                    do { try database.rollbackUninstallTransaction(); transactionOpen = false }
+                    catch { recoveryErrors.append("数据库恢复失败：\(error.localizedDescription)") }
+                }
+                if recoveryErrors.isEmpty {
+                    for package in attemptedHooks {
+                        guard !package.repair.isEmpty else {
+                            recoveryErrors.append("\(package.package.packageName) 已执行外部卸载程序，但没有可用的 repair 命令，不能确认其副作用已恢复")
+                            continue
+                        }
+                        recoveryErrors += await HDPIMRollbackHelper.repairPreviousPackages([package.repair])
+                    }
+                }
+            }
+            let cancelled = original is CancellationError || HDPIMOperationContext.cancellation?.isCancelled == true
+            let outcome: HDPIMUninstallResult.Outcome = recoveryErrors.isEmpty ? (cancelled ? .cancelled : .failed) : .partial
+            let message = ([cancelled && recoveryErrors.isEmpty ? "卸载已取消，已恢复本次文件及数据库变更" : original.localizedDescription]
+                           + recoveryErrors).joined(separator: "\n")
+            throw HDPIMUninstallFailure(result: .init(outcome: outcome, warnings: warnings, details: message,
+                                                       recoveryDirectory: backup.hasBackups ? backup.recoveryDirectory.path : nil))
+        }
+        // 外部登记不与 PIM 数据库共享事务，提交后逐项收尾并明确报告残留。
+        await HDPIMOperationContext.$isRecovering.withValue(true) {
+            for plan in plans {
+                if case .product = plan.target {
+                    completeProduct(plan.product, pcd: pcd, retainedARPTargets: retainedARPTargets,
+                                    warnings: &warnings, diagnostics: &diagnostics)
+                }
+            }
+            do {
+                if !(try database.hasInstalledNonCCProducts()) {
+                    for path in ["/Library/Application Support/Adobe/ADCRefs/AIM.adcref",
+                                 "/Library/Application Support/Adobe/AdobeApplicationManager/AAMRefs/AIM.aamref"] {
+                        try removeOwnedPath(path)
+                    }
+                }
+            } catch { warnings.append("ADS 引用清理未完成：\(error.localizedDescription)") }
+            let paths = Set(plans.flatMap(\.packages).flatMap { [$0.package.uninstallPIMXPath, $0.package.repairPIMXPath].compactMap { $0 } })
+            for path in paths where !path.isEmpty {
+                do { if !(try database.uninstallMaterialIsReferenced(path: path)) { try removeOwnedPath(path) } }
+                catch { warnings.append("保留材料 \(path)：\(error.localizedDescription)") }
+            }
+            do { try await backup.cleanup() }
+            catch { warnings.append("恢复记录清理未完成：\(backup.recoveryDirectory.path)，\(error.localizedDescription)") }
+        }
+        progressHandler?(1, warnings.isEmpty ? "卸载完成" : "卸载完成，部分收尾需要处理")
+        var seenDiagnostics: Set<String> = []
+        return .init(outcome: warnings.isEmpty ? .completed : .warnings, warnings: warnings, details: nil, recoveryDirectory: nil,
+                     diagnostics: diagnostics.filter { seenDiagnostics.insert($0).inserted })
+    }
 
-	static func uninstallPackages(
-		sapCode: String,
-		version: String,
-		processorFamily: HDPIMProcessorFamily,
-		packageKeys: Set<HDPIMPackageUninstallKey>,
-		progressHandler: ((Double, String) -> Void)? = nil
-	) async throws {
-		try await uninstall(
-			sapCode: sapCode,
-			version: version,
-			processorFamily: processorFamily,
-			target: .packages(packageKeys),
-			progressHandler: progressHandler
-		)
-	}
+    private static func productPlan(root: HDPIMUninstallProductState, state: HDPIMUninstallDatabaseState,
+                                    warnings: inout [String]) throws -> [HDPIMUninstallProductState] {
+        func referrers(_ product: HDPIMUninstallProductState) -> Set<HDPIMUninstallIdentity> {
+            Set(state.references.filter {
+                $0.dependencySapCode == product.identity.sapCode && $0.dependencyProcessorFamily == product.identity.processorFamily
+                    && ($0.dependencyVersion == product.baseVersion || $0.dependencyVersion == product.identity.version)
+            }.compactMap {
+                let key = HDPIMUninstallIdentity(sapCode: $0.referencingSapCode, version: $0.referencingVersion,
+                                                processorFamily: $0.referencingProcessorFamily)
+                return state.products[key] == nil ? nil : key
+            })
+        }
+        let blocking = referrers(root).subtracting([root.identity])
+        guard blocking.isEmpty else {
+            throw UninstallError.dependencyExists("产品仍被引用：" + blocking.map { "\($0.sapCode) \($0.version)" }.sorted().joined(separator: "、"))
+        }
+        var candidates = [root.identity: root]
+        var order = [root.identity]
+        var index = 0
+        while index < order.count {
+            let identity = order[index]; index += 1
+            for reference in state.references where reference.referencingSapCode == identity.sapCode
+                && reference.referencingVersion == identity.version && reference.referencingProcessorFamily == identity.processorFamily {
+                let matching = state.products.values.filter {
+                    $0.identity.sapCode == reference.dependencySapCode && $0.identity.processorFamily == reference.dependencyProcessorFamily
+                        && ($0.baseVersion == reference.dependencyVersion || $0.identity.version == reference.dependencyVersion)
+                }
+                guard !matching.isEmpty else { continue }
+                let dependency = try state.resolve(sapCode: reference.dependencySapCode, version: reference.dependencyVersion,
+                                                    processorFamily: reference.dependencyProcessorFamily)
+                if isTruthy(dependency.metadata[HDPIMProductExtraMetaKey.isSelfReference]) { continue }
+                if candidates[dependency.identity] == nil { candidates[dependency.identity] = dependency; order.append(dependency.identity) }
+            }
+        }
+        var changed = true
+        while changed {
+            changed = false
+            for identity in order where identity != root.identity {
+                guard let product = candidates[identity] else { continue }
+                if !referrers(product).subtracting(Set(candidates.keys)).isEmpty {
+                    candidates[identity] = nil; changed = true
+                    warnings.append("保留仍被其他产品引用的依赖：\(identity.sapCode) \(identity.version)")
+                }
+            }
+        }
+        // 被保留父产品的后代也会由引用检查保留；只提交仍从根可达的候选。
+        var reachable: Set<HDPIMUninstallIdentity> = [root.identity]
+        var pending = [root.identity]
+        while let identity = pending.popLast() {
+            for reference in state.references where reference.referencingSapCode == identity.sapCode
+                && reference.referencingVersion == identity.version && reference.referencingProcessorFamily == identity.processorFamily {
+                for product in candidates.values where product.identity.sapCode == reference.dependencySapCode
+                    && product.identity.processorFamily == reference.dependencyProcessorFamily
+                    && (product.baseVersion == reference.dependencyVersion || product.identity.version == reference.dependencyVersion) {
+                    if reachable.insert(product.identity).inserted { pending.append(product.identity) }
+                }
+            }
+        }
+        return order.filter { reachable.contains($0) }.compactMap { candidates[$0] }
+    }
 
-	private static func uninstall(
-		sapCode: String,
-		version: String,
-		processorFamily: HDPIMProcessorFamily,
-		target: HDPIMUninstallTarget,
-		progressHandler: ((Double, String) -> Void)? = nil
-	) async throws {
-		let database = HDPIMDatabase.shared
-		let shouldClose = !database.isOpen
-		if shouldClose {
-			try database.open()
-		}
-		defer {
-			if shouldClose {
-				database.close()
-			}
-		}
-		func reopenDatabaseIfNeeded() throws {
-			if shouldClose && !database.isOpen {
-				try database.open()
-			}
-		}
+    private static func selectedPackages(_ product: HDPIMUninstallProductState, target: HDPIMUninstallTarget) throws -> [HDPIMNativePackageContext] {
+        let selected: [HDPIMNativePackageContext]
+        switch target {
+        case .product: selected = product.packages
+        case .modules(let modules):
+            guard !modules.isEmpty, modules.isSubset(of: product.modules) else { throw UninstallError.moduleNotInstalled }
+            let keeping = product.modules.subtracting(modules)
+            selected = product.packages.filter {
+                let associations = Set(splitMetaValues($0.module ?? "")).intersection(product.modules)
+                return !associations.isDisjoint(with: modules) && associations.isDisjoint(with: keeping)
+            }
+        case .packages(let keys):
+            selected = product.packages.filter { keys.contains(.init(packageName: $0.packageName, packageVersion: $0.packageVersion)) }
+            guard !keys.isEmpty, selected.count == keys.count else { throw UninstallError.noPackagesSelected }
+        }
+        return selected.sorted { $0.sequenceNumber == $1.sequenceNumber ? $0.packageName < $1.packageName : $0.sequenceNumber > $1.sequenceNumber }
+    }
 
-		progressHandler?(0.04, String(localized: "正在分析 HDPIM 卸载状态"))
+    private static func preparePackage(_ package: HDPIMNativePackageContext, product: HDPIMUninstallProductState,
+                                       preservingUserPreferences: Bool) throws -> HDPIMPreparedUninstallPackage {
+        guard let path = package.uninstallPIMXPath, !path.isEmpty else { throw UninstallError.missingUninstallPIMX(package.packageName) }
+        let url = URL(fileURLWithPath: path)
+        let xml = try verifiedXML(url, sha1: package.uninstallPIMXHash, sha256: package.uninstallPIMXHash256)
+        let context = propertyTable(product, package: package, preservingUserPreferences: preservingUserPreferences)
+        let parser = PIMXParser(propertyTable: context)
+        let descriptors = try parser.parseUninstallCommands(pimxURL: url, xmlData: xml, preservingUserPreferences: preservingUserPreferences)
+        let engine = HDPIMCommandEngine(propertyTable: context)
+        var repair: [HDPIMCommand] = []
+        if let path = package.repairPIMXPath, !path.isEmpty {
+            let repairURL = URL(fileURLWithPath: path)
+            let data = try verifiedXML(repairURL, sha1: package.repairPIMXHash, sha256: package.repairPIMXHash256)
+            // 旧 repair 材料重放安装 Hook，与旧包恢复使用相同的工作流。
+            let repairContext = context.cloned(); repairContext.setProperty("workflowType", "install")
+            let repairDescriptors = try PIMXParser(propertyTable: repairContext).parseRepairCommands(pimxURL: repairURL, xmlData: data)
+                .filter { if case .runProgram = $0 { return true }; return false }
+            try HDPIMRepairResources.validateStoredCommands(repairDescriptors)
+            repair = HDPIMCommandEngine(propertyTable: repairContext).generateCommands(from: repairDescriptors)
+        }
+        try HDPIMRepairResources.validateStoredCommands(descriptors)
+        return .init(package: package, descriptors: descriptors, commands: engine.generateCommands(from: descriptors), repair: repair)
+    }
 
-		if case .product = target {
-			let canUninstall = HDPIMDependencyManager.shared.canUninstall(
-				sapCode: sapCode,
-				version: version,
-				processorFamily: processorFamily
-			)
-			print("[HDPIM-DEP] 依赖检查 \(sapCode) \(version): canUninstall=\(canUninstall.canUninstall), reason=\(canUninstall.reason ?? "无")")
+    static func verifiedXML(_ url: URL, sha1: String?, sha256: String?) throws -> Data {
+        try HDPIMMaterialIntegrity.verifiedXML(url, sha1: sha1, sha256: sha256)
+    }
 
-			guard canUninstall.canUninstall else {
-				throw UninstallError.dependencyExists(canUninstall.reason ?? "")
-			}
+    private static func propertyTable(_ product: HDPIMUninstallProductState, package: HDPIMNativePackageContext,
+                                      preservingUserPreferences: Bool) -> HDPIMPropertyTable {
+        let table = HDPIMPropertyTable()
+        table.setupSystemDirectories()
+        for (key, value) in product.metadata { table.setProperty(key, value) }
+        table.setInstallDir(package.installDir); table.setProductInstallDir(package.installDir); table.setTargetDir(package.installDir)
+        for (key, value) in ["workflowType": "uninstall", "DeleteUserPreferences": preservingUserPreferences ? "false" : "true",
+                            "sapCode": package.sapCode, "SAPCode": package.sapCode, "CodexVersion": package.productVersion,
+                            "ProductVersion": package.productVersion, "BaseVersion": product.baseVersion, "Platform": product.platform,
+                            "ProcessorFamily": package.processorFamily.rawValue, "SetPermission": "true", "PackageName": package.packageName,
+                            "PackageVersion": package.packageVersion, "PackageProcessorFamily": package.packageProcessorFamily,
+                            "PackageType": package.packageType, "Type": package.packageType, "ExtractSize": package.installSize,
+                            "Module": package.module ?? "", "RIBSCoexistenceCode": package.ribsCoexistenceCode ?? ""] { table.setProperty(key, value) }
+        let language = product.metadata[HDPIMProductMetaKey.installLang.rawValue] ?? StorageData.shared.defaultLanguage
+        table.setProperty("installLanguage", language)
+        table.setProperty("uiDisplayLanguage", language.split(separator: ",").first.map(String.init) ?? language)
+        return table
+    }
 
-			validateDependentProductsForProductUninstall(
-				database: database,
-				sapCode: sapCode,
-				version: version,
-				processorFamily: processorFamily
-			)
-		}
+    private static func validateConflicts(_ product: HDPIMUninstallProductState) throws {
+        let xml = product.metadata[HDPIMProductMetaKey.conflictingProcessesXML.rawValue] ?? ""
+        if !xml.isEmpty { _ = try XMLDocument(xmlString: xml, options: []) }
+        var conflicts = parseConflictingProcessesXML(xml)
+        if conflicts.isEmpty {
+            conflicts = splitMetaValues(product.metadata[HDPIMProductMetaKey.conflictingProcesses.rawValue] ?? "").map {
+                var value = ConflictingProcessInfo(); value.regularExpression = $0; value.processDisplayName = $0; return value
+            }
+        }
+        let running = HDPIMConflictingProcessDetector.detectConflictingProcesses(conflictingProcesses: conflicts)
+        guard running.isEmpty else { throw UninstallError.conflictingProcesses(running.map { $0.processInfo.processDisplayName }) }
+    }
 
-		let selectedPackages = try selectedPackages(
-			database: database,
-			sapCode: sapCode,
-			version: version,
-			processorFamily: processorFamily,
-			target: target
-		)
-		let validPackages = validInstalledPackages(
-			selectedPackages
-		)
+    private static func completeProduct(_ product: HDPIMUninstallProductState, pcd: HDPIMPCDCompletion?,
+                                        retainedARPTargets: Set<URL>, warnings: inout [String], diagnostics: inout [String]) {
+        let meta = product.metadata
+        let appID = meta[HDPIMProductExtraMetaKey.amtConfigAppID] ?? ""
+        let leid = meta[HDPIMProductMetaKey.amtConfigLEID.rawValue] ?? ""
+        do {
+            if !appID.isEmpty || !leid.isEmpty { try pcd?.removeProduct(appID: appID, leid: leid) }
+            if !appID.isEmpty && !leid.isEmpty {
+                guard HDPIMPackageMaterial.isLeafName(appID), HDPIMPackageMaterial.isLeafName(leid) else {
+                    throw HDPIMMaterialError.invalid("产品 PCF 身份无效")
+                }
+                let path = "/Library/Application Support/Adobe/PCF/\(appID).\(leid).xml"
+                try removeOwnedPath(path)
+                try removeEmptyDirectory(URL(fileURLWithPath: path).deletingLastPathComponent().path)
+            }
+        } catch { warnings.append("保留产品配置，AMT/PCD 收尾未完成：\(error.localizedDescription)") }
+        do { try removeARP(product, retainedARPTargets: retainedARPTargets, warnings: &warnings, diagnostics: &diagnostics) }
+        catch { warnings.append("卸载入口收尾未完成：\(error.localizedDescription)") }
+        do {
+            let installDir = meta[HDPIMProductExtraMetaKey.installDir] ?? ""
+            if !installDir.isEmpty {
+                var existing = URL(fileURLWithPath: installDir)
+                while !FileManager.default.fileExists(atPath: existing.path), existing.path != "/" { existing.deleteLastPathComponent() }
+                let values = try existing.resourceValues(forKeys: [.volumeURLKey])
+                if let volume = values.volume { try removeEmptyDirectory(volume.appendingPathComponent(".adobeTemp").path) }
+            }
+        } catch { warnings.append("保留临时目录：\(error.localizedDescription)") }
+    }
 
-		guard !validPackages.isEmpty || target.isModuleUninstall else {
-			throw UninstallError.noPackagesSelected
-		}
+    private static func arpTargets(for product: HDPIMUninstallProductState) -> Set<URL> {
+        let root = URL(fileURLWithPath: "/Library/Application Support/Adobe/Uninstall")
+        return Set([product.platform, "osx"].map { platform in
+            let guid = HDPIMARPNaming.appGuid(sapCode: product.identity.sapCode, version: product.identity.version, platform: platform)
+            return root.appendingPathComponent(guid + ".app").standardizedFileURL
+        })
+    }
 
-		let progressReporter = HDPIMUninstallProgressReporter(
-			packages: validPackages,
-			progressHandler: progressHandler
-		)
-		progressReporter.reportPackageSelection(packageCount: validPackages.count)
+    private static func removeARP(_ product: HDPIMUninstallProductState, retainedARPTargets: Set<URL>,
+                                  warnings: inout [String], diagnostics: inout [String]) throws {
+        let root = URL(fileURLWithPath: "/Library/Application Support/Adobe/Uninstall")
+        let guid = HDPIMARPNaming.appGuid(sapCode: product.identity.sapCode, version: product.identity.version, platform: product.platform)
+        let legacy = HDPIMARPNaming.appGuid(sapCode: product.identity.sapCode, version: product.identity.version, platform: "osx")
+        var directories = ["/Applications/Utilities/Adobe Installers"]
+        let installDir = product.metadata[HDPIMProductExtraMetaKey.installDir] ?? ""
+        var candidate = installDir
+        if let launch = product.metadata[HDPIMProductMetaKey.appLaunch.rawValue], !launch.isEmpty {
+            let table = HDPIMPropertyTable(); table.setupSystemDirectories(); table.setInstallDir(installDir); table.setProductInstallDir(installDir)
+            var url = URL(fileURLWithPath: try table.expandPathForInstallation(launch))
+            for _ in 0..<4 { url.deleteLastPathComponent() }
+            if url.path != "/" { candidate = url.path }
+        }
+        if !candidate.isEmpty, !HDPIMRemovalPolicy.isProtected(candidate) { directories.append(candidate) }
+        else { candidate = "" }
+        for name in Set([guid, legacy]) {
+            let app = root.appendingPathComponent(name + ".app")
+            let arguments = root.appendingPathComponent(name + ".adbarg")
+            guard FileManager.default.fileExists(atPath: app.path) || FileManager.default.fileExists(atPath: arguments.path) else { continue }
+            let lines = try String(contentsOf: arguments, encoding: .utf8).split(whereSeparator: \.isNewline).map(String.init)
+            guard lines.contains("--sapCode=\(product.identity.sapCode)"), lines.contains("--productVersion=\(product.identity.version)"),
+                  lines.contains(where: { $0.hasPrefix("--productPlatform=") && HDPIMProcessorFamily.from(platform: String($0.dropFirst(18))) == product.identity.processorFamily }) else {
+                throw HDPIMMaterialError.invalid("卸载入口身份不匹配，已保留：\(arguments.path)")
+            }
+            for directory in directories where FileManager.default.fileExists(atPath: directory) {
+                do {
+                    try removeAliases(to: app, in: URL(fileURLWithPath: directory), retainedARPTargets: retainedARPTargets,
+                                      warnings: &warnings, diagnostics: &diagnostics)
+                }
+                catch { warnings.append("别名目录读取未完成，已保留未知条目：\(directory)，\(error.localizedDescription)") }
+            }
+            try removeOwnedPath(app.path); try removeOwnedPath(arguments.path)
+        }
+        if !candidate.isEmpty {
+            let entries = try? FileManager.default.contentsOfDirectory(atPath: candidate)
+            if let entries, entries.count <= 3, Set(entries).isSubset(of: [".DS_Store", "Thumbs.db", "desktop.ini"]) {
+                for entry in entries { try removeOwnedPath(URL(fileURLWithPath: candidate).appendingPathComponent(entry).path) }
+            }
+            try removeEmptyDirectory(candidate)
+        }
+        try removeEmptyDirectory(root.path)
+    }
 
-		if case .product = target {
-			try validateUWPProductUninstall(
-				database: database,
-				sapCode: sapCode,
-				version: version,
-				processorFamily: processorFamily,
-				packages: validPackages
-			)
-			try validateConflictingProcesses(
-				database: database,
-				sapCode: sapCode,
-				version: version,
-				processorFamily: processorFamily
-			)
-		}
+    private static func removeAliases(to target: URL, in directory: URL, retainedARPTargets: Set<URL>,
+                                      warnings: inout [String], diagnostics: inout [String]) throws {
+        let targetPath = target.standardizedFileURL.path
+        let retainedPaths = Set(retainedARPTargets.map { $0.standardizedFileURL.path })
+        let items = try FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: [.isAliasFileKey])
+        for item in items {
+            do {
+                guard try item.resourceValues(forKeys: [.isAliasFileKey]).isAliasFile == true else { continue }
+                let resolved: URL
+                do {
+                    resolved = try URL(resolvingAliasFileAt: item, options: [.withoutUI, .withoutMounting])
+                } catch {
+                    // 解析失败时只用书签的历史路径分类，不能据此删除别名或其目标。
+                    let bookmark = try? URL.bookmarkData(withContentsOf: item)
+                    let lastPath = bookmark.flatMap { URL.resourceValues(forKeys: [.pathKey], fromBookmarkData: $0)?.path }
+                    if let lastPath, lastPath.hasPrefix("/"),
+                       retainedPaths.contains(URL(fileURLWithPath: lastPath).standardizedFileURL.path),
+                       URL(fileURLWithPath: lastPath).standardizedFileURL.path != targetPath {
+                        diagnostics.append("其他已登记产品的卸载别名目标无法解析，已保留：\(item.path) → \(lastPath)，\(error.localizedDescription)")
+                    } else {
+                        warnings.append("卸载别名目标无法解析，已保留：\(item.path)，\(error.localizedDescription)")
+                    }
+                    continue
+                }
+                if resolved.standardizedFileURL.path == targetPath { try removeOwnedPath(item.path) }
+            } catch {
+                warnings.append("卸载别名文件读取或清理未完成，已保留：\(item.path)，\(error.localizedDescription)")
+            }
+        }
+    }
 
-		let completionSnapshot = makeCompletionSnapshot(
-			database: database,
-			sapCode: sapCode,
-			version: version,
-			processorFamily: processorFamily,
-			target: target,
-			packages: selectedPackages
-		)
-		let uninstallPlans = try validPackages.map { package in
-			try makePackageUninstallPlan(package, database: database)
-		}
+    private static func validateRemovalPath(_ path: String, using policy: HDPIMRemovalPolicy.PreflightChecker? = nil) throws {
+        try HDPIMFileChange.validate(path)
+        let isProtected = policy?.isProtected(path) ?? HDPIMRemovalPolicy.isProtected(path)
+        guard !isProtected else {
+            throw HDPIMMaterialError.invalid("禁止删除共享根目录：\(path)")
+        }
+    }
 
-		for (index, plan) in uninstallPlans.enumerated() {
-			let package = plan.package
-			progressReporter.beginPackage(package, index: index + 1, total: validPackages.count)
-			try await uninstallPackage(plan, progressReporter: progressReporter)
-			try database.removeInstalledPackages([package])
-			progressReporter.completePackage(package)
-		}
+    private static func removeOwnedPath(_ path: String) throws {
+        try validateRemovalPath(path)
+        var info = stat()
+        if lstat(path, &info) == 0 { try FileManager.default.removeItem(atPath: path) }
+        else if errno != ENOENT && errno != ENOTDIR { throw NSError(domain: NSPOSIXErrorDomain, code: Int(errno)) }
+    }
 
-		progressReporter.reportCompletion(String(localized: "正在完成 HDPIM 卸载状态更新"))
-		try await performCompletion(
-			database: database,
-			sapCode: sapCode,
-			version: version,
-			processorFamily: processorFamily,
-			target: target,
-			snapshot: completionSnapshot
-		)
-		progressReporter.reportFinished()
-	}
+    private static func removeEmptyDirectory(_ path: String) throws {
+        try validateRemovalPath(path)
+        var info = stat()
+        guard lstat(path, &info) == 0 else {
+            if errno == ENOENT || errno == ENOTDIR { return }
+            throw NSError(domain: NSPOSIXErrorDomain, code: Int(errno))
+        }
+        guard info.st_mode & S_IFMT == S_IFDIR else { return }
+        guard try FileManager.default.contentsOfDirectory(atPath: path).isEmpty else { return }
+        if rmdir(path) != 0, errno != ENOENT && errno != ENOTEMPTY { throw NSError(domain: NSPOSIXErrorDomain, code: Int(errno)) }
+    }
 
-	private static func makeCompletionSnapshot(
-		database: HDPIMDatabase,
-		sapCode: String,
-		version: String,
-		processorFamily: HDPIMProcessorFamily,
-		target: HDPIMUninstallTarget,
-		packages: [HDPIMNativePackageContext]
-	) -> HDPIMUninstallCompletionSnapshot {
-		HDPIMUninstallCompletionSnapshot(
-			sapCode: sapCode,
-			version: version,
-			processorFamily: processorFamily,
-			installDir: database.getProductMeta(
-				sapCode: sapCode,
-				version: version,
-				processorFamily: processorFamily,
-				key: HDPIMProductExtraMetaKey.installDir
-			) ?? "",
-			appLaunchPath: database.getResolvedProductLaunchPath(
-				sapCode: sapCode,
-				version: version,
-				processorFamily: processorFamily
-			),
-			modulesToRemove: modulesToRemove(
-				database: database,
-				sapCode: sapCode,
-				version: version,
-				processorFamily: processorFamily,
-				target: target,
-				selectedPackages: packages
-			),
-			buildGuid: database.getProductMeta(
-				sapCode: sapCode,
-				version: version,
-				processorFamily: processorFamily,
-				key: HDPIMProductExtraMetaKey.buildGuid
-			) ?? "",
-			amtConfigAppID: database.getProductMeta(
-				sapCode: sapCode,
-				version: version,
-				processorFamily: processorFamily,
-				key: HDPIMProductExtraMetaKey.amtConfigAppID
-			) ?? "",
-			amtConfigLEID: database.getProductMeta(
-				sapCode: sapCode,
-				version: version,
-				processorFamily: processorFamily,
-				key: HDPIMProductMetaKey.amtConfigLEID.rawValue
-			) ?? "",
-			uninstallPIMXPaths: Set(packages.compactMap(\.uninstallPIMXPath).filter { !$0.isEmpty }),
-			repairPIMXPaths: Set(packages.compactMap(\.repairPIMXPath).filter { !$0.isEmpty })
-		)
-	}
-
-	private static func selectedPackages(
-		database: HDPIMDatabase,
-		sapCode: String,
-		version: String,
-		processorFamily: HDPIMProcessorFamily,
-		target: HDPIMUninstallTarget
-	) throws -> [HDPIMNativePackageContext] {
-		switch target {
-		case .product:
-			return database.getInstalledPackageContexts(
-				sapCode: sapCode,
-				version: version,
-				processorFamily: processorFamily
-			)
-
-		case .modules(let moduleIds):
-			let installedPackages = database.getInstalledPackageContexts(
-				sapCode: sapCode,
-				version: version,
-				processorFamily: processorFamily
-			)
-			let installedModules = Set(installedModuleIds(
-				database: database,
-				sapCode: sapCode,
-				version: version,
-				processorFamily: processorFamily,
-				packages: installedPackages
-			))
-			let modulesToRemove = installedModules.intersection(moduleIds)
-			guard !modulesToRemove.isEmpty else {
-				throw UninstallError.moduleNotInstalled
-			}
-			let modulesToKeep = installedModules.subtracting(modulesToRemove)
-			return installedPackages.filter { package in
-				let packageModules = Set(splitMetaValues(package.module ?? ""))
-				return !packageModules.isDisjoint(with: modulesToRemove)
-					&& packageModules.isDisjoint(with: modulesToKeep)
-			}
-
-		case .packages(let packageKeys):
-			let packageNames = Set(packageKeys.map(\.packageName))
-			return database.getInstalledPackageContexts(
-				sapCode: sapCode,
-				version: version,
-				processorFamily: processorFamily,
-				packageNames: packageNames
-			).filter { package in
-				packageKeys.contains(HDPIMPackageUninstallKey(
-					packageName: package.packageName,
-					packageVersion: package.packageVersion
-				))
-			}
-		}
-	}
-
-	private static func validInstalledPackages(
-		_ packages: [HDPIMNativePackageContext]
-	) -> [HDPIMNativePackageContext] {
-		packages
-	}
-
-	private static func validateDependentProductsForProductUninstall(
-		database: HDPIMDatabase,
-		sapCode: String,
-		version: String,
-		processorFamily: HDPIMProcessorFamily
-	) {
-		let dependentReferences = HDPIMDependencyManager.shared.dependentReferences(
-			forSapCode: sapCode,
-			version: version,
-			processorFamily: processorFamily
-		)
-
-		for reference in dependentReferences {
-			if isTruthy(database.getProductMeta(
-				sapCode: reference.dependencySapCode,
-				version: reference.dependencyVersion,
-				processorFamily: reference.dependencyProcessorFamily,
-				key: HDPIMProductExtraMetaKey.isSelfReference
-			)) {
-				print("[HDPIM] Dependent product with sapCode \(reference.dependencySapCode) and version \(reference.dependencyVersion) is a self referenced product, it will not be uninstalled with this parent product, it should be uninstalled seperately.")
-				continue
-			}
-
-			let canUninstall = HDPIMDependencyManager.shared.canUninstallDependentProduct(
-				reference,
-				excludingReferencingProduct: (
-					sapCode: sapCode,
-					version: version,
-					processorFamily: processorFamily
-				)
-			)
-			if !canUninstall.canUninstall {
-				print("[HDPIM] Dependent product with sapCode \(reference.dependencySapCode) and version \(reference.dependencyVersion) will not be uninstalled as it is referred by \(canUninstall.referenceCount) products")
-			}
-		}
-	}
-
-	private static func modulesToRemove(
-		database: HDPIMDatabase,
-		sapCode: String,
-		version: String,
-		processorFamily: HDPIMProcessorFamily,
-		target: HDPIMUninstallTarget,
-		selectedPackages: [HDPIMNativePackageContext]
-	) -> Set<String> {
-		guard case .modules(let moduleIds) = target else {
-			return []
-		}
-
-		let installedModules = Set(installedModuleIds(
-			database: database,
-			sapCode: sapCode,
-			version: version,
-			processorFamily: processorFamily,
-			packages: selectedPackages
-		))
-		return installedModules.intersection(moduleIds)
-	}
-
-	private static func validateUWPProductUninstall(
-		database: HDPIMDatabase,
-		sapCode: String,
-		version: String,
-		processorFamily: HDPIMProcessorFamily,
-		packages: [HDPIMNativePackageContext]
-	) throws {
-		let isUWPProduct = isTruthy(
-			database.getProductMeta(
-				sapCode: sapCode,
-				version: version,
-				processorFamily: processorFamily,
-				key: HDPIMProductExtraMetaKey.isUWPProduct
-			)
-		) || packages.contains { package in
-			!(package.uwpInfoXML ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-		}
-
-		guard isUWPProduct else {
-			return
-		}
-
-		let canUninstall = HDPIMDependencyManager.shared.canUninstall(
-			sapCode: sapCode,
-			version: version,
-			processorFamily: processorFamily
-		)
-		guard canUninstall.canUninstall else {
-			throw UninstallError.uwpReferenceExists(canUninstall.reason ?? "")
-		}
-	}
-
-	private static func validateConflictingProcesses(
-		database: HDPIMDatabase,
-		sapCode: String,
-		version: String,
-		processorFamily: HDPIMProcessorFamily
-	) throws {
-		let conflictingProcesses = productConflictingProcesses(
-			database: database,
-			sapCode: sapCode,
-			version: version,
-			processorFamily: processorFamily
-		)
-
-		guard !conflictingProcesses.isEmpty else {
-			return
-		}
-
-		let runningProcesses = HDPIMConflictingProcessDetector.detectConflictingProcesses(
-			conflictingProcesses: conflictingProcesses
-		)
-		guard !runningProcesses.isEmpty else {
-			return
-		}
-
-		let names = runningProcesses.map { process in
-			firstNonEmptyString([
-				process.processInfo.processDisplayName,
-				process.executablePath,
-				process.processInfo.regularExpression
-			])
-		}
-		throw UninstallError.conflictingProcesses(Array(Set(names)).sorted())
-	}
-
-	private static func productConflictingProcesses(
-		database: HDPIMDatabase,
-		sapCode: String,
-		version: String,
-		processorFamily: HDPIMProcessorFamily
-	) -> [ConflictingProcessInfo] {
-		let xml = database.getProductMeta(
-			sapCode: sapCode,
-			version: version,
-			processorFamily: processorFamily,
-			key: HDPIMProductMetaKey.conflictingProcessesXML.rawValue
-		) ?? ""
-		let xmlProcesses = parseConflictingProcessesXML(xml)
-		if !xmlProcesses.isEmpty {
-			return xmlProcesses
-		}
-
-		let rawList = database.getProductMeta(
-			sapCode: sapCode,
-			version: version,
-			processorFamily: processorFamily,
-			key: HDPIMProductMetaKey.conflictingProcesses.rawValue
-		) ?? ""
-		return rawList
-			.split(separator: ",")
-			.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-			.filter { !$0.isEmpty }
-			.map { value in
-				var process = ConflictingProcessInfo()
-				process.regularExpression = value
-				process.processDisplayName = value
-				return process
-			}
-	}
-
+    private static func splitMetaValues(_ value: String) -> [String] {
+        value.split(separator: ",").map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
+    }
+    private static func isTruthy(_ value: String?) -> Bool { ["true", "1", "yes"].contains(value?.lowercased() ?? "") }
 	private static func parseConflictingProcessesXML(_ xml: String) -> [ConflictingProcessInfo] {
 		let trimmedXML = xml.trimmingCharacters(in: .whitespacesAndNewlines)
 		guard !trimmedXML.isEmpty,
@@ -744,483 +743,6 @@ final class HDPIMUninstaller {
 		return nodes.first?.stringValue?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
 	}
 
-	private static func uninstallPackage(
-		_ plan: HDPIMPackageUninstallPlan,
-		progressReporter: HDPIMUninstallProgressReporter?
-	) async throws {
-		let package = plan.package
-		guard let pimxPlan = plan.pimxPlan else {
-			progressReporter?.reportPackageProgress(package, processedBytes: progressReporter?.packageWorkSize(for: package) ?? 0, detail: String(localized: "卸载 PIMX 已缺失，安装目标已不存在，跳过命令执行"))
-			return
-		}
-
-		try await HDPIMRollbackHelper.executeUninstallPIMXPlan(
-			pimxPlan,
-			estimatedWorkSize: progressReporter?.packageWorkSize(for: package) ?? 0,
-			progressHandler: { processedBytes, detail in
-				progressReporter?.reportPackageProgress(
-					package,
-					processedBytes: processedBytes,
-					detail: detail
-				)
-			}
-		)
-	}
-
-	private static func makePackageUninstallPlan(
-		_ package: HDPIMNativePackageContext,
-		database: HDPIMDatabase
-	) throws -> HDPIMPackageUninstallPlan {
-		guard let pimxPath = package.uninstallPIMXPath,
-		      !pimxPath.isEmpty else {
-			throw UninstallError.missingUninstallPIMX(package.packageName)
-		}
-
-		let propertyTable = makePropertyTable(for: package, database: database)
-		guard FileManager.default.fileExists(atPath: pimxPath) else {
-			if installedTargetsAreGone(package: package, propertyTable: propertyTable) {
-				return HDPIMPackageUninstallPlan(
-					package: package,
-					pimxPlan: nil
-				)
-			}
-			throw UninstallError.missingUninstallPIMX(pimxPath)
-		}
-
-		let pimxPlan = try HDPIMRollbackHelper.makeUninstallPIMXPlan(
-			at: URL(fileURLWithPath: pimxPath),
-			propertyTable: propertyTable
-		)
-		return HDPIMPackageUninstallPlan(
-			package: package,
-			pimxPlan: pimxPlan
-		)
-	}
-
-	private static func installedTargetsAreGone(
-		package: HDPIMNativePackageContext,
-		propertyTable: HDPIMPropertyTable
-	) -> Bool {
-		let targets = package.targetFolders
-			.map { propertyTable.expandPath($0).trimmingCharacters(in: .whitespacesAndNewlines) }
-			.filter { !$0.isEmpty && !$0.contains("[") }
-		guard !targets.isEmpty else {
-			return false
-		}
-		return targets.allSatisfy { !FileManager.default.fileExists(atPath: $0) }
-	}
-
-	private static func makePropertyTable(
-		for package: HDPIMNativePackageContext,
-		database: HDPIMDatabase
-	) -> HDPIMPropertyTable {
-		let propertyTable = HDPIMPropertyTable()
-		propertyTable.setupSystemDirectories()
-		propertyTable.setInstallDir(package.installDir)
-		propertyTable.setProductInstallDir(package.installDir)
-		propertyTable.setTargetDir(package.installDir)
-		propertyTable.setProperty("ProductInstallDir", package.installDir)
-		propertyTable.setProperty("TargetDir", package.installDir)
-		propertyTable.setProperty("workflowType", "uninstall")
-		propertyTable.setProperty("sapCode", package.sapCode)
-		propertyTable.setProperty("SAPCode", package.sapCode)
-		propertyTable.setProperty("CodexVersion", package.productVersion)
-		propertyTable.setProperty("ProductVersion", package.productVersion)
-		if let baseVersion = database.getProductMeta(
-			sapCode: package.sapCode,
-			version: package.productVersion,
-			processorFamily: package.processorFamily,
-			key: HDPIMProductMetaKey.baseVersion.rawValue
-		), !baseVersion.isEmpty {
-			propertyTable.setProperty("BaseVersion", baseVersion)
-		}
-		if let buildVersion = database.getProductMeta(
-			sapCode: package.sapCode,
-			version: package.productVersion,
-			processorFamily: package.processorFamily,
-			key: HDPIMProductMetaKey.buildVersion.rawValue
-		), !buildVersion.isEmpty {
-			propertyTable.setProperty("BuildVersion", buildVersion)
-		}
-		if let buildGuid = database.getProductMeta(
-			sapCode: package.sapCode,
-			version: package.productVersion,
-			processorFamily: package.processorFamily,
-			key: HDPIMProductExtraMetaKey.buildGuid
-		), !buildGuid.isEmpty {
-			propertyTable.setProperty("BuildGuid", buildGuid)
-		}
-		propertyTable.setProperty("Platform", platform(for: package.processorFamily))
-		propertyTable.setProperty("ProcessorFamily", package.processorFamily.rawValue)
-		propertyTable.setProperty("SetPermission", "true")
-		propertyTable.setProperty("PackageName", package.packageName)
-		propertyTable.setProperty("PackageVersion", package.packageVersion)
-		propertyTable.setProperty("PackageProcessorFamily", package.packageProcessorFamily)
-		propertyTable.setProperty("PackageType", package.packageType)
-		propertyTable.setProperty("Type", package.packageType)
-		propertyTable.setProperty("ExtractSize", package.installSize)
-		if let ribsCode = package.ribsCoexistenceCode, !ribsCode.isEmpty {
-			propertyTable.setProperty("RIBSCoexistenceCode", ribsCode)
-		}
-		let installLanguage = firstNonEmptyString([
-			database.getProductMeta(
-				sapCode: package.sapCode,
-				version: package.productVersion,
-				processorFamily: package.processorFamily,
-				key: HDPIMProductMetaKey.installLang.rawValue
-			),
-			StorageData.shared.defaultLanguage
-		])
-		propertyTable.setProperty("InstallLang", installLanguage)
-		propertyTable.setProperty("installLanguage", installLanguage)
-		propertyTable.setProperty("uiDisplayLanguage", firstInstallLanguageToken(installLanguage))
-		if let module = package.module, !module.isEmpty {
-			propertyTable.setProperty("Module", module)
-		}
-		return propertyTable
-	}
-
-	private static func performCompletion(
-		database: HDPIMDatabase,
-		sapCode: String,
-		version: String,
-		processorFamily: HDPIMProcessorFamily,
-		target: HDPIMUninstallTarget,
-		snapshot: HDPIMUninstallCompletionSnapshot
-	) async throws {
-		await cleanupSelectedPIMXFiles(
-			database: database,
-			uninstallPIMXPaths: snapshot.uninstallPIMXPaths,
-			repairPIMXPaths: snapshot.repairPIMXPaths
-		)
-
-		switch target {
-		case .product:
-			try await removeProductIfNoPackagesRemain(
-				database: database,
-				sapCode: sapCode,
-				version: version,
-				processorFamily: processorFamily,
-				snapshot: snapshot
-			)
-
-		case .modules(let moduleIds):
-			let modulesToRemove = snapshot.modulesToRemove.intersection(moduleIds)
-			if !modulesToRemove.isEmpty {
-				_ = try database.updateInstalledModules(
-					sapCode: sapCode,
-					version: version,
-					processorFamily: processorFamily,
-					removing: modulesToRemove
-				)
-			}
-
-		case .packages:
-			break
-		}
-
-		await removePathIfExists("/.adobeTemp")
-	}
-
-	private static func removeProductIfNoPackagesRemain(
-		database: HDPIMDatabase,
-		sapCode: String,
-		version: String,
-		processorFamily: HDPIMProcessorFamily,
-		snapshot: HDPIMUninstallCompletionSnapshot
-	) async throws {
-		let remainingPackages = database.getInstalledPackageContexts(
-			sapCode: sapCode,
-			version: version,
-			processorFamily: processorFamily
-		)
-		print("[HDPIM-COMPLETION] \(sapCode) \(version) 剩余包数量: \(remainingPackages.count)")
-		guard remainingPackages.isEmpty else {
-			print("[HDPIM-COMPLETION] \(sapCode) 还有 \(remainingPackages.count) 个包未删除，保留产品记录")
-			return
-		}
-
-		print("[HDPIM-COMPLETION] \(sapCode) 所有包已删除，开始删除产品记录")
-		try database.removeProductInstallationRecords(productKeys: [
-			HDPIMNativeProductKey(
-				sapCode: sapCode,
-				version: version,
-				platform: platform(for: processorFamily)
-			)
-		])
-		await performProductSystemCompletion(
-			database: database,
-			snapshot: snapshot
-		)
-	}
-
-	private static func performProductSystemCompletion(
-		database: HDPIMDatabase,
-		snapshot: HDPIMUninstallCompletionSnapshot
-	) async {
-		await removeAMTConfig(snapshot: snapshot)
-		await removeARPEntry(snapshot: snapshot)
-		await removeReferenceToADS(database: database)
-		await cleanupOrphanedPIMXFiles(
-			database: database,
-			uninstallPIMXPaths: snapshot.uninstallPIMXPaths,
-			repairPIMXPaths: snapshot.repairPIMXPaths
-		)
-	}
-
-	private static func removeAMTConfig(snapshot: HDPIMUninstallCompletionSnapshot) async {
-		if let amtConfigPath = snapshot.amtConfigPath {
-			await removePathIfExists(amtConfigPath)
-			await removeEmptyDirectoryIfExists(URL(fileURLWithPath: amtConfigPath).deletingLastPathComponent().path)
-		}
-	}
-
-	private static func removeARPEntry(snapshot: HDPIMUninstallCompletionSnapshot) async {
-		await removePathIfExists(snapshot.uninstallAppPath)
-		await removePathIfExists(snapshot.uninstallAdbargPath)
-
-		let installDir = snapshot.installDir.trimmingCharacters(in: .whitespacesAndNewlines)
-		if shouldRemoveProductDirectory(installDir) {
-			await removePathIfExists(installDir)
-		}
-
-		let appLaunchPath = snapshot.appLaunchPath.trimmingCharacters(in: .whitespacesAndNewlines)
-		if !appLaunchPath.isEmpty {
-			let appURL = URL(fileURLWithPath: appLaunchPath)
-			let appBundleURL = nearestAppBundleURL(from: appURL) ?? appURL
-			await removePathIfExists(appBundleURL.path)
-		}
-
-		await removeEmptyDirectoryIfExists("/Library/Application Support/Adobe/Uninstall")
-	}
-
-	private static func removeReferenceToADS(database: HDPIMDatabase) async {
-		let hasNonCCProduct = database.getAllInstalledProducts().contains { product in
-			let processorFamily = HDPIMProcessorFamily.from(platform: product.platform)
-			return isTruthy(database.getProductMeta(
-				sapCode: product.sapCode,
-				version: product.version,
-				processorFamily: processorFamily,
-				key: HDPIMProductExtraMetaKey.isNonCCProduct
-			))
-		}
-
-		guard !hasNonCCProduct else {
-			return
-		}
-
-		await removePathIfExists("/Library/Application Support/Adobe/ADCRefs/AIM.adcref")
-		await removePathIfExists("/Library/Application Support/Adobe/AdobeApplicationManager/AAMRefs/AIM.aamref")
-	}
-
-	private static func cleanupOrphanedPIMXFiles(
-		database: HDPIMDatabase,
-		uninstallPIMXPaths: Set<String>,
-		repairPIMXPaths: Set<String>
-	) async {
-		await cleanupSelectedPIMXFiles(
-			database: database,
-			uninstallPIMXPaths: uninstallPIMXPaths,
-			repairPIMXPaths: repairPIMXPaths
-		)
-		await cleanupOrphanedPIMXFiles(
-			database: database,
-			directory: "/Library/Application Support/Adobe/Installers/uninstallXml",
-			metaKey: HDPIMPackageMetaKey.uninstallPIMX.rawValue
-		)
-		await cleanupOrphanedPIMXFiles(
-			database: database,
-			directory: "/Library/Application Support/Adobe/Installers/repairXml",
-			metaKey: HDPIMPackageMetaKey.repairPIMX.rawValue
-		)
-	}
-
-	private static func cleanupSelectedPIMXFiles(
-		database: HDPIMDatabase,
-		uninstallPIMXPaths: Set<String>,
-		repairPIMXPaths: Set<String>
-	) async {
-		for path in uninstallPIMXPaths where !database.packageMetaValueExists(key: HDPIMPackageMetaKey.uninstallPIMX.rawValue, value: path) {
-			await removePathIfExists(path)
-		}
-		for path in repairPIMXPaths where !database.packageMetaValueExists(key: HDPIMPackageMetaKey.repairPIMX.rawValue, value: path) {
-			await removePathIfExists(path)
-		}
-	}
-
-	private static func cleanupOrphanedPIMXFiles(
-		database: HDPIMDatabase,
-		directory: String,
-		metaKey: String
-	) async {
-		guard let enumerator = FileManager.default.enumerator(atPath: directory) else {
-			return
-		}
-
-		let entries = enumerator
-			.compactMap { $0 as? String }
-			.filter { $0.lowercased().hasSuffix(".pimx") }
-		for entry in entries {
-			let path = URL(fileURLWithPath: directory).appendingPathComponent(entry).path
-			if database.packageMetaValueExists(key: metaKey, value: path) {
-				continue
-			}
-			await removePathIfExists(path)
-		}
-	}
-
-	private static func nearestAppBundleURL(from url: URL) -> URL? {
-		var current = url
-		while current.path != "/" {
-			if current.pathExtension == "app" {
-				return current
-			}
-			current.deleteLastPathComponent()
-		}
-		return nil
-	}
-
-	private static func shouldRemoveProductDirectory(_ path: String) -> Bool {
-		let normalized = path.trimmingCharacters(in: .whitespacesAndNewlines)
-		guard !normalized.isEmpty else {
-			return false
-		}
-
-		let blocked = [
-			"/Applications",
-			"/Library/Application Support/Adobe",
-			"/Library/Application Support",
-			"/Library",
-			"/"
-		]
-		return !blocked.contains(normalized)
-	}
-
-	private static var usesLocalPrivilegedExecution: Bool {
-		ProcessInfo.processInfo.environment[HDPIMHeadlessInstallRunner.localExecutionEnvironmentKey] == "1"
-	}
-
-	private static func removePathIfExists(_ path: String) async {
-		let normalizedPath = path.trimmingCharacters(in: .whitespacesAndNewlines)
-		guard !normalizedPath.isEmpty,
-		      FileManager.default.fileExists(atPath: normalizedPath) else {
-			return
-		}
-
-		do {
-			if usesLocalPrivilegedExecution {
-				try removeLocalPath(normalizedPath)
-			} else {
-				try await HelperManager.shared.uninstallPath(normalizedPath)
-			}
-		} catch {
-			print("[HDPIM] 卸载完成清理失败: \(normalizedPath), error: \(error.localizedDescription)")
-		}
-	}
-
-	private static func removeLocalPath(_ path: String) throws {
-		guard !isProtectedRemovalRoot(path) else {
-			throw NSError(
-				domain: "HDPIMUninstaller",
-				code: 1,
-				userInfo: [NSLocalizedDescriptionKey: String(format: String(localized: "禁止删除共享根目录: %@"), path)]
-			)
-		}
-
-		try FileManager.default.removeItem(atPath: path)
-	}
-
-	private static func isProtectedRemovalRoot(_ path: String) -> Bool {
-		[
-			"/Applications",
-			"/Library/Application Support/Adobe",
-			"/Library/Application Support",
-			"/Library",
-			"/tmp",
-			"/"
-		].contains(path)
-	}
-
-	private static func removeEmptyDirectoryIfExists(_ path: String) async {
-		let normalizedPath = path.trimmingCharacters(in: .whitespacesAndNewlines)
-		guard !normalizedPath.isEmpty,
-		      FileManager.default.fileExists(atPath: normalizedPath) else {
-			return
-		}
-
-		if let contents = try? FileManager.default.contentsOfDirectory(atPath: normalizedPath),
-		   !contents.isEmpty {
-			return
-		}
-
-		await removePathIfExists(normalizedPath)
-	}
-
-	private static func platform(for processorFamily: HDPIMProcessorFamily) -> String {
-		switch processorFamily {
-		case .arm64Bit:
-			return "MACARM64"
-		case .bit32:
-			return "OSX"
-		case .bit64:
-			return "OSX10"
-		}
-	}
-
-	private static func installedModuleIds(
-		database: HDPIMDatabase,
-		sapCode: String,
-		version: String,
-		processorFamily: HDPIMProcessorFamily,
-		packages: [HDPIMNativePackageContext]
-	) -> [String] {
-		var modules = database.getInstalledModuleIds(
-			sapCode: sapCode,
-			version: version,
-			processorFamily: processorFamily
-		)
-
-		for package in packages {
-			for module in splitMetaValues(package.module ?? "") where !modules.contains(module) {
-				modules.append(module)
-			}
-		}
-
-		return modules.sorted()
-	}
-
-	private static func splitMetaValues(_ value: String) -> [String] {
-		value
-			.split(separator: ",")
-			.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
-			.filter { !$0.isEmpty }
-	}
-
-	private static func firstNonEmptyString(_ values: [String?]) -> String {
-		for value in values {
-			let trimmedValue = value?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-			if !trimmedValue.isEmpty {
-				return trimmedValue
-			}
-		}
-		return ""
-	}
-
-	private static func firstInstallLanguageToken(_ value: String) -> String {
-		value
-			.split(separator: ",")
-			.first
-			.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) } ?? value
-	}
-
-	private static func isTruthy(_ value: String?) -> Bool {
-		switch value?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
-		case "1", "true", "yes":
-			return true
-		default:
-			return false
-		}
-	}
 }
 
 enum UninstallError: Error, LocalizedError {

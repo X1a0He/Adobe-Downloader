@@ -233,9 +233,11 @@ struct TaskCardPackageList: View {
         Button(action: {
             let containerURL = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
             let tasksDirectory = containerURL.appendingPathComponent("Adobe Downloader/tasks", isDirectory: true)
-            let fileName = "\(installerOutputName(productId: task.productId, version: task.productVersion, language: task.language, platform: task.platform))-task.json"
-            let fileURL = tasksDirectory.appendingPathComponent(fileName)
-            NSWorkspace.shared.selectFile(fileURL.path, inFileViewerRootedAtPath: tasksDirectory.path)
+            Task { @MainActor in
+                await TaskPersistenceManager.shared.saveTask(task)
+                let fileURL = TaskPersistenceManager.shared.taskFileURL(for: task.id)
+                NSWorkspace.shared.selectFile(fileURL.path, inFileViewerRootedAtPath: tasksDirectory.path)
+            }
         }) {
             Label(String(localized: "持久化文件"), systemImage: "doc.text.magnifyingglass")
                 .font(.system(size: 11, weight: .medium))
@@ -545,7 +547,7 @@ private struct PackageItemRow: View {
 
             if package.status == .downloading {
                 VStack(spacing: 4) {
-                    ProgressView(value: clampedProgress)
+                    ProgressView(value: package.hasUnknownDownloadSize ? nil : clampedProgress)
                         .progressViewStyle(.linear)
                         .tint(.blue)
 
@@ -553,7 +555,7 @@ private struct PackageItemRow: View {
                         Text("\(package.formattedDownloadedSize) / \(package.formattedSize)")
                             .foregroundColor(.secondary)
                         Spacer()
-                        if package.speed > 0 {
+                        if package.downloadPhase == .transferring && package.speed > 0 {
                             Label(DownloadFormatters.speed(package.speed), systemImage: "arrow.down")
                                 .foregroundColor(.blue)
                         }
@@ -603,7 +605,9 @@ private struct PackageItemRow: View {
                 .font(.system(size: 10))
                 .foregroundColor(.secondary)
         case .downloading:
-            Label("\(Int(clampedProgress * 100))%", systemImage: "arrow.down.circle.fill")
+            Label(package.downloadPhase == .validating ? String(localized: "正在校验下载文件")
+                    : (package.hasUnknownDownloadSize ? String(localized: "未知") : "\(Int(clampedProgress * 100))%"),
+                  systemImage: package.downloadPhase == .validating ? "checkmark.shield" : "arrow.down.circle.fill")
                 .font(.system(size: 10, weight: .semibold))
                 .foregroundColor(.blue)
                 .monospacedDigit()

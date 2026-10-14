@@ -272,6 +272,7 @@ class Package: Identifiable, ObservableObject, Codable {
     }
     @Published var progress: Double = 0
     @Published var speed: Double = 0
+    @Published var downloadPhase: PDMDownloadPhase = .waiting
     @Published var status: PackageStatus = .waiting
     @Published var downloaded: Bool = false
 
@@ -374,8 +375,11 @@ class Package: Identifiable, ObservableObject, Codable {
         }
     }
 
+    var hasUnknownDownloadSize: Bool { !downloaded && downloadSize <= 0 }
+
     var formattedSize: String {
-        ByteCountFormatter.string(fromByteCount: downloadSize, countStyle: .file)
+        hasUnknownDownloadSize ? String(localized: "未知")
+            : ByteCountFormatter.string(fromByteCount: downloadSize, countStyle: .file)
     }
 
     var formattedDownloadedSize: String {

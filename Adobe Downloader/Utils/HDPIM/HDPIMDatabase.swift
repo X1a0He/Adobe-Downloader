@@ -34,6 +34,7 @@ struct HDPIMInstalledPackageSnapshot {
     let repairPIMXHash: String?
     let repairPIMXHash256: String?
     let targetFolders: [String]
+    var canReuseInstallation: Bool = true
 }
 
 enum HDPIMInstallStatus: String {
@@ -273,6 +274,10 @@ final class HDPIMDatabase {
         dbPath = capsDir.appendingPathComponent("hdpim.db")
     }
 
+    init(databaseURL: URL) {
+        dbPath = databaseURL
+    }
+
 	func open() throws {
 		if db != nil {
 			return
@@ -283,11 +288,7 @@ final class HDPIMDatabase {
 			withIntermediateDirectories: true
 		)
 
-        if sqlite3_open_v2(dbPath.path, &db, SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE, nil) != SQLITE_OK {
-            throw HDPIMDatabaseError.openFailed(lastErrorMessage())
-        }
-
-        sqlite3_busy_timeout(db, 1000)
+        try openConnection(flags: SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE)
 
         do {
             try ensureSchema()
@@ -302,11 +303,28 @@ final class HDPIMDatabase {
 			return
 		}
 
-		if sqlite3_open_v2(dbPath.path, &db, SQLITE_OPEN_READONLY, nil) != SQLITE_OK {
-			throw HDPIMDatabaseError.openFailed(lastErrorMessage())
-		}
+        try openConnection(flags: SQLITE_OPEN_READONLY)
+    }
+
+    func makeReadOnlyConnection() throws -> HDPIMDatabase {
+        let connection = HDPIMDatabase(databaseURL: dbPath)
+        try connection.openReadOnly()
+        return connection
+    }
+
+    private func openConnection(flags: Int32) throws {
+        var connection: OpaquePointer?
+        let result = sqlite3_open_v2(dbPath.path, &connection, flags | SQLITE_OPEN_FULLMUTEX, nil)
+        guard result == SQLITE_OK else {
+            let message = connection.map { String(cString: sqlite3_errmsg($0)) } ?? "unknown sqlite error"
+            sqlite3_close(connection)
+            throw HDPIMDatabaseError.openFailed(message)
+        }
+        db = connection
         sqlite3_busy_timeout(db, 1000)
     }
+
+    deinit { close() }
 
     func close() {
         if db != nil {
@@ -348,18 +366,10 @@ final class HDPIMDatabase {
             throw HDPIMDatabaseError.queryFailed("数据库未打开")
         }
 
-        let legacySnapshot = getInstalledPackageSnapshots(
-            sapCode: package.sapCode,
-            processorFamily: package.processorFamily,
-            packageName: package.packageName,
-            expectedInstallDir: package.installDir
-        ).first
-
-        let packageWithInheritedData = package.withInheritedLegacyData(from: legacySnapshot)
-
         try beginTransaction(name: "HDPIMDatabase-recordInstalledPackage")
         do {
-            try writePackage(packageWithInheritedData)
+            try writePackage(package)
+            try validateMaterialRegistration(package)
             if let product {
                 try writeProductInstallLocation(
                     sapCode: product.sapCode,
@@ -371,7 +381,7 @@ final class HDPIMDatabase {
             }
             try commitTransaction(name: "HDPIMDatabase-recordInstalledPackage")
 
-            if let ribsCode = packageWithInheritedData.ribsCoexistenceCode, !ribsCode.isEmpty,
+            if let ribsCode = package.ribsCoexistenceCode, !ribsCode.isEmpty,
                let product = product {
                 _ = HDPIMRIBSHelper.addRIBSDependency(
                     ribsCode: ribsCode,
@@ -383,6 +393,52 @@ final class HDPIMDatabase {
         } catch {
             try? rollbackTransaction(name: "HDPIMDatabase-recordInstalledPackage")
             throw error
+        }
+    }
+
+    func validateMaterialRegistration(_ package: HDPIMNativePackageContext) throws {
+        guard let db else { throw HDPIMDatabaseError.queryFailed("数据库未打开") }
+        let expected: [String: String] = [
+            HDPIMPackageMetaKey.uninstallPIMX.rawValue: package.uninstallPIMXPath ?? "",
+            HDPIMPackageMetaKey.uninstallPIMXHash.rawValue: package.uninstallPIMXHash ?? "",
+            HDPIMPackageMetaKey.uninstallPIMXHash256.rawValue: package.uninstallPIMXHash256 ?? "",
+            HDPIMPackageMetaKey.repairPIMX.rawValue: package.repairPIMXPath ?? "",
+            HDPIMPackageMetaKey.repairPIMXHash.rawValue: package.repairPIMXHash ?? "",
+            HDPIMPackageMetaKey.repairPIMXHash256.rawValue: package.repairPIMXHash256 ?? ""
+        ]
+        let sql = """
+        SELECT meta.Key, meta.Value
+        FROM \(Schema.packageInstallationMetaInfo) meta
+        INNER JOIN \(Schema.packageInstallationInfo) package
+          ON package.SAPCode = meta.SAPCode AND package.ProductVersion = meta.ProductVersion
+         AND package.ProcessorFamily = meta.ProcessorFamily AND package.PackageName = meta.PackageName
+         AND package.PackageVersion = meta.PackageVersion
+        WHERE meta.SAPCode = ? AND meta.ProductVersion = ? AND meta.ProcessorFamily = ?
+          AND meta.PackageName = ? AND meta.PackageVersion = ?;
+        """
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else {
+            throw HDPIMDatabaseError.queryFailed(lastErrorMessage())
+        }
+        defer { sqlite3_finalize(statement) }
+        for (offset, value) in [package.sapCode, package.productVersion, package.processorFamily.rawValue,
+                                package.packageName, package.packageVersion].enumerated() {
+            bindText(value, index: Int32(offset + 1), to: statement)
+        }
+        var observed: [String: String] = [:]
+        while true {
+            let result = sqlite3_step(statement)
+            if result == SQLITE_DONE { break }
+            guard result == SQLITE_ROW else { throw HDPIMDatabaseError.queryFailed(lastErrorMessage()) }
+            let key = columnText(statement, index: 0)
+            guard expected[key] != nil else { continue }
+            guard observed[key] == nil else {
+                throw HDPIMDatabaseError.queryFailed("材料登记存在重复字段：\(package.packageName) / \(key)")
+            }
+            observed[key] = columnText(statement, index: 1)
+        }
+        guard observed == expected else {
+            throw HDPIMDatabaseError.queryFailed("材料登记与安装计划不一致：\(package.packageName)")
         }
     }
 
@@ -858,7 +914,8 @@ final class HDPIMDatabase {
         sapCode: String,
         processorFamily: HDPIMProcessorFamily,
         packageName: String,
-        expectedInstallDir: String
+        expectedInstallDir: String,
+        includingInvalidMaterials: Bool = false
     ) -> [HDPIMInstalledPackageSnapshot] {
         let sql = """
         SELECT p.SAPCode,
@@ -968,7 +1025,7 @@ final class HDPIMDatabase {
                 packageVersion: packageVersion,
                 expectedInstallDir: expectedInstallDir
             )) ?? false
-            if !isValid {
+            if !includingInvalidMaterials && !isValid {
                 continue
             }
 
@@ -981,23 +1038,28 @@ final class HDPIMDatabase {
                 key: HDPIMPackageMetaKey.targetFolderList.rawValue
             )) ?? nil
 
-            snapshots.append(
-                HDPIMInstalledPackageSnapshot(
-                    sapCode: columnText(stmt, index: 0),
-                    productVersion: productVersion,
-                    processorFamily: processorFamily,
-                    packageName: resolvedPackageName,
-                    packageVersion: packageVersion,
-                    installDir: installDir,
-                    uninstallPIMXPath: columnOptionalText(stmt, index: 5),
-                    uninstallPIMXHash: columnOptionalText(stmt, index: 6),
-                    uninstallPIMXHash256: columnOptionalText(stmt, index: 7),
-                    repairPIMXPath: columnOptionalText(stmt, index: 8),
-                    repairPIMXHash: columnOptionalText(stmt, index: 9),
-                    repairPIMXHash256: columnOptionalText(stmt, index: 10),
-                    targetFolders: splitMetaValues(targetFoldersRaw ?? "")
-                )
+            var snapshot = HDPIMInstalledPackageSnapshot(
+                sapCode: columnText(stmt, index: 0),
+                productVersion: productVersion,
+                processorFamily: processorFamily,
+                packageName: resolvedPackageName,
+                packageVersion: packageVersion,
+                installDir: installDir,
+                uninstallPIMXPath: columnOptionalText(stmt, index: 5),
+                uninstallPIMXHash: columnOptionalText(stmt, index: 6),
+                uninstallPIMXHash256: columnOptionalText(stmt, index: 7),
+                repairPIMXPath: columnOptionalText(stmt, index: 8),
+                repairPIMXHash: columnOptionalText(stmt, index: 9),
+                repairPIMXHash256: columnOptionalText(stmt, index: 10),
+                targetFolders: splitMetaValues(targetFoldersRaw ?? ""),
+                canReuseInstallation: isValid
             )
+            if snapshot.canReuseInstallation {
+                snapshot.canReuseInstallation = (try? HDPIMMaterialIntegrity.validateInstalledPayload(snapshot)) != nil
+            }
+            if includingInvalidMaterials || snapshot.canReuseInstallation {
+                snapshots.append(snapshot)
+            }
         }
 
         return snapshots.sorted { lhs, rhs in
@@ -2247,15 +2309,60 @@ final class HDPIMDatabase {
     }
 
     private func beginTransaction(name: String) throws {
-        try execute("BEGIN TRANSACTION \"\(name)\"")
+        try execute("SAVEPOINT \"\(name)\"")
     }
 
     private func commitTransaction(name: String) throws {
-        try execute("END TRANSACTION \"\(name)\"")
+        try execute("RELEASE SAVEPOINT \"\(name)\"")
     }
 
     private func rollbackTransaction(name: String) throws {
-        try execute("ROLLBACK TRANSACTION \"\(name)\"")
+        try execute("ROLLBACK TO SAVEPOINT \"\(name)\"")
+        try execute("RELEASE SAVEPOINT \"\(name)\"")
+    }
+
+    func beginInstallTransaction() throws {
+        try execute("BEGIN IMMEDIATE")
+    }
+
+    func commitInstallTransaction() throws {
+        try execute("COMMIT")
+    }
+
+    func rollbackInstallTransaction() throws {
+        try execute("ROLLBACK")
+    }
+
+    func dataVersion() throws -> Int64 {
+        var statement: OpaquePointer?
+        guard sqlite3_prepare_v2(db, "PRAGMA data_version", -1, &statement, nil) == SQLITE_OK else {
+            throw HDPIMDatabaseError.queryFailed(lastErrorMessage())
+        }
+        defer { sqlite3_finalize(statement) }
+        guard sqlite3_step(statement) == SQLITE_ROW else { throw HDPIMDatabaseError.queryFailed(lastErrorMessage()) }
+        return sqlite3_column_int64(statement, 0)
+    }
+
+    func removeObsoleteProducts(_ keys: [HDPIMNativeProductKey]) throws {
+        for key in Set(keys) {
+            let sql = """
+            SELECT
+              (SELECT COUNT(*) FROM \(Schema.packageInstallationInfo) WHERE SAPCode=?1 AND ProductVersion=?2 AND ProcessorFamily=?3)
+              + (SELECT COUNT(*) FROM \(Schema.productReferenceInfo) WHERE SAPCode=?1 AND ProductVersion=?2 AND ProcessorFamily=?3);
+            """
+            var statement: OpaquePointer?
+            guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else {
+                throw HDPIMDatabaseError.queryFailed(lastErrorMessage())
+            }
+            defer { sqlite3_finalize(statement) }
+            bindText(key.sapCode, index: 1, to: statement)
+            bindText(key.version, index: 2, to: statement)
+            bindText(key.processorFamily.rawValue, index: 3, to: statement)
+            guard sqlite3_step(statement) == SQLITE_ROW else { throw HDPIMDatabaseError.queryFailed(lastErrorMessage()) }
+            if sqlite3_column_int64(statement, 0) == 0 {
+                try deleteProductRecords(sapCode: key.sapCode, version: key.version, processorFamily: key.processorFamily)
+            }
+        }
     }
 
     private func execute(_ sql: String) throws {
@@ -2412,28 +2519,3 @@ enum HDPIMDatabaseError: Error, LocalizedError {
     }
 }
 
-extension HDPIMNativePackageContext {
-    func withInheritedLegacyData(from legacy: HDPIMInstalledPackageSnapshot?) -> HDPIMNativePackageContext {
-        guard let legacy = legacy else { return self }
-
-        let newUninstallPath = legacy.uninstallPIMXPath?.isEmpty == false ? legacy.uninstallPIMXPath : uninstallPIMXPath
-        let newUninstallHash = legacy.uninstallPIMXHash256?.isEmpty == false ? nil : (legacy.uninstallPIMXHash?.isEmpty == false ? legacy.uninstallPIMXHash : uninstallPIMXHash)
-        let newUninstallHash256 = legacy.uninstallPIMXHash256?.isEmpty == false ? legacy.uninstallPIMXHash256 : uninstallPIMXHash256
-        let newRepairPath = legacy.repairPIMXPath?.isEmpty == false ? legacy.repairPIMXPath : repairPIMXPath
-        let newRepairHash = legacy.repairPIMXHash256?.isEmpty == false ? nil : (legacy.repairPIMXHash?.isEmpty == false ? legacy.repairPIMXHash : repairPIMXHash)
-        let newRepairHash256 = legacy.repairPIMXHash256?.isEmpty == false ? legacy.repairPIMXHash256 : repairPIMXHash256
-        let mergedFolders = Array(Set(targetFolders + legacy.targetFolders))
-
-        return HDPIMNativePackageContext(
-            sapCode: sapCode, productVersion: productVersion, platform: platform,
-            packageName: packageName, packageVersion: packageVersion, packageType: packageType,
-            packageProcessorFamily: packageProcessorFamily, sequenceNumber: sequenceNumber,
-            installDir: installDir, uninstallPIMXPath: newUninstallPath,
-            uninstallPIMXHash: newUninstallHash, uninstallPIMXHash256: newUninstallHash256,
-            repairPIMXPath: newRepairPath, repairPIMXHash: newRepairHash,
-            repairPIMXHash256: newRepairHash256, installSize: installSize,
-            targetFolders: mergedFolders, ribsCoexistenceCode: ribsCoexistenceCode,
-            module: module, uwpInfoXML: uwpInfoXML, isShared: isShared
-        )
-    }
-}

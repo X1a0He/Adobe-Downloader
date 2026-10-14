@@ -32,9 +32,16 @@ class NetworkManager: ObservableObject {
 	private var lastInstallationPhase: InstallProgressPhase = .preparing
 	private var installationCancelledByUser = false
 	private var installationSessionID = UUID()
+    private var installationSessionFinished = false
+    @Published private var installationPackages: [HDPIMPackageProgress] = []
 	private var lastUninstallProgress = 0.0
 	private var lastUninstallStatus = String(localized: "准备卸载...")
 	private var lastUninstallPhase: InstallProgressPhase = .preparing
+    private var uninstallSessionID = UUID()
+    private var uninstallSessionFinished = true
+    private var uninstallCancellation: HDPIMOperationCancellation?
+    private var uninstallResult: HDPIMUninstallResult?
+    @Published private(set) var uninstallCancellationRequested = false
     
     private var defaultDirectory: String {
         get { StorageData.shared.defaultDirectory }
@@ -56,6 +63,7 @@ class NetworkManager: ObservableObject {
 	}
 
 	private func completeInstallation() {
+        installationSessionFinished = true
 		if case .completed = installationState {
 			return
 		}
@@ -183,6 +191,10 @@ class NetworkManager: ObservableObject {
             platform: customDependencies.first(where: { $0.sapCode == productId })?.platform
                 ?? selectedPlatform,
             targetArchitecture: snapshot.context.architecture.rawValue)
+        guard let generation = task.execution.begin() else {
+            throw NetworkError.invalidData("该任务仍在运行或停止中，请稍后重试")
+        }
+        defer { task.execution.finish(generation) }
         task.catalogSnapshot = snapshot
 
         if !downloadTasks.contains(where: { $0.id == task.id }) {
@@ -194,49 +206,37 @@ class NetworkManager: ObservableObject {
             stage: .initializing
         ))
         updateDockBadge()
-        await saveTask(task)
-        
+
         do {
+            await globalCancelTracker.reset(task.id)
+            guard task.execution.accepts(generation) else { throw NetworkError.cancelled }
+            await saveTask(task)
+            guard task.execution.accepts(generation) else { throw NetworkError.cancelled }
             if isManifestInstallerProduct(productId) {
-                try await globalNewDownloadUtils.downloadAPRO(task: task, productInfo: productInfo)
+                try await globalNewDownloadUtils.downloadAPRO(task: task, productInfo: productInfo, generation: generation)
             } else {
-                try await globalNewDownloadUtils.handleCustomDownload(task: task, customDependencies: customDependencies)
-            }
-        } catch NetworkError.cancelled {
-            if isManifestInstallerProduct(productId), await globalCancelTracker.isPaused(task.id) {
-                task.setStatus(.paused(DownloadStatus.PauseInfo(
-                    reason: .userRequested,
-                    timestamp: Date(),
-                    resumable: true
-                )))
-                await saveTask(task)
-                await MainActor.run {
-                    updateDockBadge()
-                    objectWillChange.send()
-                }
-            } else {
-                task.setStatus(.failed(DownloadStatus.FailureInfo(
-                    message: NetworkError.cancelled.localizedDescription,
-                    error: NetworkError.cancelled,
-                    timestamp: Date(),
-                    recoverable: true
-                )))
-                await saveTask(task)
-                await MainActor.run {
-                    objectWillChange.send()
-                }
+                try await globalNewDownloadUtils.handleCustomDownload(task: task, customDependencies: customDependencies, generation: generation)
             }
         } catch {
-            task.setStatus(.failed(DownloadStatus.FailureInfo(
-                message: error.localizedDescription,
-                error: error,
-                timestamp: Date(),
-                recoverable: true
-            )))
-            await saveTask(task)
-            await MainActor.run {
-                objectWillChange.send()
+            guard task.execution.isCurrent(generation) else { return }
+            let cancelled = !task.execution.accepts(generation) || Task.isCancelled
+                || DownloadTaskExecution.isCancellation(error)
+            let paused = await globalCancelTracker.isPaused(task.id)
+            guard task.execution.isCurrent(generation) else { return }
+            if cancelled && paused {
+                task.setStatus(.paused(DownloadStatus.PauseInfo(
+                    reason: .userRequested, timestamp: Date(), resumable: true
+                )))
+            } else {
+                let reportedError: Error = cancelled ? NetworkError.cancelled : error
+                task.setStatus(.failed(DownloadStatus.FailureInfo(
+                    message: reportedError.localizedDescription, error: reportedError,
+                    timestamp: Date(), recoverable: true
+                )))
             }
+            await saveTask(task)
+            updateDockBadge()
+            objectWillChange.send()
         }
     }
 
@@ -245,7 +245,7 @@ class NetworkManager: ObservableObject {
            await globalCancelTracker.cancel(taskId)
 
            if let task = downloadTasks.first(where: { $0.id == taskId }) {
-               globalNewDownloadUtils.stopActiveDownloads(for: task)
+               await globalNewDownloadUtils.stopActiveDownloads(for: task)
                if task.status.isActive {
                    task.setStatus(.failed(DownloadStatus.FailureInfo(
                        message: String(localized: "下载已取消"),
@@ -310,9 +310,11 @@ class NetworkManager: ObservableObject {
         let sessionID = UUID()
         await MainActor.run {
             installationSessionID = sessionID
+            installationSessionFinished = false
             installationCancelledByUser = false
             installationState = .installing(progress: 0, status: String(localized: "准备安装..."))
             installLogs = []
+            installationPackages = []
             installCommand = ""
             lastInstallationPhase = .preparing
             updateInstallationSnapshot(progress: 0, status: String(localized: "准备安装..."))
@@ -323,18 +325,16 @@ class NetworkManager: ObservableObject {
                 at: path,
                 progressHandler: { progress, status in
                     Task { @MainActor in
-                        guard self.installationSessionID == sessionID else { return }
+                        guard self.installationSessionID == sessionID, !self.installationSessionFinished else { return }
                         self.updateInstallationSnapshot(progress: progress, status: status)
-                        if status == String(localized: "安装完成") || status == "安装完成" {
-							self.completeInstallation()
-                        } else {
-                            self.installationState = .installing(progress: progress, status: status)
-                        }
+                        self.installationState = .installing(progress: progress, status: status)
                     }
                 },
                 logHandler: { message in
                     Task { @MainActor in
                         guard self.installationSessionID == sessionID else { return }
+                        if self.consumePackageProgress(message) { return }
+                        guard !self.installationSessionFinished else { return }
                         self.appendInstallLog(message)
                     }
                 }
@@ -371,6 +371,7 @@ class NetworkManager: ObservableObject {
                     }
                 }
                 
+                installationSessionFinished = true
                 installationState = .failed(mainError, errorDetails)
             }
         }
@@ -388,8 +389,10 @@ class NetworkManager: ObservableObject {
             cancelInstallation()
         }
         installationSessionID = UUID()
+        installationSessionFinished = true
         installationState = .idle
         installLogs = []
+        installationPackages = []
         installCommand = ""
         lastInstallationProgress = 0
         lastInstallationStatus = String(localized: "准备安装...")
@@ -401,9 +404,11 @@ class NetworkManager: ObservableObject {
         let sessionID = UUID()
         await MainActor.run {
             installationSessionID = sessionID
+            installationSessionFinished = false
             installationCancelledByUser = false
             installationState = .installing(progress: 0, status: String(localized: "正在重试安装..."))
             installLogs = []
+            installationPackages = []
             installCommand = ""
             lastInstallationPhase = .preparing
             updateInstallationSnapshot(progress: 0, status: String(localized: "正在重试安装..."))
@@ -414,18 +419,16 @@ class NetworkManager: ObservableObject {
                 at: path,
                 progressHandler: { progress, status in
                     Task { @MainActor in
-                        guard self.installationSessionID == sessionID else { return }
+                        guard self.installationSessionID == sessionID, !self.installationSessionFinished else { return }
                         self.updateInstallationSnapshot(progress: progress, status: status)
-                        if status == String(localized: "安装完成") || status == "安装完成" {
-                            self.completeInstallation()
-                        } else {
-                            self.installationState = .installing(progress: progress, status: status)
-                        }
+                        self.installationState = .installing(progress: progress, status: status)
                     }
                 },
                 logHandler: { message in
                     Task { @MainActor in
                         guard self.installationSessionID == sessionID else { return }
+                        if self.consumePackageProgress(message) { return }
+                        guard !self.installationSessionFinished else { return }
                         self.appendInstallLog(message)
                     }
                 }
@@ -453,6 +456,7 @@ class NetworkManager: ObservableObject {
                     }
                 }
                 
+                installationSessionFinished = true
                 installationState = .failed(mainError, errorDetails)
             }
         }
@@ -469,7 +473,8 @@ class NetworkManager: ObservableObject {
                 installCommand: installCommand,
                 errorDetails: nil,
                 phase: .preparing,
-                outcome: .running
+                outcome: .running,
+                packages: installationPackages
             )
         case .installing(let progress, let status):
             return InstallProgressViewData(
@@ -480,7 +485,8 @@ class NetworkManager: ObservableObject {
                 installCommand: installCommand,
                 errorDetails: nil,
                 phase: lastInstallationPhase,
-                outcome: .running
+                outcome: .running,
+                packages: installationPackages
             )
         case .completed:
             return InstallProgressViewData(
@@ -491,7 +497,8 @@ class NetworkManager: ObservableObject {
                 installCommand: installCommand,
                 errorDetails: nil,
                 phase: lastInstallationPhase,
-                outcome: .completed
+                outcome: .completed,
+                packages: installationPackages
             )
         case .failed(let error, let errorDetails):
             let fallbackStatus = lastInstallationStatus
@@ -506,7 +513,8 @@ class NetworkManager: ObservableObject {
                 phase: lastInstallationPhase,
                 outcome: .failed,
                 contextStatus: fallbackStatus,
-                isUserCancelled: cancelledByUser
+                isUserCancelled: cancelledByUser,
+                packages: installationPackages
             )
         }
 	}
@@ -515,7 +523,8 @@ class NetworkManager: ObservableObject {
 		sapCode: String,
 		version: String,
 		processorFamily: HDPIMProcessorFamily,
-		productName: String
+		productName: String,
+        preservingUserPreferences: Bool = true
 	) async {
 		let request = HDPIMUninstallHelperRequest(
 			sapCode: sapCode,
@@ -523,11 +532,10 @@ class NetworkManager: ObservableObject {
 			processorFamily: processorFamily.rawValue,
 			target: .product,
 			moduleIds: [],
-			packageKeys: []
+			packageKeys: [],
+            preservingUserPreferences: preservingUserPreferences
 		)
-		await runUninstall(productName: productName) {
-			try await self.executeHDPIMUninstall(request)
-		}
+        await runUninstall(productName: productName, request: request)
 	}
 
 	func uninstallModule(
@@ -535,14 +543,16 @@ class NetworkManager: ObservableObject {
 		version: String,
 		processorFamily: HDPIMProcessorFamily,
 		moduleId: String,
-		productName: String
+		productName: String,
+        preservingUserPreferences: Bool = true
 	) async {
 		await uninstallModules(
 			sapCode: sapCode,
 			version: version,
 			processorFamily: processorFamily,
 			moduleIds: [moduleId],
-			productName: productName
+			productName: productName,
+            preservingUserPreferences: preservingUserPreferences
 		)
 	}
 
@@ -551,7 +561,8 @@ class NetworkManager: ObservableObject {
 		version: String,
 		processorFamily: HDPIMProcessorFamily,
 		moduleIds: Set<String>,
-		productName: String
+		productName: String,
+        preservingUserPreferences: Bool = true
 	) async {
 		let request = HDPIMUninstallHelperRequest(
 			sapCode: sapCode,
@@ -559,11 +570,10 @@ class NetworkManager: ObservableObject {
 			processorFamily: processorFamily.rawValue,
 			target: .module,
 			moduleIds: Array(moduleIds).sorted(),
-			packageKeys: []
+			packageKeys: [],
+            preservingUserPreferences: preservingUserPreferences
 		)
-		await runUninstall(productName: productName) {
-			try await self.executeHDPIMUninstall(request)
-		}
+        await runUninstall(productName: productName, request: request)
 	}
 
 	func uninstallPackages(
@@ -571,7 +581,8 @@ class NetworkManager: ObservableObject {
 		version: String,
 		processorFamily: HDPIMProcessorFamily,
 		packageKeys: Set<HDPIMPackageUninstallKey>,
-		productName: String
+		productName: String,
+        preservingUserPreferences: Bool = true
 	) async {
 		let request = HDPIMUninstallHelperRequest(
 			sapCode: sapCode,
@@ -586,190 +597,247 @@ class NetworkManager: ObservableObject {
 						packageName: $0.packageName,
 						packageVersion: $0.packageVersion
 					)
-				}
-		)
-		await runUninstall(productName: productName) {
-			try await self.executeHDPIMUninstall(request)
-		}
-	}
-
-	func makeUninstallProgressViewData(productName: String) -> InstallProgressViewData {
-		switch uninstallState {
-		case .idle:
-			return InstallProgressViewData(
-				productName: productName,
-				progress: 0,
-				status: String(localized: "准备卸载..."),
-				logs: uninstallLogs,
-				installCommand: String(localized: "HDPIM Engine (内置卸载引擎)"),
-				errorDetails: nil,
-				phase: .preparing,
-				outcome: .running,
-				operation: .uninstall
-			)
-		case .installing(let progress, let status):
-			return InstallProgressViewData(
-				productName: productName,
-				progress: progress,
-				status: status,
-				logs: uninstallLogs,
-				installCommand: String(localized: "HDPIM Engine (内置卸载引擎)"),
-				errorDetails: nil,
-				phase: lastUninstallPhase,
-				outcome: .running,
-				operation: .uninstall
-			)
-		case .completed:
-			return InstallProgressViewData(
-				productName: productName,
-				progress: 1.0,
-				status: String(localized: "卸载完成"),
-				logs: uninstallLogs,
-				installCommand: String(localized: "HDPIM Engine (内置卸载引擎)"),
-				errorDetails: nil,
-				phase: .finishing,
-				outcome: .completed,
-				operation: .uninstall
-			)
-		case .failed(let error, let errorDetails):
-			return InstallProgressViewData(
-				productName: productName,
-				progress: lastUninstallProgress,
-				status: normalizedUninstallFailureStatus(from: error),
-				logs: uninstallLogs,
-				installCommand: String(localized: "HDPIM Engine (内置卸载引擎)"),
-				errorDetails: errorDetails,
-				phase: lastUninstallPhase,
-				outcome: .failed,
-				operation: .uninstall,
-				contextStatus: lastUninstallStatus
-			)
-		}
-	}
-
-	private func runUninstall(
-		productName: String,
-		operation: @escaping () async throws -> Void
-	) async {
-		await MainActor.run {
-			uninstallState = .installing(progress: 0, status: String(localized: "准备卸载..."))
-			uninstallLogs = []
-			lastUninstallProgress = 0
-			lastUninstallStatus = String(localized: "准备卸载...")
-			lastUninstallPhase = .preparing
-			appendUninstallLog(String(format: String(localized: "准备卸载 %@"), productName))
-		}
-
-		do {
-			await MainActor.run {
-				let snapshot = updateUninstallSnapshot(progress: 0.05, status: String(localized: "正在准备 HDPIM 卸载流程..."))
-				uninstallState = .installing(progress: snapshot.progress, status: snapshot.status)
-				appendUninstallLog(String(localized: "正在执行 HDPIM 卸载流程"))
-			}
-
-			try await operation()
-
-			await MainActor.run {
-				let snapshot = updateUninstallSnapshot(progress: 1.0, status: String(localized: "卸载完成"))
-				appendUninstallLog(String(localized: "卸载完成"))
-				uninstallState = .installing(progress: snapshot.progress, status: snapshot.status)
-				uninstallState = .completed
-				notifyInstallStateChanged()
-				objectWillChange.send()
-			}
-		} catch {
-			await MainActor.run {
-				let message = error.localizedDescription
-				appendUninstallLog(String(format: String(localized: "卸载失败: %@"), message))
-				uninstallState = .failed(error, String(describing: error))
-				objectWillChange.send()
-			}
-		}
-	}
-
-	private func executeHDPIMUninstall(_ request: HDPIMUninstallHelperRequest) async throws {
-		let outputState = InstallManager.InstallOutputState()
-		let executablePath = Bundle.main.executableURL?.path ?? CommandLine.arguments[0]
-
-		do {
-			try await HelperManager.shared.executeHDPIMUninstall(
-				request: request,
-				userHome: NSHomeDirectory(),
-				executablePath: executablePath
-			) { [weak self] output in
-				InstallManager.consumeHelperOutput(
-					output,
-					state: outputState,
-					progressHandler: { progress, status in
-						Task { @MainActor in
-							guard let self else { return }
-							let snapshot = self.updateUninstallSnapshot(progress: progress, status: status)
-							self.uninstallState = .installing(progress: snapshot.progress, status: snapshot.status)
-						}
-					},
-					logHandler: { message in
-						Task { @MainActor in
-							self?.appendUninstallLog(message)
-						}
-					},
-					failureStatusPrefix: String(localized: "卸载失败"),
-					includeUnstructuredOutput: false
-				)
-			}
-		} catch {
-			InstallManager.consumeHelperOutput(
-				"\n",
-				state: outputState,
-				progressHandler: { progress, status in
-					Task { @MainActor in
-						let snapshot = self.updateUninstallSnapshot(progress: progress, status: status)
-						self.uninstallState = .installing(progress: snapshot.progress, status: snapshot.status)
-					}
 				},
-				logHandler: { [weak self] message in
-					Task { @MainActor in
-						self?.appendUninstallLog(message)
-					}
-				},
-				failureStatusPrefix: String(localized: "卸载失败"),
-				includeUnstructuredOutput: false
-			)
-			if let lastStructuredError = outputState.lastStructuredError {
-				throw NSError(
-					domain: "HDPIMUninstall",
-					code: 1,
-					userInfo: [NSLocalizedDescriptionKey: lastStructuredError]
-				)
-			}
-			throw error
-		}
-
-		InstallManager.consumeHelperOutput(
-			"\n",
-			state: outputState,
-			progressHandler: { progress, status in
-				Task { @MainActor in
-					let snapshot = self.updateUninstallSnapshot(progress: progress, status: status)
-					self.uninstallState = .installing(progress: snapshot.progress, status: snapshot.status)
-				}
-			},
-			logHandler: { [weak self] message in
-				Task { @MainActor in
-					self?.appendUninstallLog(message)
-				}
-			},
-			failureStatusPrefix: String(localized: "卸载失败"),
-			includeUnstructuredOutput: false
+            preservingUserPreferences: preservingUserPreferences
 		)
-
-		if let lastStructuredError = outputState.lastStructuredError {
-			throw NSError(
-				domain: "HDPIMUninstall",
-				code: 1,
-				userInfo: [NSLocalizedDescriptionKey: lastStructuredError]
-			)
-		}
+        await runUninstall(productName: productName, request: request)
 	}
+
+    func makeUninstallProgressViewData(productName: String) -> InstallProgressViewData {
+        let status: String
+        let progress: Double
+        let outcome: InstallProgressOutcome
+        let details: String?
+        switch uninstallState {
+        case .idle:
+            status = String(localized: "准备卸载...")
+            progress = 0
+            outcome = .running
+            details = nil
+        case .installing(let currentProgress, let currentStatus):
+            status = currentStatus
+            progress = currentProgress
+            outcome = .running
+            details = nil
+        case .completed:
+            status = uninstallResult?.outcome == .warnings
+                ? String(localized: "卸载已完成，请查看警告事项") : String(localized: "卸载完成")
+            progress = 1
+            outcome = .completed
+            details = nil
+        case .failed(let error, let errorDetails):
+            switch uninstallResult?.outcome {
+            case .cancelled:
+                status = String(localized: "卸载已取消")
+            case .partial:
+                status = String(localized: "卸载部分失败，请保留恢复目录并查看详细信息")
+            default:
+                status = normalizedUninstallFailureStatus(from: error)
+            }
+            progress = lastUninstallProgress
+            outcome = .failed
+            details = errorDetails
+        }
+        return InstallProgressViewData(
+            productName: productName,
+            progress: progress,
+            status: status,
+            logs: uninstallLogs,
+            installCommand: String(localized: "HDPIM Engine (内置卸载引擎)"),
+            errorDetails: details,
+            phase: lastUninstallPhase,
+            outcome: outcome,
+            operation: .uninstall,
+            contextStatus: lastUninstallStatus,
+            isUserCancelled: uninstallResult?.outcome == .cancelled,
+            warnings: uninstallResult?.warnings ?? [],
+            isPartialFailure: uninstallResult?.outcome == .partial,
+            recoveryDirectory: uninstallResult?.recoveryDirectory,
+            isCancellationPending: uninstallCancellationRequested && !uninstallSessionFinished
+        )
+    }
+
+    func cancelUninstallation() {
+        guard !uninstallSessionFinished, let cancellation = uninstallCancellation,
+              !uninstallCancellationRequested else { return }
+        uninstallCancellationRequested = true
+        cancellation.cancel()
+        let status = String(localized: "正在取消卸载，等待恢复和收尾...")
+        uninstallState = .installing(progress: lastUninstallProgress, status: status)
+        appendUninstallLog(status)
+    }
+
+    private func runUninstall(productName: String, request: HDPIMUninstallHelperRequest) async {
+        guard uninstallCancellation == nil else {
+            appendUninstallLog(String(localized: "上一卸载操作仍在运行或恢复，请等待收尾完成"))
+            return
+        }
+        let sessionID = UUID()
+        let cancellation = HDPIMOperationCancellation()
+        uninstallSessionID = sessionID
+        uninstallSessionFinished = false
+        uninstallCancellation = cancellation
+        uninstallCancellationRequested = false
+        uninstallResult = nil
+        uninstallLogs = []
+        lastUninstallProgress = 0
+        lastUninstallStatus = String(localized: "准备卸载...")
+        lastUninstallPhase = .preparing
+        uninstallState = .installing(progress: 0, status: lastUninstallStatus)
+        appendUninstallLog(String(format: String(localized: "准备卸载 %@"), productName))
+        defer {
+            cancellation.stopMonitoring()
+            if uninstallSessionID == sessionID { uninstallCancellation = nil }
+        }
+
+        let result: HDPIMUninstallResult
+        do {
+            result = try await withTaskCancellationHandler {
+                try await HDPIMOperationContext.$cancellation.withValue(cancellation) {
+                    try HDPIMOperationContext.checkCancellation()
+                    let lease = try await X1a0HeCCInstaller.shared.reserveForProductInstallation()
+                    do {
+                        try HDPIMOperationContext.checkCancellation()
+                        let result = try await executeHDPIMUninstall(request, sessionID: sessionID)
+                        await X1a0HeCCInstaller.shared.releaseProductInstallation(lease)
+                        return result
+                    } catch {
+                        await X1a0HeCCInstaller.shared.releaseProductInstallation(lease)
+                        throw error
+                    }
+                }
+            } onCancel: {
+                cancellation.cancel()
+            }
+        } catch let failure as HDPIMUninstallFailure {
+            result = failure.result
+        } catch {
+            result = HDPIMUninstallResult(
+                outcome: error is CancellationError ? .cancelled : .failed,
+                warnings: [],
+                details: error.localizedDescription,
+                recoveryDirectory: nil
+            )
+        }
+        guard uninstallSessionID == sessionID else { return }
+        uninstallSessionFinished = true
+        uninstallResult = result
+        for diagnostic in result.diagnostics ?? [] { appendUninstallLog("诊断：" + diagnostic) }
+        for warning in result.warnings { appendUninstallLog("警告：" + warning) }
+        if let details = result.details { appendUninstallLog(details) }
+        if let directory = result.recoveryDirectory { appendUninstallLog("恢复目录：" + directory) }
+        switch result.outcome {
+        case .completed, .warnings:
+            lastUninstallProgress = 1
+            lastUninstallPhase = .finishing
+            lastUninstallStatus = result.outcome == .warnings ? "卸载完成（有警告）" : "卸载完成"
+            appendUninstallLog(lastUninstallStatus)
+            uninstallState = .completed
+        case .cancelled, .failed, .partial:
+            let failure = HDPIMUninstallFailure(result: result)
+            uninstallState = .failed(failure, result.details)
+        }
+        notifyInstallStateChanged()
+    }
+
+    private func executeHDPIMUninstall(
+        _ request: HDPIMUninstallHelperRequest,
+        sessionID: UUID
+    ) async throws -> HDPIMUninstallResult {
+        var continuation: AsyncStream<String>.Continuation!
+        let stream = AsyncStream<String> { continuation = $0 }
+        let outputContinuation = continuation!
+        // 同一消费任务处理完整行，并在发布终态前排空，避免迟到的进度覆盖结果。
+        let consumer = Task { @MainActor in
+            var state = UninstallOutputState()
+            for await output in stream {
+                self.consumeUninstallOutput(output, sessionID: sessionID, state: &state)
+            }
+            self.consumeUninstallOutput("\n", sessionID: sessionID, state: &state)
+            return state
+        }
+        var helperError: Error?
+        do {
+            try await HelperManager.shared.executeHDPIMUninstall(
+                request: request,
+                userHome: NSHomeDirectory(),
+                executablePath: Bundle.main.executableURL?.path ?? CommandLine.arguments[0]
+            ) { output in
+                outputContinuation.yield(output)
+            }
+        } catch {
+            helperError = error
+        }
+        outputContinuation.finish()
+        let state = await consumer.value
+        if let result = state.result { return result }
+        if let error = state.lastError {
+            throw NSError(domain: "HDPIMUninstall", code: 1,
+                          userInfo: [NSLocalizedDescriptionKey: error])
+        }
+        let details = helperError.map { "\n" + $0.localizedDescription } ?? ""
+        throw NSError(domain: "HDPIMUninstall", code: 1, userInfo: [NSLocalizedDescriptionKey:
+            "卸载进程未返回完整结果，无法确认卸载或恢复是否完成，请检查安装状态和日志。" + details])
+    }
+
+    private struct UninstallOutputState {
+        var pending = ""
+        var result: HDPIMUninstallResult?
+        var lastError: String?
+        var lastProgressPhase: String?
+        var lastProgressLogTime = -Double.infinity
+    }
+
+    private func consumeUninstallOutput(
+        _ output: String,
+        sessionID: UUID,
+        state: inout UninstallOutputState
+    ) {
+        guard uninstallSessionID == sessionID, !uninstallSessionFinished else { return }
+        state.pending.append(output)
+        while let newline = state.pending.firstIndex(of: "\n") {
+            let line = String(state.pending[..<newline]).trimmingCharacters(in: .newlines)
+            state.pending.removeSubrange(...newline)
+            if line.hasPrefix("UNINSTALL|") {
+                do {
+                    guard let data = Data(base64Encoded: String(line.dropFirst(10))) else {
+                        throw CocoaError(.coderReadCorrupt)
+                    }
+                    state.result = try JSONDecoder().decode(HDPIMUninstallResult.self, from: data)
+                } catch {
+                    state.lastError = "无法读取卸载结果：" + error.localizedDescription
+                }
+            } else if line.hasPrefix("PROGRESS|") {
+                let fields = line.split(separator: "|", maxSplits: 2).map(String.init)
+                guard fields.count == 3, let progress = Double(fields[1]), progress.isFinite else { continue }
+                let status = fields[2]
+                let phase = status.components(separatedBy: "...").first ?? status
+                let now = ProcessInfo.processInfo.systemUptime
+                if state.lastProgressPhase != phase || now - state.lastProgressLogTime >= 5 || progress >= 1 {
+                    state.lastProgressPhase = phase
+                    state.lastProgressLogTime = now
+                    appendUninstallLog(status)
+                }
+                let snapshot = updateUninstallSnapshot(progress: progress, status: status)
+                if !uninstallCancellationRequested {
+                    uninstallState = .installing(progress: snapshot.progress, status: snapshot.status)
+                }
+            } else if line.hasPrefix("LOG|") {
+                let message = String(line.dropFirst(4))
+                #if DEBUG
+                appendUninstallLog(message)
+                #else
+                if message.contains("警告") || message.contains("Warning") || message.contains("失败") ||
+                    message.contains("恢复") || message.contains("耗时") {
+                    appendUninstallLog(message)
+                }
+                #endif
+            } else if line.hasPrefix("ERROR|") {
+                state.lastError = String(line.dropFirst(6))
+                appendUninstallLog(state.lastError ?? "")
+            }
+        }
+    }
 
 	@discardableResult
 	private func updateUninstallSnapshot(progress: Double, status: String) -> (progress: Double, status: String) {
@@ -828,6 +896,19 @@ class NetworkManager: ObservableObject {
             return message
         }
         return String(format: String(localized: "安装失败: %@"), message)
+    }
+
+    private func consumePackageProgress(_ message: String) -> Bool {
+        guard message.hasPrefix(HDPIMPackageProgress.messagePrefix) else { return false }
+        guard let package = HDPIMPackageProgress.decode(message) else { return true }
+        if let index = installationPackages.firstIndex(where: { $0.id == package.id }) {
+            guard package.revision > installationPackages[index].revision else { return true }
+            installationPackages[index] = package
+        } else {
+            installationPackages.append(package)
+            installationPackages.sort { $0.id < $1.id }
+        }
+        return true
     }
 
     private func appendInstallLog(_ message: String) {
@@ -905,7 +986,9 @@ class NetworkManager: ObservableObject {
     }
 
     func isProductInstalled(productId: String, version: String, platform: String) -> Bool {
-        return HDPIMDatabase.shared.isProductReallyInstalled(
+        guard let database = try? HDPIMDatabase.shared.makeReadOnlyConnection() else { return false }
+        defer { database.close() }
+        return database.isProductReallyInstalled(
             sapCode: productId,
             version: version,
             platform: platform,
@@ -919,8 +1002,9 @@ class NetworkManager: ObservableObject {
         let downloadedSize = activeTasks.reduce(Int64(0)) {
             $0 + min(max($1.totalDownloadedSize, 0), max($1.totalSize, 0))
         }
-        let totalSpeed = activeTasks.reduce(0.0) { $0 + max($1.totalSpeed, 0) }
-        let progress = totalSize > 0 ? Double(downloadedSize) / Double(totalSize) : 0
+        let totalSpeed = DownloadTaskSummary(tasks: downloadTasks).speed
+        let hasUnknownSize = activeTasks.contains { $0.hasUnknownDownloadSize }
+        let progress = !hasUnknownSize && totalSize > 0 ? Double(downloadedSize) / Double(totalSize) : 0
 
         DockProgressIndicator.shared.update(
             progress: progress,
@@ -938,7 +1022,7 @@ class NetworkManager: ObservableObject {
 
     func loadSavedTasks() {
         guard !hasLoadedSavedTasks else { return }
-        
+        hasLoadedSavedTasks = true
         Task {
             let savedTasks = await TaskPersistenceManager.shared.loadTasks()
             await MainActor.run {
@@ -947,7 +1031,8 @@ class NetworkManager: ObservableObject {
                         product.updateCompletedPackages()
                     }
                 }
-                downloadTasks.append(contentsOf: savedTasks)
+                let existing = Set(downloadTasks.map(\.id))
+                downloadTasks.append(contentsOf: savedTasks.filter { !existing.contains($0.id) })
                 updateDockBadge()
                 hasLoadedSavedTasks = true
             }

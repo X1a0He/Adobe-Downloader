@@ -26,6 +26,16 @@ final class PDMAtomicState {
     }
 
     @discardableResult
+    func requestStop(_ newState: PDMDownloadState) -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        guard newState == .paused || newState == .cancelled,
+              _state != .completed, _state != .error, _state != .cancelled else { return false }
+        _state = newState
+        return true
+    }
+
+    @discardableResult
     func compareAndSet(expected: PDMDownloadState, new newState: PDMDownloadState) -> Bool {
         lock.lock()
         defer { lock.unlock() }

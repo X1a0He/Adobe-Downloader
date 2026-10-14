@@ -13,6 +13,7 @@ actor InstallManager {
         var latestProgress = 0.0
         var lastStructuredError: String?
         var lastLoggedProgressStatus: String?
+        var lastProgressLogTime = -Double.infinity
     }
 
     private struct PreparedInstallSource {
@@ -46,7 +47,12 @@ actor InstallManager {
         }
     }
 
-    private var isInstalling = false
+    private struct InstallationOperation {
+        let id: UUID
+        let cancellation: HDPIMOperationCancellation
+        let task: Task<Void, Error>
+    }
+    private var currentOperation: InstallationOperation?
 
     private static var shouldEmitDetailedInstallLogs: Bool {
         #if DEBUG
@@ -68,6 +74,54 @@ actor InstallManager {
         progressHandler: @escaping (Double, String) -> Void,
         logHandler: ((String) -> Void)? = nil
     ) async throws {
+        try await runInstallationOperation {
+            let lease = try await X1a0HeCCInstaller.shared.reserveForProductInstallation()
+            do {
+                try await self.performInstall(at: appPath, componentLease: lease,
+                                              progressHandler: progressHandler, logHandler: logHandler)
+                await X1a0HeCCInstaller.shared.releaseProductInstallation(lease)
+            } catch {
+                await X1a0HeCCInstaller.shared.releaseProductInstallation(lease)
+                throw error
+            }
+        }
+    }
+
+    func runInstallationOperation(_ operation: @escaping () async throws -> Void) async throws {
+        guard currentOperation == nil else {
+            throw InstallError.installationFailed("上一安装操作仍在运行或恢复，请等待收尾完成")
+        }
+        try Task.checkCancellation()
+        let id = UUID()
+        let cancellation = HDPIMOperationCancellation()
+        let task = Task {
+            try await HDPIMOperationContext.$cancellation.withValue(cancellation) {
+                try HDPIMOperationContext.checkCancellation()
+                try await operation()
+            }
+        }
+        currentOperation = InstallationOperation(id: id, cancellation: cancellation, task: task)
+        defer { if currentOperation?.id == id { currentOperation = nil } }
+        try await withTaskCancellationHandler {
+            try await task.value
+        } onCancel: {
+            cancellation.cancel()
+            task.cancel()
+        }
+    }
+
+    private func performInstall(
+        at appPath: URL,
+        componentLease: UUID,
+        progressHandler: @escaping (Double, String) -> Void,
+        logHandler: ((String) -> Void)?
+    ) async throws {
+        try HDPIMOperationContext.checkCancellation()
+        let started = ProcessInfo.processInfo.systemUptime
+        defer {
+            logHandler?(String(format: "[安装总耗时] %.3f s（包含源准备、组件检查和收尾）",
+                               ProcessInfo.processInfo.systemUptime - started))
+        }
         let sourceURL = resolvedInstallSourceURL(for: appPath)
         let preparedSource = try await prepareInstallSource(
             at: sourceURL,
@@ -79,6 +133,7 @@ actor InstallManager {
                 try? FileManager.default.removeItem(at: cleanupURL)
             }
         }
+        try HDPIMOperationContext.checkCancellation()
 
         if !FileManager.default.fileExists(atPath: preparedSource.url.appendingPathComponent("driver.xml").path),
            try await installAcrobatSourceIfPossible(
@@ -94,12 +149,17 @@ actor InstallManager {
             throw InstallError.installationFailed(String(localized: "找不到 driver.xml 文件"))
         }
 
+        let cancellation = HDPIMOperationContext.cancellation
+        try await X1a0HeCCInstaller.shared.install(
+            productLease: componentLease,
+            progress: { _, status in progressHandler(0, status) },
+            log: logHandler,
+            cancellationCheck: { cancellation?.isCancelled == true }
+        )
+        try HDPIMOperationContext.checkCancellation()
         let productDir = preparedSource.url.path
         let userHome = NSHomeDirectory()
         let executablePath = Bundle.main.executableURL?.path ?? CommandLine.arguments[0]
-
-        isInstalling = true
-        defer { isInstalling = false }
 
         do {
             let outputState = InstallOutputState()
@@ -138,12 +198,12 @@ actor InstallManager {
         }
     }
 
-    func cancel() {
-        guard isInstalling else { return }
-        Task {
-            try? await HelperManager.shared.cancelCurrentOperation()
-        }
-        isInstalling = false
+    func cancel() async {
+        guard let operation = currentOperation else { return }
+        operation.cancellation.cancel()
+        operation.task.cancel()
+        _ = await operation.task.result
+        if currentOperation?.id == operation.id { currentOperation = nil }
     }
 
     func getInstallCommand(for driverPath: String) -> String {
@@ -155,8 +215,8 @@ actor InstallManager {
         progressHandler: @escaping (Double, String) -> Void,
         logHandler: ((String) -> Void)? = nil
     ) async throws {
-        cancel()
-        try await Task.sleep(nanoseconds: 500_000_000)
+        await cancel()
+        try Task.checkCancellation()
         try await install(at: appPath, progressHandler: progressHandler, logHandler: logHandler)
     }
 
@@ -181,9 +241,12 @@ actor InstallManager {
                 if components.count == 3, let progress = Double(components[1]) {
                     state.latestProgress = progress
                     let status = components[2]
-                    if state.lastLoggedProgressStatus != status {
-                        state.lastLoggedProgressStatus = status
-                        emitDetailedInstallLog(status, logHandler: logHandler)
+                    let phase = status.components(separatedBy: "...").first ?? status
+                    let now = ProcessInfo.processInfo.systemUptime
+                    if state.lastLoggedProgressStatus != phase || now - state.lastProgressLogTime >= 5 || progress >= 1 {
+                        state.lastLoggedProgressStatus = phase
+                        state.lastProgressLogTime = now
+                        logHandler?(status)
                     }
                     Task { @MainActor in
                         progressHandler(progress, status)
@@ -194,11 +257,13 @@ actor InstallManager {
 
             if line.hasPrefix("LOG|") {
                 let message = String(line.dropFirst(4))
-                if shouldEmitDetailedInstallLogs {
+                // 诊断不覆盖进度状态；耗时和异常在 Release 中也必须可见。
+                if message.hasPrefix(HDPIMPackageProgress.messagePrefix) ||
+                    message.hasPrefix("[HDPIM 耗时]") || message.contains("失败") ||
+                    message.contains("Warning") || message.contains("警告") {
                     logHandler?(message)
-                    Task { @MainActor in
-                        progressHandler(state.latestProgress, message)
-                    }
+                } else {
+                    emitDetailedInstallLog(message, logHandler: logHandler)
                 }
                 continue
             }
@@ -281,36 +346,10 @@ actor InstallManager {
     }
 
     private func runLocalCopy(sourceURL: URL, destinationURL: URL) async throws {
-        try await withCheckedThrowingContinuation { continuation in
-            DispatchQueue.global(qos: .userInitiated).async {
-                let task = Process()
-                let stdout = Pipe()
-                let stderr = Pipe()
-                task.executableURL = URL(fileURLWithPath: "/usr/bin/ditto")
-                task.arguments = [sourceURL.path, destinationURL.path]
-                task.standardOutput = stdout
-                task.standardError = stderr
-
-                do {
-                    try task.run()
-                    task.waitUntilExit()
-
-                    if task.terminationStatus == 0 {
-                        continuation.resume()
-                    } else {
-                        let errorData = stderr.fileHandleForReading.readDataToEndOfFile()
-                        let outputData = stdout.fileHandleForReading.readDataToEndOfFile()
-                        let message = String(data: errorData, encoding: .utf8)?
-                            .trimmingCharacters(in: .whitespacesAndNewlines)
-                            ?? String(data: outputData, encoding: .utf8)?
-                            .trimmingCharacters(in: .whitespacesAndNewlines)
-                            ?? "ditto exited with code \(task.terminationStatus)"
-                        continuation.resume(throwing: InstallError.installationFailed(message))
-                    }
-                } catch {
-                    continuation.resume(throwing: error)
-                }
-            }
+        let result = try await HDPIMProcessRunner.run(executable: "/usr/bin/ditto",
+                                                    arguments: [sourceURL.path, destinationURL.path])
+        guard result.exitCode == 0 else {
+            throw InstallError.installationFailed(result.output.isEmpty ? "ditto exited with code \(result.exitCode)" : result.output)
         }
     }
 

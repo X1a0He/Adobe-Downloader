@@ -1,9 +1,10 @@
 import Foundation
 
 enum HDPIMARPNaming {
-    static func appGuid(sapCode: String, version: String) -> String {
+    static func appGuid(sapCode: String, version: String, platform: String) -> String {
         let normalizedVersion = version.replacingOccurrences(of: ".", with: "_")
-        return "\(sapCode)_\(normalizedVersion)_32"
+        let suffix = !platform.contains("64") ? "_32" : (platform == "winarm64" ? "_arm64" : "")
+        return "\(sapCode)_\(normalizedVersion)\(suffix)"
     }
 }
 
@@ -11,6 +12,16 @@ enum HDPIMARPCompletion {
     private static let uninstallerSourcePath = "/Library/Application Support/Adobe/Adobe Desktop Common/HDBox/Uninstaller.app"
     private static let uninstallRoot = "/Library/Application Support/Adobe/Uninstall"
     private static let adobeInstallersDir = "/Applications/Utilities/Adobe Installers"
+
+    static func targetPaths(for contexts: [HDPIMNativeProductContext]) -> [String] {
+        contexts.filter(\.isVisibleProduct).flatMap { context in
+            let appGuid = HDPIMARPNaming.appGuid(sapCode: context.sapCode, version: context.codexVersion, platform: context.platform)
+            let aliasName = sanitizedAliasName(context.uninstallDisplayName, fallback: context.productName)
+            var paths = ["\(uninstallRoot)/\(appGuid).app", "\(uninstallRoot)/\(appGuid).adbarg", "\(adobeInstallersDir)/\(aliasName)"]
+            if let productDir = productDirectory(for: context) { paths.append("\(productDir)/\(aliasName)") }
+            return paths
+        }
+    }
 
     static func createARPEntries(
         for contexts: [HDPIMNativeProductContext],
@@ -40,7 +51,8 @@ enum HDPIMARPCompletion {
 
         let appGuid = HDPIMARPNaming.appGuid(
             sapCode: context.sapCode,
-            version: context.codexVersion
+            version: context.codexVersion,
+            platform: context.platform
         )
         let uninstallAppPath = "\(uninstallRoot)/\(appGuid).app"
         let adbargPath = "\(uninstallRoot)/\(appGuid).adbarg"

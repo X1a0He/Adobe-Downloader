@@ -257,8 +257,8 @@ struct DownloadManagerView: View {
     }
 
     private func remainingSeconds(for task: NewDownloadTask) -> Int {
-        guard task.totalSpeed > 0 else { return Int.max }
-        return Int(Double(task.totalSize - task.totalDownloadedSize) / task.totalSpeed)
+        guard let seconds = task.remainingDownloadSeconds, seconds.rounded(.up) < Double(Int.max) else { return Int.max }
+        return Int(seconds.rounded(.up))
     }
 
     private func clearAllFilters() {
@@ -452,14 +452,11 @@ private struct DownloadManagerStatsBar: View {
         var waiting = 0
         var completed = 0
         var failed = 0
-        var totalSpeed: Double = 0
-        var remainingSize: Int64 = 0
+        let summary = DownloadTaskSummary(tasks: tasks)
         for task in tasks {
             switch task.status {
             case .downloading, .preparing, .retrying:
                 running += 1
-                totalSpeed += task.totalSpeed
-                remainingSize += max(task.totalSize - task.totalDownloadedSize, 0)
             case .waiting, .paused:
                 waiting += 1
             case .completed:
@@ -473,8 +470,8 @@ private struct DownloadManagerStatsBar: View {
             waiting: waiting,
             completed: completed,
             failed: failed,
-            totalSpeed: totalSpeed,
-            remainingSize: remainingSize
+            totalSpeed: summary.speed,
+            remainingSeconds: summary.remainingSeconds
         )
     }
 
@@ -501,19 +498,15 @@ private struct DownloadManagerStatsBar: View {
                         }
                         .foregroundColor(.blue)
 
-                        if stats.totalSpeed > 0 && stats.remainingSize > 0 {
-                            let remaining = DownloadFormatters.remainingTime(
-                                total: stats.remainingSize,
-                                downloaded: 0,
-                                speed: stats.totalSpeed
-                            )
+                        if stats.remainingSeconds != nil {
+                            let remaining = DownloadFormatters.remainingTime(seconds: stats.remainingSeconds)
                             if !remaining.isEmpty {
                                 Text("·")
                                     .foregroundColor(.secondary.opacity(0.4))
                                 HStack(spacing: 3) {
                                     Image(systemName: "clock")
                                         .font(.system(size: 10))
-                                    Text(String(format: String(localized: "剩余 %@"), remaining))
+                                    Text(String(format: String(localized: "下载剩余 %@"), remaining))
                                         .font(.system(size: 12))
                                         .monospacedDigit()
                                 }
@@ -543,7 +536,7 @@ private struct DownloadManagerStatsBar: View {
         let completed: Int
         let failed: Int
         let totalSpeed: Double
-        let remainingSize: Int64
+        let remainingSeconds: TimeInterval?
     }
 }
 

@@ -44,11 +44,15 @@ class UninstallPIMXGenerator {
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
 
         let filePath = directory.appendingPathComponent(fileName)
-        try xmlData.write(to: filePath)
+        try xmlData.write(to: filePath, options: .atomic)
+        let publishedData = try Data(contentsOf: filePath)
+        guard publishedData == xmlData else {
+            throw HDPIMMaterialError.invalid("材料写入后回读不一致：\(filePath.path)")
+        }
 
-        let sha1 = Insecure.SHA1.hash(data: xmlData)
+        let sha1 = Insecure.SHA1.hash(data: publishedData)
             .map { String(format: "%02X", $0) }.joined()
-        let sha256 = SHA256.hash(data: xmlData)
+        let sha256 = SHA256.hash(data: publishedData)
             .map { String(format: "%02X", $0) }.joined()
 
         return (path: filePath, sha1: sha1, sha256: sha256)

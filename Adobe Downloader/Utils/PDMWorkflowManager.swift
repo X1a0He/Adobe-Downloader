@@ -54,6 +54,8 @@ struct AssetGlobalData {
     var validationURL: String = ""
     var validationURLs: [String] = []
     var inlineValidationData: String = ""
+    var hasInlineValidation = false
+    var hasDeclaredValidation = false
     var downloadFileName: String = ""
     var downloadFileHash: String = ""
     var totalSize: Int64 = 0
@@ -262,6 +264,8 @@ private struct PDMManifestAsset {
     let assetRelativePath: String
     let assetPath: String
     let inlineValidationData: String
+    let hasInlineValidation: Bool
+    let hasDeclaredValidation: Bool
     let validationDataRelativeURL: String
     let validationType2URL: String
     let validationType1URL: String
@@ -326,6 +330,12 @@ private struct PDMManifestAsset {
         self.assetRelativePath = assetRelativePath
         self.assetPath = assetPath
         self.inlineValidationData = try xml.firstString("//asset/validation_data_string") ?? ""
+        self.hasInlineValidation = try !xml.elements("//asset/validation_data_string").isEmpty
+        let declaredValidationFields = [
+            "//asset/validation_data_string", "//asset/validation_data_rel_url",
+            "/asset/validation_urls/type2", "/asset/validation_urls/type1", "//asset/validation_data"
+        ]
+        self.hasDeclaredValidation = try declaredValidationFields.contains { try !xml.elements($0).isEmpty }
         self.validationDataRelativeURL = try xml.firstString("//asset/validation_data_rel_url") ?? ""
         self.validationType2URL = try xml.firstString("/asset/validation_urls/type2") ?? ""
         self.validationType1URL = try xml.firstString("/asset/validation_urls/type1") ?? ""
@@ -431,11 +441,46 @@ class PDMWorkflowManager {
     private var currentState: PDMState = .downloadPackageManifest
     private var globalData: AssetGlobalData
     private var validationInfo: ValidationInfo?
-    private var isRunning = false
-    private var overlappedExtractor: HDPIMOverlappedZipExtractor?
-    private var overlappedExtractionTask: Task<HDPIMExtractionResult, Error>?
+    private let lifecycleLock = NSLock()
+    private var requestCancellation = PDMTransferCancellation()
+    private var executionInProgress = false
+    private var cancellationRequested = false
+    private var completionCommitted = false
+    private var activeDownloadIdentifier: String?
+    private var isRunning: Bool {
+        lifecycleLock.lock()
+        defer { lifecycleLock.unlock() }
+        return executionInProgress && !cancellationRequested && !completionCommitted
+    }
+    private var activeExtractor: HDPIMOverlappedZipExtractor?
+    private var activeExtractionTask: Task<HDPIMExtractionResult, Error>?
+    private var overlappedExtractor: HDPIMOverlappedZipExtractor? {
+        get {
+            lifecycleLock.lock()
+            defer { lifecycleLock.unlock() }
+            return activeExtractor
+        }
+        set {
+            lifecycleLock.lock()
+            activeExtractor = newValue
+            lifecycleLock.unlock()
+        }
+    }
+    private var overlappedExtractionTask: Task<HDPIMExtractionResult, Error>? {
+        get {
+            lifecycleLock.lock()
+            defer { lifecycleLock.unlock() }
+            return activeExtractionTask
+        }
+        set {
+            lifecycleLock.lock()
+            activeExtractionTask = newValue
+            lifecycleLock.unlock()
+        }
+    }
     private var overlappedExtractionResult: HDPIMExtractionResult?
     private var packageIdentifier: String?
+    private var expectedArtifactIdentity: DownloadArtifactStore.Identity?
     private var assets: [PDMManifestAsset] = []
     private var currentAsset: PDMManifestAsset?
     private var downloadedAssetURL: URL?
@@ -450,7 +495,7 @@ class PDMWorkflowManager {
 
     var progressHandler: ((PDMState, Double) -> Void)?
     var assetInfoHandler: ((String, Int64) -> Void)?
-    var downloadProgressHandler: ((Int64, Int64, Double) -> Void)?
+    var downloadProgressHandler: PDMProgressTracker.ProgressCallback?
     var completionHandler: ((Result<URL, Error>) -> Void)?
     var cancellationCheck: (() async -> Bool)?
 
@@ -473,22 +518,26 @@ class PDMWorkflowManager {
         headers: [String: String],
         destinationDirectory: URL,
         packageIdentifier: String? = nil,
+        artifactIdentity: DownloadArtifactStore.Identity? = nil,
         returnExecutedAsset: Bool = false,
         skipAssetActions: Bool = false,
         outputAssetURL: URL? = nil,
         assetMetadataDirectory: URL? = nil,
         progressHandler: ((PDMState, Double) -> Void)? = nil,
         assetInfoHandler: ((String, Int64) -> Void)? = nil,
-        downloadProgressHandler: ((Int64, Int64, Double) -> Void)? = nil,
+        downloadProgressHandler: PDMProgressTracker.ProgressCallback? = nil,
         cancellationCheck: (() async -> Bool)? = nil
     ) async throws -> URL {
+        try beginExecution()
+        defer { finishExecution() }
         self.progressHandler = progressHandler
         self.assetInfoHandler = assetInfoHandler
         self.downloadProgressHandler = downloadProgressHandler
         self.cancellationCheck = cancellationCheck
+        self.globalData = AssetGlobalData(tempDirectory: globalData.tempDirectory)
         self.globalData.manifestURL = manifestURL
         self.packageIdentifier = packageIdentifier
-        self.isRunning = true
+        self.expectedArtifactIdentity = artifactIdentity
         self.currentState = .downloadPackageManifest
         self.validationInfo = nil
         self.assets = []
@@ -497,24 +546,40 @@ class PDMWorkflowManager {
         self.executedAssetURL = nil
         self.activeValidationURL = ""
         self.destinationURL = nil
+        self.overlappedExtractor = nil
+        self.overlappedExtractionTask = nil
+        self.overlappedExtractionResult = nil
         self.shouldReturnExecutedAsset = returnExecutedAsset
         self.shouldSkipAssetActions = skipAssetActions
         self.outputAssetURL = outputAssetURL
         self.assetMetadataDirectory = assetMetadataDirectory
 
-        while currentState != .workflowCompletion && isRunning {
-            if let check = cancellationCheck, await check() {
-                throw NetworkError.cancelled
+        return try await withTaskCancellationHandler {
+            do {
+                try await checkCancellation()
+                try FileManager.default.createDirectory(at: globalData.tempDirectory, withIntermediateDirectories: true)
+                while currentState != .workflowCompletion {
+                    try await checkCancellation()
+                    try await executeState(cdnBaseURL: cdnBaseURL, headers: headers, destinationDirectory: destinationDirectory)
+                }
+                try await checkCancellation()
+
+                guard let destination = destinationURL else {
+                    throw PDMError(code: 107, message: "Download completed but no destination file")
+                }
+
+                try commitCompletion()
+                return destination
+            } catch {
+                cancel()
+                if let extractionTask = overlappedExtractionTask {
+                    _ = try? await extractionTask.value
+                }
+                throw error
             }
-
-            try await executeState(cdnBaseURL: cdnBaseURL, headers: headers, destinationDirectory: destinationDirectory)
+        } onCancel: {
+            self.cancel()
         }
-
-        guard let destination = destinationURL else {
-            throw PDMError(code: 107, message: "Download completed but no destination file")
-        }
-
-        return destination
     }
 
     private func executeState(cdnBaseURL: String, headers: [String: String], destinationDirectory: URL) async throws {
@@ -569,19 +634,18 @@ class PDMWorkflowManager {
 
         let manifestFile = globalData.tempDirectory.appendingPathComponent("manifest.xml")
 
-        var request = URLRequest(url: url)
-        request.httpMethod = "GET"
-        request.timeoutInterval = NetworkConstants.downloadTimeout
-        headers.forEach { request.setValue($0.value, forHTTPHeaderField: $0.key) }
+        let response = try await PDMHttpCommunicator(cancellation: requestCancellation).sendRequest(PDMHTTPRequestConfig(
+            url: url.absoluteString, headers: headers.map { ($0.key, $0.value) },
+            timeoutSeconds: NetworkConstants.downloadTimeout
+        ))
+        let data = response.data
 
-        let (data, response) = try await URLSession.shared.data(for: request)
-
-        guard let httpResponse = response as? HTTPURLResponse,
-              (200...299).contains(httpResponse.statusCode) else {
+        guard response.isSuccess else {
             throw PDMError.manifestDownloadFailed
         }
+        try await checkCancellation()
 
-        try data.write(to: manifestFile)
+        try await PDMDownloadIO.run { try data.write(to: manifestFile) }
         globalData.manifestPath = manifestFile.path
 
         progressHandler?(.downloadPackageManifest, 1.0)
@@ -623,6 +687,8 @@ class PDMWorkflowManager {
         currentAsset = asset
         globalData.downloadURL = resolvedManifestURL(asset.downloadPath, cdnBaseURL: cdnBaseURL)
         globalData.inlineValidationData = asset.inlineValidationData
+        globalData.hasInlineValidation = asset.hasInlineValidation
+        globalData.hasDeclaredValidation = asset.hasDeclaredValidation
         globalData.validationURLs = []
         for validationPath in asset.validationPaths {
             appendValidationURL(validationPath, cdnBaseURL: cdnBaseURL)
@@ -784,10 +850,15 @@ class PDMWorkflowManager {
     }
 
     private func handleAssetValidationDownload(headers: [String: String]) async throws {
-        let validationFile = globalData.tempDirectory.appendingPathComponent("validation.xml")
+        validationInfo = nil
+        activeValidationURL = ""
 
-        if !globalData.inlineValidationData.isEmpty {
-            try globalData.inlineValidationData.write(to: validationFile, atomically: true, encoding: .utf8)
+        if globalData.hasInlineValidation {
+            guard let info = validationInfo(from: Data(globalData.inlineValidationData.utf8)),
+                  validationInfoMatchesAsset(info) else {
+                throw PDMError(code: 107, message: "Declared inline validation is invalid or does not match asset size")
+            }
+            validationInfo = info
             activeValidationURL = "inline"
             progressHandler?(.downloadAssetValidation, 1.0)
             await moveToNextState()
@@ -795,6 +866,9 @@ class PDMWorkflowManager {
         }
 
         guard !globalData.validationURLs.isEmpty else {
+            guard !globalData.hasDeclaredValidation else {
+                throw PDMError(code: 107, message: "Declared validation source is empty")
+            }
             await moveToNextState()
             return
         }
@@ -802,10 +876,12 @@ class PDMWorkflowManager {
         progressHandler?(.downloadAssetValidation, 0)
 
         for validationURL in globalData.validationURLs {
+            try await checkCancellation()
             let validationData: Data
             do {
                 validationData = try await downloadValidationData(from: validationURL, headers: headers)
             } catch {
+                try await checkCancellation()
                 continue
             }
 
@@ -814,8 +890,9 @@ class PDMWorkflowManager {
                 continue
             }
 
-            try validationData.write(to: validationFile)
+            validationInfo = info
             activeValidationURL = validationURL
+            globalData.validationURL = validationURL
 
             progressHandler?(.downloadAssetValidation, 1.0)
             await moveToNextState()
@@ -830,15 +907,12 @@ class PDMWorkflowManager {
             throw PDMError.validationDownloadFailed
         }
 
-        var request = URLRequest(url: url)
-        request.httpMethod = "GET"
-        request.timeoutInterval = NetworkConstants.downloadTimeout
-        headers.forEach { request.setValue($0.value, forHTTPHeaderField: $0.key) }
-
-        let (data, response) = try await URLSession.shared.data(for: request)
-        guard let httpResponse = response as? HTTPURLResponse,
-              (200...299).contains(httpResponse.statusCode),
-              !data.isEmpty else {
+        let response = try await PDMHttpCommunicator(cancellation: requestCancellation).sendRequest(PDMHTTPRequestConfig(
+            url: url.absoluteString, headers: headers.map { ($0.key, $0.value) },
+            timeoutSeconds: NetworkConstants.downloadTimeout
+        ))
+        let data = response.data
+        guard response.isSuccess, !data.isEmpty else {
             throw PDMError.validationDownloadFailed
         }
 
@@ -854,29 +928,26 @@ class PDMWorkflowManager {
 
     private func validationInfoMatchesAsset(_ info: ValidationInfo) -> Bool {
         let totalSize = validationTotalSize(info)
-        return globalData.totalSize <= 0 || totalSize <= 0 || totalSize == globalData.totalSize
+        return totalSize > 0 && (globalData.totalSize <= 0 || totalSize == globalData.totalSize)
     }
 
     private func handleAssetValidationParsing() async throws {
         progressHandler?(.parseAssetValidation, 0)
 
-        let validationFile = globalData.tempDirectory.appendingPathComponent("validation.xml")
+        if globalData.hasDeclaredValidation, validationInfo == nil {
+            throw PDMError(code: 107, message: "Declared validation could not be parsed")
+        }
 
-        if FileManager.default.fileExists(atPath: validationFile.path),
-           let xmlString = try? String(contentsOf: validationFile, encoding: .utf8) {
-            validationInfo = ValidationInfo.parse(from: xmlString)
-
-            if globalData.downloadFileName.isEmpty, let info = validationInfo {
+        if let info = validationInfo {
+            let totalSize = validationTotalSize(info)
+            guard totalSize > 0, validationInfoMatchesAsset(info) else {
+                throw PDMError(code: 107, message: "Validation size does not match asset size")
+            }
+            if globalData.downloadFileName.isEmpty {
                 globalData.downloadFileName = "asset_\(info.packageHashKey.prefix(8)).zip"
             }
-
-            if let info = validationInfo {
-                let totalSize = validationTotalSize(info)
-                if globalData.totalSize <= 0 {
-                    globalData.totalSize = totalSize
-                } else if totalSize > 0, totalSize != globalData.totalSize {
-                    throw PDMError(code: 107, message: "Validation size does not match asset size")
-                }
+            if globalData.totalSize <= 0 {
+                globalData.totalSize = totalSize
             }
         }
 
@@ -885,8 +956,14 @@ class PDMWorkflowManager {
     }
 
     private func validationTotalSize(_ info: ValidationInfo) -> Int64 {
-        let lastSegmentSize = info.lastSegmentSize > 0 ? info.lastSegmentSize : info.segmentSize
-        return Int64(max(0, info.segmentCount - 1)) * info.segmentSize + lastSegmentSize
+        guard info.segmentCount > 0, info.segmentSize > 0,
+              info.lastSegmentSize > 0, info.lastSegmentSize <= info.segmentSize else {
+            return 0
+        }
+        let precedingSize = Int64(info.segmentCount - 1).multipliedReportingOverflow(by: info.segmentSize)
+        guard !precedingSize.overflow else { return 0 }
+        let totalSize = precedingSize.partialValue.addingReportingOverflow(info.lastSegmentSize)
+        return totalSize.overflow ? 0 : totalSize.partialValue
     }
 
     private func handleCheckDownloadedBits(destinationDirectory: URL) async throws {
@@ -896,18 +973,28 @@ class PDMWorkflowManager {
             let filePath = outputAssetURL ?? destinationDirectory.appendingPathComponent(globalData.downloadFileName)
             destinationURL = filePath
 
-            if FileManager.default.fileExists(atPath: filePath.path) {
-                let attrs = try? FileManager.default.attributesOfItem(atPath: filePath.path)
-                let existingSize = (attrs?[.size] as? NSNumber)?.int64Value ?? 0
-
-                if existingSize == globalData.totalSize,
-                   globalData.totalSize > 0,
-                   isExistingAssetReusable(filePath) {
-                    progressHandler?(.checkDownloadedBits, 1.0)
-                    downloadedAssetURL = filePath
-                    currentState = .assetSignatureValidation
-                    return
+            do {
+                let existingSize = try await PDMDownloadIO.validate { [self] in
+                    try DownloadArtifactStore.verify(
+                        fileURL: filePath,
+                        identity: artifactIdentity(for: filePath),
+                        expectedSize: globalData.totalSize,
+                        metadataDirectory: assetMetadataDirectory,
+                        validationInfo: validationInfo,
+                        allowLegacy: false,
+                        cancellationCheck: { !self.isRunning }
+                    )
                 }
+                try await checkCancellation()
+                globalData.totalSize = existingSize
+                progressHandler?(.checkDownloadedBits, 1.0)
+                downloadedAssetURL = filePath
+                currentState = .assetSignatureValidation
+                return
+            } catch is CancellationError {
+                throw CancellationError()
+            } catch {
+                try await checkCancellation()
             }
         }
 
@@ -915,12 +1002,13 @@ class PDMWorkflowManager {
         await moveToNextState()
     }
 
-    private func isExistingAssetReusable(_ fileURL: URL) -> Bool {
-        guard let validationInfo, globalData.totalSize > 0 else {
-            return true
-        }
-
-        return (try? SignatureValidator.validateWithSegments(fileURL: fileURL, validationInfo: validationInfo)) == true
+    private func artifactIdentity(for fileURL: URL) -> DownloadArtifactStore.Identity {
+        if let expectedArtifactIdentity { return expectedArtifactIdentity }
+        return DownloadArtifactStore.Identity(
+            name: fileURL.lastPathComponent,
+            source: globalData.manifestURL.isEmpty ? globalData.downloadURL : globalData.manifestURL,
+            hashKey: validationInfo?.packageHashKey ?? ""
+        )
     }
 
     private func handleStartOverlappedExtraction(destinationDirectory: URL) async throws {
@@ -938,7 +1026,7 @@ class PDMWorkflowManager {
             await moveToNextState()
             return
         }
-        let assetURL = destinationDirectory.appendingPathComponent(fileName)
+        let assetURL = outputAssetURL ?? destinationDirectory.appendingPathComponent(fileName)
         let extractRoot = globalData.tempDirectory
             .appendingPathComponent("PDMExtract-\(UUID().uuidString)", isDirectory: true)
 
@@ -956,7 +1044,8 @@ class PDMWorkflowManager {
                     allowOverlap: true
                 ),
                 progressHandler: { [weak self] progress in
-                    self?.progressHandler?(.startOverlappedExtraction, progress)
+                    guard let self, self.isRunning else { return }
+                    self.progressHandler?(.startOverlappedExtraction, progress)
                 },
                 cancellationCheck: { [weak self] in
                     !(self?.isRunning ?? false)
@@ -985,6 +1074,8 @@ class PDMWorkflowManager {
         progressHandler?(.downloadAssetBits, 0)
 
         let effectivePackageIdentifier = packageIdentifier ?? "PDM_\(fileName)"
+        try registerActiveDownload(effectivePackageIdentifier)
+        defer { clearActiveDownload() }
 
         let result = await PDMDownloadEngine.shared.downloadFile(
             packageId: effectivePackageIdentifier,
@@ -995,22 +1086,27 @@ class PDMWorkflowManager {
             expectedTotalSize: globalData.totalSize,
             validationURL: globalData.validationURL.isEmpty ? nil : globalData.validationURL,
             validationURLs: globalData.validationURLs,
-            progressHandler: { [weak self] downloaded, total, speed in
+            validationInfo: validationInfo,
+            artifactIdentity: artifactIdentity(for: filePath),
+            progressHandler: { [weak self] downloaded, total, speed, phase in
+                guard let self, self.isRunning else { return }
                 let progress = total > 0 ? Double(downloaded) / Double(total) : 0
                 if total > 0 {
-                    self?.globalData.totalSize = total
+                    self.globalData.totalSize = total
                 }
-                self?.downloadProgressHandler?(downloaded, total, speed)
-                self?.progressHandler?(.downloadAssetBits, progress)
+                self.downloadProgressHandler?(downloaded, total, speed, phase)
+                self.progressHandler?(.downloadAssetBits, progress)
             },
             rangeAvailabilityHandler: { [weak self] upperBound, isComplete in
-                self?.overlappedExtractor?.updateAvailableBytes(upperBound)
+                guard let self, self.isRunning else { return }
+                self.overlappedExtractor?.updateAvailableBytes(upperBound)
                 if isComplete {
-                    self?.overlappedExtractor?.completeDownload(totalSize: self?.globalData.totalSize ?? 0)
+                    self.overlappedExtractor?.completeDownload(totalSize: self.globalData.totalSize)
                 }
             }
         )
 
+        try await checkCancellation()
         switch result {
         case .completed:
             break
@@ -1075,9 +1171,18 @@ class PDMWorkflowManager {
         await moveToNextState()
     }
 
+    private func firstMismatchedSegment(_ assetURL: URL, info: ValidationInfo) async throws -> Int? {
+        try await checkCancellation()
+        let mismatch = try await PDMDownloadIO.validate {
+            try SignatureValidator.firstMismatchedSegment(fileURL: assetURL, validationInfo: info)
+        }
+        try await checkCancellation()
+        return mismatch
+    }
+
     private func validateAssetSegments(_ assetURL: URL, headers: [String: String]) async throws {
         if let validationInfo,
-           try SignatureValidator.firstMismatchedSegment(fileURL: assetURL, validationInfo: validationInfo) == nil {
+           try await firstMismatchedSegment(assetURL, info: validationInfo) == nil {
             return
         }
 
@@ -1086,13 +1191,20 @@ class PDMWorkflowManager {
         let candidateURLs = globalData.validationURLs.filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
 
         for validationURL in candidateURLs where validationURL != activeValidationURL {
-            guard let data = try? await downloadValidationData(from: validationURL, headers: headers),
-                  let info = validationInfo(from: data),
+            try await checkCancellation()
+            let data: Data
+            do {
+                data = try await downloadValidationData(from: validationURL, headers: headers)
+            } catch {
+                try await checkCancellation()
+                continue
+            }
+            guard let info = validationInfo(from: data),
                   validationInfoMatchesAsset(info) else {
                 continue
             }
 
-            let mismatchSegment = try SignatureValidator.firstMismatchedSegment(fileURL: assetURL, validationInfo: info)
+            let mismatchSegment = try await firstMismatchedSegment(assetURL, info: info)
             if mismatchSegment == nil {
                 validationInfo = info
                 activeValidationURL = validationURL
@@ -1107,7 +1219,7 @@ class PDMWorkflowManager {
         }
 
         if firstMismatchSegment == nil, let validationInfo {
-            firstMismatchSegment = try SignatureValidator.firstMismatchedSegment(fileURL: assetURL, validationInfo: validationInfo)
+            firstMismatchSegment = try await firstMismatchedSegment(assetURL, info: validationInfo)
         }
 
         let validationLabel = firstValidationURL.isEmpty ? "unknown validation" : firstValidationURL
@@ -1122,16 +1234,31 @@ class PDMWorkflowManager {
             throw PDMError.signatureValidationFailed(reason: "downloaded asset is missing")
         }
 
-        if validationInfo != nil, globalData.totalSize > 0 {
+        if globalData.hasDeclaredValidation, validationInfo == nil {
+            throw PDMError.signatureValidationFailed(reason: "declared validation is missing")
+        }
+        if validationInfo != nil {
             try await validateAssetSegments(assetURL, headers: headers)
         }
 
         if shouldValidateCodeSignature(assetURL) {
-            guard SignatureValidator.verifyCodeSignature(at: assetURL) else {
+            guard try await PDMDownloadIO.validate({ SignatureValidator.verifyCodeSignature(at: assetURL) }) else {
                 throw PDMError.signatureValidationFailed(reason: "code signature verification failed for \(assetURL.lastPathComponent)")
             }
         }
 
+        try await checkCancellation()
+        try await PDMDownloadIO.validate { [self] in
+            try DownloadArtifactStore.recordCompletion(
+                fileURL: assetURL,
+                identity: artifactIdentity(for: assetURL),
+                expectedSize: globalData.totalSize,
+                metadataDirectory: assetMetadataDirectory,
+                validationInfo: validationInfo,
+                cancellationCheck: { [weak self] in !(self?.isRunning ?? false) }
+            )
+        }
+        try await checkCancellation()
         progressHandler?(.assetSignatureValidation, 1.0)
         await moveToNextState()
     }
@@ -1168,7 +1295,8 @@ class PDMWorkflowManager {
                     allowOverlap: false
                 ),
                 progressHandler: { [weak self] progress in
-                    self?.progressHandler?(.executeAsset, progress)
+                    guard let self, self.isRunning else { return }
+                    self.progressHandler?(.executeAsset, progress)
                 },
                 cancellationCheck: { [weak self] in !(self?.isRunning ?? false) }
             )
@@ -1220,10 +1348,81 @@ class PDMWorkflowManager {
         currentState = nextState
     }
 
+    private func beginExecution() throws {
+        lifecycleLock.lock()
+        defer { lifecycleLock.unlock() }
+        guard !executionInProgress else {
+            throw PDMError(code: 119, message: "A download workflow is already running")
+        }
+        executionInProgress = true
+        requestCancellation = PDMTransferCancellation()
+        cancellationRequested = false
+        completionCommitted = false
+        activeDownloadIdentifier = nil
+    }
+
+    private func commitCompletion() throws {
+        lifecycleLock.lock()
+        defer { lifecycleLock.unlock() }
+        guard executionInProgress, !cancellationRequested, !Task.isCancelled else {
+            throw NetworkError.cancelled
+        }
+        completionCommitted = true
+    }
+
+    private func finishExecution() {
+        lifecycleLock.lock()
+        executionInProgress = false
+        activeDownloadIdentifier = nil
+        lifecycleLock.unlock()
+    }
+
+    private func checkCancellation() async throws {
+        guard isRunning, !Task.isCancelled else {
+            throw NetworkError.cancelled
+        }
+        if let cancellationCheck, await cancellationCheck() {
+            cancel()
+            throw NetworkError.cancelled
+        }
+        guard isRunning, !Task.isCancelled else {
+            throw NetworkError.cancelled
+        }
+    }
+
+    private func registerActiveDownload(_ identifier: String) throws {
+        lifecycleLock.lock()
+        defer { lifecycleLock.unlock() }
+        guard executionInProgress, !cancellationRequested else {
+            throw NetworkError.cancelled
+        }
+        activeDownloadIdentifier = identifier
+    }
+
+    private func clearActiveDownload() {
+        lifecycleLock.lock()
+        activeDownloadIdentifier = nil
+        lifecycleLock.unlock()
+    }
+
     func cancel() {
-        isRunning = false
-        overlappedExtractor?.cancel()
-        overlappedExtractionTask?.cancel()
+        lifecycleLock.lock()
+        guard executionInProgress, !completionCommitted else {
+            lifecycleLock.unlock()
+            return
+        }
+        cancellationRequested = true
+        let downloadIdentifier = activeDownloadIdentifier
+        let requests = requestCancellation
+        let extractor = activeExtractor
+        let extractionTask = activeExtractionTask
+        lifecycleLock.unlock()
+        requests.cancel()
+        if let downloadIdentifier {
+            PDMDownloadEngine.shared.cancelDownload(packageId: downloadIdentifier)
+        }
+        extractor?.cancel()
+        extractionTask?.cancel()
     }
 }
 

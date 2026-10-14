@@ -13,6 +13,8 @@ class HDPIMRIBSHelper {
     private static let ribsDBPath = URL(fileURLWithPath: HDPIMRuntimeEnvironment.userHomeDirectory())
         .appendingPathComponent("Library/Application Support/Adobe/AAMUpdater/Installers/RIBSCoExist")
 
+    static var storageDirectory: URL { ribsDBPath }
+
     static func addRIBSDependency(
         ribsCode: String,
         sapCode: String,
