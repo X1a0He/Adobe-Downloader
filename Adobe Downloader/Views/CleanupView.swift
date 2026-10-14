@@ -249,7 +249,14 @@ final class CleanupViewModel: ObservableObject {
                         self.cleanupLogs[index] = CleanupLog(timestamp: Date(), command: item.debugSummary, status: .cancelled, message: String(localized: "已取消"))
                     } else {
                         let isSuccess = self.isExecutionSuccess(output)
-                        let message = isSuccess ? String(localized: "执行成功") : self.failureMessage(for: item, output: output)
+                        let message: String
+                        if !isSuccess {
+                            message = self.failureMessage(for: item, output: output)
+                        } else if item.kind == .hosts {
+                            message = output.trimmingCharacters(in: .whitespacesAndNewlines)
+                        } else {
+                            message = String(localized: "执行成功")
+                        }
                         self.cleanupLogs[index] = CleanupLog(timestamp: Date(), command: item.debugSummary, status: isSuccess ? .success : .error, message: message)
                     }
                 }

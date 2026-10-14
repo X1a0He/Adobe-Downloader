@@ -858,14 +858,58 @@ enum CleanupOption: String, CaseIterable, Identifiable {
             ]
         case .adobeHosts:
             return [
-                .shell(self, "/bin/sh -c '/usr/bin/grep -vi \"adobe\" /etc/hosts | /usr/bin/grep -vi \"hstatic.io\" > /etc/hosts.adobe-downloader.tmp && /bin/mv /etc/hosts.adobe-downloader.tmp /etc/hosts'", "清理 hosts Adobe 条目", kind: .hosts)
-          ]
+                .shell(self, Self.hostsCleanupCommand, "清理 hosts Adobe 条目", kind: .hosts)
+            ]
         case .c4dRedGiant:
             return Self.safeC4DProcessNames.map {
                 .shell(self, "/usr/bin/killall -9 \"\($0)\" 2>/dev/null || true", "终止 \($0)", kind: .process)
             } + Self.c4dPathTargets(for: self)
         }
     }
+
+    private static let hostsCleanupCommand = #"""
+    set -eu
+    hosts_path=/etc/hosts
+    if [ -L "$hosts_path" ] || [ ! -f "$hosts_path" ]; then
+        echo "Hosts 清理失败：目标必须是普通文件，且不能是符号链接" >&2
+        exit 1
+    fi
+
+    match_status=0
+    /usr/bin/grep -i -e 'adobe' -e 'hstatic.io' "$hosts_path" >/dev/null || match_status=$?
+    case "$match_status" in
+        0) ;;
+        1) echo "未发现需要清理的 Hosts 条目"; exit 0 ;;
+        *) exit "$match_status" ;;
+    esac
+
+    backup_dir=$(/usr/bin/mktemp -d /private/etc/.hosts-cleanup.XXXXXXXX)
+    trap 'result=$?; if [ "$result" -ne 0 ]; then printf "Hosts 清理失败，恢复文件目录：%s\n" "$backup_dir" >&2; fi' EXIT
+    backup_path="$backup_dir/hosts.original"
+    staged_path="$backup_dir/hosts.cleaned"
+    /bin/cp -p "$hosts_path" "$backup_path"
+    /bin/cp -p "$backup_path" "$staged_path"
+
+    filter_status=0
+    /usr/bin/grep -iv -e 'adobe' -e 'hstatic.io' "$backup_path" > "$staged_path" || filter_status=$?
+    if [ "$filter_status" -gt 1 ]; then
+        exit "$filter_status"
+    fi
+
+    if [ -L "$hosts_path" ] || ! /usr/bin/cmp -s "$hosts_path" "$backup_path"; then
+        echo "Hosts 文件在清理期间发生变化或无法读取，已保留原文件，请重试" >&2
+        exit 1
+    fi
+    /bin/mv -f "$staged_path" "$hosts_path"
+
+    verify_status=0
+    /usr/bin/grep -i -e 'adobe' -e 'hstatic.io' "$hosts_path" >/dev/null || verify_status=$?
+    if [ "$verify_status" -ne 1 ]; then
+        echo "Hosts 清理后的内容核验失败，请检查恢复文件" >&2
+        exit 1
+    fi
+    printf "Hosts 清理完成，原文件备份：%s\n" "$backup_path"
+    """#
 
     private static let unsafeProcessNames = [
         "node",
