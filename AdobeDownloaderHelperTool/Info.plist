@@ -12,7 +12,7 @@
 	<string>$(MARKETING_VERSION)</string>
 	<key>SMAuthorizedClients</key>
 	<array>
-		<string>identifier "com.x1a0he.macOS.Adobe-Downloader" and anchor apple generic and certificate leaf[subject.CN] = "Apple Development: x1a0he@outlook.com (LFN2762T4F)" and certificate 1[field.1.2.840.113635.100.6.2.1] /* exists */</string>
+		<string>identifier "com.x1a0he.macOS.Adobe-Downloader" and anchor apple generic and certificate leaf[subject.OU] = "$(DEVELOPMENT_TEAM)"</string>
 	</array>
 	<key>MachServices</key>
 	<dict>

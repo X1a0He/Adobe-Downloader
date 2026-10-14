@@ -28,7 +28,7 @@ struct QAView: View {
 
                     QAItem(
                         question: String(localized: "Helper 无法安装或显示未安装怎么办？"),
-                        answer: String(localized: "请按以下步骤处理：\n1. 在 Helper 设置中点击「重新启用」\n2. 前往系统设置 → 登录项与扩展\n3. 找到 Adobe Downloader.app 并打开开关\n4. 重启 Adobe Downloader\n5. 再次点击「重新启用」或「重新连接」")
+                        answer: String(localized: "请先在 Helper 设置查看具体状态。尚未注册时点击「启用 Helper」；等待授权时点击「打开后台项目」，在系统设置 → 通用 → 登录项与扩展的后台活动区域允许 Adobe Downloader。返回 App 后自动检查，无需重启。列表中没有条目时，请检查文件、签名或注册错误，并复制诊断信息。")
                     )
 
                     QAItem(

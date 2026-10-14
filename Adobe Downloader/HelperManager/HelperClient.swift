@@ -6,48 +6,64 @@ final class HelperClient {
     private var connection: NSXPCConnection?
     private let queue = DispatchQueue(label: "com.helper.client")
 
+    private var connectionID: UUID?
+
     func connect() throws -> NSXPCConnection {
-        try queue.sync {
-            if let existing = connection {
-                return existing
-            }
+        try queue.sync { try connectOnQueue() }
+    }
 
-            let newConnection = NSXPCConnection(
-                machServiceName: Self.machServiceName,
-                options: .privileged
-            )
-
-            let interface = NSXPCInterface(with: HelperXPCProtocol.self)
-            newConnection.remoteObjectInterface = interface
-
-            newConnection.invalidationHandler = { [weak self] in
-                self?.queue.async {
-                    self?.connection = nil
+    /// 前台状态检查使用独立连接，探测超时不影响正在执行安装或清理的业务连接。
+    func checkConnection() async throws {
+        try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<Void, Error>) in
+            DispatchQueue.global(qos: .utility).async {
+                let probeConnection = NSXPCConnection(machServiceName: Self.machServiceName, options: .privileged)
+                probeConnection.remoteObjectInterface = NSXPCInterface(with: HelperXPCProtocol.self)
+                probeConnection.resume()
+                defer { probeConnection.invalidate() }
+                do {
+                    try self.verifyConnection(probeConnection)
+                    continuation.resume()
+                } catch {
+                    continuation.resume(throwing: error)
                 }
             }
-
-            newConnection.interruptionHandler = { [weak self] in
-                self?.queue.async {
-                    self?.connection = nil
-                }
-            }
-
-            newConnection.resume()
-
-            guard try verifyConnection(newConnection) else {
-                newConnection.invalidate()
-                throw HelperError.connectionFailed
-            }
-
-            connection = newConnection
-            return newConnection
         }
+    }
+
+    private func connectOnQueue() throws -> NSXPCConnection {
+        if let existing = connection { return existing }
+        let newConnection = NSXPCConnection(machServiceName: Self.machServiceName, options: .privileged)
+        newConnection.remoteObjectInterface = NSXPCInterface(with: HelperXPCProtocol.self)
+        let id = UUID()
+        let invalidate: () -> Void = { [weak self] in
+            guard let self else { return }
+            self.queue.async {
+                // 旧连接的迟到回调不能清除新连接。
+                guard self.connectionID == id else { return }
+                self.connection?.invalidate()
+                self.connection = nil
+                self.connectionID = nil
+            }
+        }
+        newConnection.invalidationHandler = invalidate
+        newConnection.interruptionHandler = invalidate
+        newConnection.resume()
+        do {
+            try verifyConnection(newConnection)
+        } catch {
+            newConnection.invalidate()
+            throw error
+        }
+        connection = newConnection
+        connectionID = id
+        return newConnection
     }
 
     func disconnect() {
         queue.async {
             self.connection?.invalidate()
             self.connection = nil
+            self.connectionID = nil
         }
     }
 
@@ -190,29 +206,52 @@ final class HelperClient {
         }
     }
 
-    private func verifyConnection(_ connection: NSXPCConnection) throws -> Bool {
-        let semaphore = DispatchSemaphore(value: 0)
-        var isVerified = false
-
-        guard let proxy = connection.remoteObjectProxy as? HelperXPCProtocol else {
-            return false
+    private func verifyConnection(_ connection: NSXPCConnection) throws {
+        let reply = ConnectionProbe()
+        guard let proxy = connection.remoteObjectProxyWithErrorHandler({ error in
+            reply.finish(.failure(error))
+        }) as? HelperXPCProtocol else {
+            throw HelperError.proxyCreationFailed
         }
-
-        let testOp = HelperOperation.executeShell(command: "whoami")
-        guard let data = try? JSONEncoder().encode(testOp) else {
-            return false
-        }
-
+        let data = try JSONEncoder().encode(HelperOperation.executeShell(command: "whoami"))
         proxy.executeOperation(data) { resultData in
-            if let result = try? JSONDecoder().decode(HelperOperationResult.self, from: resultData),
-               result.success,
-               result.output.trimmingCharacters(in: .whitespacesAndNewlines) == "root" {
-                isVerified = true
+            do {
+                let result = try JSONDecoder().decode(HelperOperationResult.self, from: resultData)
+                guard result.success,
+                      result.output.trimmingCharacters(in: .whitespacesAndNewlines) == "root" else {
+                    reply.finish(.failure(HelperError.operationFailed(result.output)))
+                    return
+                }
+                reply.finish(.success(()))
+            } catch {
+                reply.finish(.failure(error))
             }
-            semaphore.signal()
         }
+        try reply.wait()
+    }
+}
 
-        _ = semaphore.wait(timeout: .now() + 3.0)
-        return isVerified
+/// XPC 失败、正常回复与超时只接受第一个结果；迟到回复不再改变已结束的检查。
+private final class ConnectionProbe {
+    private let lock = NSLock()
+    private let semaphore = DispatchSemaphore(value: 0)
+    private var result: Result<Void, Error>?
+
+    func finish(_ value: Result<Void, Error>) {
+        lock.lock()
+        guard result == nil else { lock.unlock(); return }
+        result = value
+        lock.unlock()
+        semaphore.signal()
+    }
+
+    func wait() throws {
+        if semaphore.wait(timeout: .now() + 3) == .timedOut {
+            finish(.failure(HelperError.connectionTimeout))
+        }
+        lock.lock()
+        let value = result
+        lock.unlock()
+        try value?.get()
     }
 }

@@ -6,14 +6,22 @@ import os.log
 final class HelperManager: ObservableObject {
     static let shared = HelperManager()
 
-    private static let machServiceName = "com.x1a0he.macOS.Adobe-Downloader.helper"
+    static let machServiceName = "com.x1a0he.macOS.Adobe-Downloader.helper"
     private static let daemonPlistName = "\(machServiceName).plist"
 
     private let client = HelperClient()
     private let logger = Logger(subsystem: "com.x1a0he.macOS.Adobe-Downloader", category: "HelperManager")
+    private var refreshTask: Task<Void, Never>?
+    private var lastError: NSError?
 
-    @Published private(set) var isInstalled = false
-    @Published private(set) var status: String = "检查中..."
+    @Published private(set) var state: HelperServiceState = .checking
+    @Published private(set) var isBusy = false
+    @Published private(set) var legacyPaths: [String] = []
+    @Published private(set) var migrationReport = ""
+    @Published private(set) var errorDetails = ""
+
+    var isInstalled: Bool { state == .enabled }
+    var status: String { [state.guidance, errorDetails].filter { !$0.isEmpty }.joined(separator: "\n") }
 
     private init() {}
 
@@ -21,184 +29,245 @@ final class HelperManager: ObservableObject {
         SMAppService.daemon(plistName: Self.daemonPlistName)
     }
 
-    func checkStatus() async {
-        status = "检查中..."
+    var diagnostics: String {
+        """
+        macOS: \(ProcessInfo.processInfo.operatingSystemVersionString)
+        App: \(Bundle.main.bundleURL.path)
+        Version: \(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "unknown") (\(Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "unknown"))
+        Service: \(Self.machServiceName)
+        System status: \(service.status.rawValue)
+        State: \(state.title)
+        \(status)
+        Legacy files: \(legacyPaths.joined(separator: ", "))
+        \(migrationReport)
+        """
+    }
 
-        guard isRunningFromValidLocation() else {
-            status = "应用必须从 /Applications 运行"
-            isInstalled = false
+    /// 刷新只读取注册状态；旧版迁移只能由用户明确触发。
+    func checkStatus() async {
+        guard !isBusy else { return }
+        if let refreshTask {
+            await refreshTask.value
+            return
+        }
+        let task = Task { await self.refreshStatus() }
+        refreshTask = task
+        await task.value
+        refreshTask = nil
+    }
+
+    private func refreshStatus() async {
+        legacyPaths = HelperLegacyMigration.existingPaths
+        if !legacyPaths.isEmpty {
+            state = .legacyDetected
+            return
+        }
+        if let issue = bundleIssue() {
+            state = .invalidBundle
+            errorDetails = issue
             return
         }
 
-        await checkAndMigrateLegacyHelper()
-
         switch service.status {
         case .enabled:
-            let canConnect = await testConnection()
-            isInstalled = canConnect
-            status = canConnect ? "已启用" : "服务异常，需要重装"
-
+            do {
+                try await client.checkConnection()
+                clearError()
+                state = .enabled
+                saveInstalledVersion()
+            } catch {
+                record(error)
+                state = .connectionFailed
+            }
         case .requiresApproval:
-            status = "需要在系统设置中授权"
-            isInstalled = false
-
-        case .notRegistered, .notFound:
-            status = "未安装"
-            isInstalled = false
-
+            state = .requiresApproval
+        case .notRegistered:
+            // 失败原因在用户返回系统设置或界面刷新时仍需可见。
+            state = lastError.map(classifyRegistrationError) ?? .notRegistered
+        case .notFound:
+            state = lastError.map(classifyRegistrationError) ?? .notFound
         @unknown default:
-            status = "未知状态"
-            isInstalled = false
+            state = .registrationFailed
         }
     }
 
     func install() async throws {
-        guard isRunningFromValidLocation() else {
-            throw HelperError.operationFailed("应用必须从 /Applications 运行")
+        guard !isBusy else { throw HelperError.operationFailed(String(localized: "Helper 正在处理其他操作，请稍后重试。")) }
+        isBusy = true
+        defer { isBusy = false }
+        await refreshTask?.value
+        try await registerService()
+    }
+
+    private func registerService() async throws {
+        clearError()
+        legacyPaths = HelperLegacyMigration.existingPaths
+        guard legacyPaths.isEmpty else {
+            state = .legacyDetected
+            throw HelperError.operationFailed(state.guidance)
         }
-
-        try service.register()
-
+        if let issue = bundleIssue() {
+            state = .invalidBundle
+            errorDetails = issue
+            throw HelperError.operationFailed(status)
+        }
+        // 等待授权时重复注销、注册并不能替用户打开系统开关。
         if service.status == .requiresApproval {
-            SMAppService.openSystemSettingsLoginItems()
-            status = "请在系统设置中授权"
-            throw HelperError.notAuthorized
+            state = .requiresApproval
+            openBackgroundSettings()
+            return
         }
-
-        await checkStatus()
-
-        if !isInstalled {
-            throw HelperError.installationFailed("安装后验证失败")
+        if service.status != .enabled {
+            do {
+                try service.register()
+            } catch {
+                record(error)
+                let failure = classifyRegistrationError(error as NSError)
+                if service.status == .requiresApproval || failure == .requiresApproval {
+                    state = .requiresApproval
+                    openBackgroundSettings()
+                    return
+                }
+                if !isServiceError(error as NSError, code: kSMErrorAlreadyRegistered) {
+                    state = failure
+                    throw error
+                }
+            }
         }
-
-        saveInstalledVersion()
+        await refreshStatus()
+        if state == .requiresApproval {
+            openBackgroundSettings()
+        } else if !isInstalled {
+            throw HelperError.installationFailed(status)
+        }
     }
 
     func uninstall() async throws {
-        try await service.unregister()
+        guard !isBusy else { throw HelperError.operationFailed(String(localized: "Helper 正在处理其他操作，请稍后重试。")) }
+        isBusy = true
+        defer { isBusy = false }
+        await refreshTask?.value
+        try await unregisterService()
+        await refreshStatus()
+    }
+
+    private func unregisterService() async throws {
+        do {
+            try await service.unregister()
+        } catch {
+            if !isServiceError(error as NSError, code: kSMErrorJobNotFound) {
+                record(error)
+                state = .registrationFailed
+                throw error
+            }
+        }
         client.disconnect()
-        clearInstalledVersion()
-        await checkStatus()
+        UserDefaults.standard.removeObject(forKey: "InstalledHelperVersion")
+        clearError()
     }
 
     func reinstall() async throws {
-        do {
-            try await uninstall()
-        } catch {
-            logger.warning("卸载时出现错误: \(error.localizedDescription)")
+        guard !isBusy else { throw HelperError.operationFailed(String(localized: "Helper 正在处理其他操作，请稍后重试。")) }
+        isBusy = true
+        defer { isBusy = false }
+        await refreshTask?.value
+        if service.status == .requiresApproval {
+            state = .requiresApproval
+            openBackgroundSettings()
+            return
         }
+        try await unregisterService()
+        try await registerService()
+    }
 
-        try await Task.sleep(nanoseconds: 1_000_000_000)
+    func reconnect() async {
+        guard !isBusy else { return }
+        isBusy = true
+        defer { isBusy = false }
+        await refreshTask?.value
+        client.disconnect()
+        await refreshStatus()
+    }
 
-        try await install()
+    func migrateLegacyHelper() async throws {
+        guard !isBusy else { throw HelperError.operationFailed(String(localized: "Helper 正在处理其他操作，请稍后重试。")) }
+        isBusy = true
+        defer { isBusy = false }
+        await refreshTask?.value
+        do {
+            migrationReport = try await HelperLegacyMigration.migrate()
+        } catch {
+            record(error)
+            legacyPaths = HelperLegacyMigration.existingPaths
+            state = legacyPaths.isEmpty ? .registrationFailed : .legacyDetected
+            throw error
+        }
+        client.disconnect()
+        try await registerService()
+    }
+
+    func openBackgroundSettings() {
+        SMAppService.openSystemSettingsLoginItems()
     }
 
     func getClient() throws -> HelperClient {
-        guard isInstalled else {
-            throw HelperError.notInstalled
-        }
+        guard isInstalled else { throw HelperError.operationFailed(status) }
         return client
     }
 
-    private func testConnection() async -> Bool {
+    private func classifyRegistrationError(_ error: NSError) -> HelperServiceState {
+        if isServiceError(error, code: kSMErrorLaunchDeniedByUser) { return .requiresApproval }
+        if isServiceError(error, code: kSMErrorInvalidSignature) { return .invalidSignature }
+        if isServiceError(error, code: kSMErrorInvalidPlist) || isServiceError(error, code: kSMErrorToolNotValid) || isServiceError(error, code: kSMErrorJobPlistNotFound) {
+            return .invalidBundle
+        }
+        return .registrationFailed
+    }
+
+    private func isServiceError(_ error: NSError, code: Int) -> Bool {
+        error.domain == (kSMErrorDomainFramework as String) && error.code == code
+    }
+
+    private func record(_ error: Error) {
+        let error = error as NSError
+        lastError = error
+        errorDetails = "\(error.localizedDescription) [\(error.domain):\(error.code)]"
+        if let underlying = error.userInfo[NSUnderlyingErrorKey] as? NSError {
+            errorDetails += "\n\(underlying.localizedDescription) [\(underlying.domain):\(underlying.code)]"
+        }
+        logger.error("Helper: \(self.errorDetails, privacy: .public)")
+    }
+
+    private func clearError() {
+        lastError = nil
+        errorDetails = ""
+    }
+
+    private func bundleIssue() -> String? {
+        let bundle = Bundle.main.bundleURL.resolvingSymlinksInPath()
+        let plistURL = bundle.appendingPathComponent("Contents/Library/LaunchDaemons/\(Self.daemonPlistName)")
         do {
-            let conn = try client.connect()
-            return conn.remoteObjectProxy != nil
+            let data = try Data(contentsOf: plistURL)
+            guard let plist = try PropertyListSerialization.propertyList(from: data, options: [], format: nil) as? [String: Any],
+                  plist["Label"] as? String == Self.machServiceName,
+                  let program = plist["BundleProgram"] as? String,
+                  !program.hasPrefix("/"),
+                  (plist["MachServices"] as? [String: Bool])?[Self.machServiceName] == true else {
+                return String(localized: "Helper 服务配置不完整，请重新下载完整应用。") + "\n\(plistURL.path)"
+            }
+            let helper = bundle.appendingPathComponent(program).resolvingSymlinksInPath()
+            guard helper.path.hasPrefix(bundle.path + "/"), FileManager.default.isExecutableFile(atPath: helper.path) else {
+                return String(localized: "Helper 可执行文件缺失或不在当前 App 内。") + "\n\(helper.path)"
+            }
+            return nil
         } catch {
-            return false
+            return "\(plistURL.path)\n\(error.localizedDescription)"
         }
-    }
-
-    private func isRunningFromValidLocation() -> Bool {
-        if isHelperProgramInsideCurrentBundle() {
-            return true
-        }
-
-        #if DEBUG
-        return true
-        #else
-        let bundlePath = Bundle.main.bundleURL.resolvingSymlinksInPath().path
-        return bundlePath.hasPrefix("/Applications/")
-        #endif
-    }
-
-    private func isHelperProgramInsideCurrentBundle() -> Bool {
-        let plistURL = Bundle.main.bundleURL
-            .appendingPathComponent("Contents/Library/LaunchDaemons")
-            .appendingPathComponent(Self.daemonPlistName)
-
-        guard let data = try? Data(contentsOf: plistURL),
-              let plist = try? PropertyListSerialization.propertyList(from: data, options: [], format: nil) as? [String: Any],
-              let programPath = plist["Program"] as? String else {
-            return false
-        }
-
-        let bundlePath = Bundle.main.bundleURL.resolvingSymlinksInPath().path
-        let helperPath = URL(fileURLWithPath: programPath).resolvingSymlinksInPath().path
-        return helperPath.hasPrefix(bundlePath + "/")
     }
 
     private func saveInstalledVersion() {
         if let version = Bundle.main.infoDictionary?["CFBundleVersion"] as? String {
             UserDefaults.standard.set(version, forKey: "InstalledHelperVersion")
-        }
-    }
-
-    private func clearInstalledVersion() {
-        UserDefaults.standard.removeObject(forKey: "InstalledHelperVersion")
-    }
-
-    private func checkAndMigrateLegacyHelper() async {
-        let legacyPlist = "/Library/LaunchDaemons/\(Self.machServiceName).plist"
-        let legacyHelper = "/Library/PrivilegedHelperTools/\(Self.machServiceName)"
-
-        guard FileManager.default.fileExists(atPath: legacyPlist) ||
-              FileManager.default.fileExists(atPath: legacyHelper) else {
-            return
-        }
-
-        logger.notice("检测到旧版 Helper，尝试清理")
-
-        let script = """
-        #!/bin/bash
-        sudo /bin/launchctl unload \(legacyPlist) 2>/dev/null || true
-        sudo /bin/rm -f \(legacyPlist) || true
-        sudo /bin/rm -f \(legacyHelper) || true
-        sudo /usr/bin/killall -9 \(Self.machServiceName) 2>/dev/null || true
-        exit 0
-        """
-
-        do {
-            try await executeSudoScript(script)
-            logger.notice("旧版 Helper 已清理")
-        } catch {
-            logger.error("清理旧版 Helper 失败: \(error.localizedDescription)")
-        }
-    }
-
-    private func executeSudoScript(_ script: String) async throws {
-        let tempDir = FileManager.default.temporaryDirectory
-        let scriptURL = tempDir.appendingPathComponent("helper_migration_\(UUID().uuidString).sh")
-
-        try script.write(to: scriptURL, atomically: true, encoding: .utf8)
-        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: scriptURL.path)
-
-        defer {
-            try? FileManager.default.removeItem(at: scriptURL)
-        }
-
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/osascript")
-        process.arguments = [
-            "-e",
-            "do shell script \"\(scriptURL.path)\" with administrator privileges"
-        ]
-
-        try process.run()
-        process.waitUntilExit()
-
-        guard process.terminationStatus == 0 else {
-            throw HelperError.operationFailed("迁移脚本执行失败")
         }
     }
 }

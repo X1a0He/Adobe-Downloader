@@ -53,19 +53,25 @@ final class OperationExecutor {
 
         do {
             try process.run()
+            let outputCapture = ShellOutputCapture()
+            let errorCapture = ShellOutputCapture()
+            let readers = DispatchGroup()
+            for (pipe, capture) in [(outputPipe, outputCapture), (errorPipe, errorCapture)] {
+                readers.enter()
+                DispatchQueue.global(qos: .utility).async {
+                    capture.read(pipe.fileHandleForReading)
+                    readers.leave()
+                }
+            }
             process.waitUntilExit()
+            readers.wait()
 
-            let outputData = outputPipe.fileHandleForReading.readDataToEndOfFile()
-            let errorData = errorPipe.fileHandleForReading.readDataToEndOfFile()
-
-            let output = String(data: outputData, encoding: .utf8) ?? ""
-            let errorOutput = String(data: errorData, encoding: .utf8) ?? ""
-
+            let output = outputCapture.text
+            let errorOutput = errorCapture.text
             if process.terminationStatus == 0 {
                 return .success(output.isEmpty ? "Success" : output)
             } else {
-                let message = errorOutput.isEmpty ? "Unknown error" : errorOutput
-                return .failure(message, exitCode: process.terminationStatus)
+                return .failure(errorOutput.isEmpty ? "Unknown error" : errorOutput, exitCode: process.terminationStatus)
             }
         } catch {
             return .failure("执行失败: \(error.localizedDescription)")
@@ -122,4 +128,15 @@ final class OperationExecutor {
 
         return .success("triggered")
     }
+}
+
+/// 每条输出管道由独立读取任务消费，调用方在 DispatchGroup 完成后读取结果。
+private final class ShellOutputCapture {
+    private var data = Data()
+
+    func read(_ handle: FileHandle) {
+        data = handle.readDataToEndOfFile()
+    }
+
+    var text: String { String(decoding: data, as: UTF8.self) }
 }

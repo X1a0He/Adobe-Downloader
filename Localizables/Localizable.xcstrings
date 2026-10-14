@@ -20,6 +20,7 @@
 
     },
     "(No logs available)" : {
+      "extractionState" : "stale",
       "localizations" : {
         "zh-Hans" : {
           "stringUnit" : {
@@ -52,21 +53,12 @@
       }
     },
     "（输出会显示在这里）" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "(Output will appear here)"
-          }
-        }
-      }
-    },
-    "[%@] %@ $ %@" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "new",
-            "value" : "[%1$@] %2$@ $ %3$@"
           }
         }
       }
@@ -721,6 +713,50 @@
         }
       }
     },
+    "15 秒" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "15 seconds"
+          }
+        }
+      }
+    },
+    "30 秒" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "30 seconds"
+          }
+        }
+      }
+    },
+    "60 秒" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "60 seconds"
+          }
+        }
+      }
+    },
+    "120 秒" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "120 seconds"
+          }
+        }
+      }
+    },
     "Acrobat 自动安装失败: %@" : {
       "localizations" : {
         "en" : {
@@ -832,6 +868,17 @@
         }
       }
     },
+    "Adobe 支持目录" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Adobe support directory"
+          }
+        }
+      }
+    },
     "Adobe 日志文件" : {
       "localizations" : {
         "en" : {
@@ -868,6 +915,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Adobe user data"
+          }
+        }
+      }
+    },
+    "Adobe 目录不存在或无法列出，不单独代表 Helper 授权失败。" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The Adobe directory is missing or cannot be listed. This alone does not indicate a Helper authorization failure."
           }
         }
       }
@@ -1068,12 +1126,34 @@
         }
       }
     },
+    "Helper 不支持当前诊断请求，请更新并重新注册 Helper。" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Helper does not support this diagnostic request. Update and re-register Helper."
+          }
+        }
+      }
+    },
     "Helper 全磁盘访问权限" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "Helper Full Disk Access"
+          }
+        }
+      }
+    },
+    "Helper 可执行文件缺失或不在当前 App 内。" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The Helper executable is missing or is outside the current app."
           }
         }
       }
@@ -1122,6 +1202,7 @@
       }
     },
     "Helper 已安装并运行中" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -1132,6 +1213,7 @@
       }
     },
     "Helper 已安装并运行中，可正常执行特权操作" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -1148,6 +1230,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Helper has been completely uninstalled"
+          }
+        }
+      }
+    },
+    "Helper 已通过连接检查，可以执行安装和卸载操作。" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The Helper connection is verified and ready for installation and uninstallation."
           }
         }
       }
@@ -1170,6 +1263,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Helper file does not exist or is damaged, please re-install the app"
+          }
+        }
+      }
+    },
+    "Helper 文件或路径异常" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Helper files or path are invalid"
           }
         }
       }
@@ -1205,7 +1309,30 @@
         }
       }
     },
+    "Helper 服务配置不完整，请重新下载完整应用。" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The Helper service configuration is incomplete. Download the complete app again."
+          }
+        }
+      }
+    },
+    "Helper 未以 root 身份执行。" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Helper did not run as root."
+          }
+        }
+      }
+    },
     "Helper 未启用，无法执行安装/清理操作" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -1216,6 +1343,7 @@
       }
     },
     "Helper 未启用，无法执行需要管理员权限的操作" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -1226,6 +1354,7 @@
       }
     },
     "Helper 未启用将导致无法执行需要管理员权限的操作" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -1236,6 +1365,7 @@
       }
     },
     "Helper 未启用或未连接，无法下载 IPCBox 和 HDBox。请先在 Helper 设置中点击「重新启用」，前往系统设置 → 登录项与扩展打开 Adobe Downloader.app，重启 App 后再点击「重新启用」或「重新连接」。" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -1246,11 +1376,23 @@
       }
     },
     "Helper 未启用或未连接，请先在设置中启用并连接 Helper" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "Helper not enabled or connected, please enable and connect Helper in Settings first"
+          }
+        }
+      }
+    },
+    "Helper 未在时限内返回结果，诊断连接已关闭。请检查 Helper 状态。" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Helper did not respond within the time limit. The diagnostic connection was closed. Check Helper status."
           }
         }
       }
@@ -1307,6 +1449,28 @@
         }
       }
     },
+    "Helper 检查完成，部分项目需要留意。" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Helper checks completed. Some items need attention."
+          }
+        }
+      }
+    },
+    "Helper 正在处理其他操作，请稍后重试。" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Another Helper operation is in progress. Please try again shortly."
+          }
+        }
+      }
+    },
     "Helper 注册失败" : {
       "extractionState" : "stale",
       "localizations" : {
@@ -1340,6 +1504,7 @@
       }
     },
     "Helper 状态异常，可能无法执行需要管理员权限的操作" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -1350,6 +1515,7 @@
       }
     },
     "Helper 状态异常，建议点击\"重新启用\"修复" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -1380,6 +1546,7 @@
       }
     },
     "Helper 负责执行特权操作；连接异常时可尝试重新启用或创建连接" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -1456,6 +1623,7 @@
       }
     },
     "id（用户/组信息）" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -1472,6 +1640,7 @@
 
     },
     "launchctl print system/...（服务状态）" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -1559,6 +1728,7 @@
       }
     },
     "sw_vers（系统版本）" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -1572,6 +1742,7 @@
 
     },
     "whoami（检查是否 root）" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -1648,6 +1819,7 @@
       }
     },
     "XPC 通道运行正常，可执行特权命令" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -1693,6 +1865,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Illegal ZIP entry path: %1$@"
+          }
+        }
+      }
+    },
+    "一键检查 Helper 是否可用" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Check whether Helper is available"
           }
         }
       }
@@ -2093,6 +2276,17 @@
         }
       }
     },
+    "仅保留本次运行最近 30 条记录；输出在命令结束后显示。" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Keep the latest 30 records for this app session. Output appears when the command ends."
+          }
+        }
+      }
+    },
     "仅最新" : {
       "extractionState" : "stale",
       "localizations" : {
@@ -2130,6 +2324,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Select a product from the product list to start downloading"
+          }
+        }
+      }
+    },
+    "以 root 身份执行非交互命令。不支持后台任务；超时或取消会终止命令进程组。" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Run non-interactive commands as root. Background tasks are not supported; timeout or cancellation terminates the command process group."
           }
         }
       }
@@ -2257,6 +2462,17 @@
         }
       }
     },
+    "停止" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Stop"
+          }
+        }
+      }
+    },
     "停止并删除 Adobe 相关服务" : {
       "localizations" : {
         "en" : {
@@ -2295,6 +2511,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Allow custom commands (high risk)"
+          }
+        }
+      }
+    },
+    "先查看上方状态：等待授权时，在后台活动区域查找 Adobe Downloader 或其开发者条目；可点信息按钮核对 App 路径。尚未注册时先点击启用；文件、签名或注册错误需先修复。手动加入“登录时打开”列表和授予完全磁盘访问都不能替代后台服务授权。" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Check the status above first. If approval is required, look for Adobe Downloader or its developer under background activity; use the info button to check the app path. If unregistered, click Enable Helper. Resolve file, signature, or registration errors first. Adding the app to Open at Login or granting Full Disk Access does not approve its background service."
           }
         }
       }
@@ -2383,11 +2610,23 @@
       }
     },
     "共 %d 字符" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "%1$d characters"
+          }
+        }
+      }
+    },
+    "共 %d 条记录" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%d records"
           }
         }
       }
@@ -2928,6 +3167,17 @@
         }
       }
     },
+    "刷新状态" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Refresh status"
+          }
+        }
+      }
+    },
     "前往 Adobe Creative Cloud" : {
       "extractionState" : "stale",
       "localizations" : {
@@ -3010,6 +3260,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Upgrade"
+          }
+        }
+      }
+    },
+    "单项检查" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Individual checks"
           }
         }
       }
@@ -3362,6 +3623,28 @@
         }
       }
     },
+    "后台服务状态" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Background service status"
+          }
+        }
+      }
+    },
+    "后台运行已获授权，但 Helper 没有正常响应。请先重新连接；仍失败时可重新注册服务。" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Background activity is approved, but the Helper did not respond correctly. Try reconnecting first; if that fails, reregister the service."
+          }
+        }
+      }
+    },
     "启动时自动检查 GitHub 新版本" : {
       "localizations" : {
         "en" : {
@@ -3372,7 +3655,19 @@
         }
       }
     },
+    "启用 Helper" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Enable Helper"
+          }
+        }
+      }
+    },
     "启用状态" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -3389,6 +3684,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Enable status: "
+          }
+        }
+      }
+    },
+    "命令不能超过 16 KiB。" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Commands must not exceed 16 KiB."
           }
         }
       }
@@ -3416,6 +3722,7 @@
       }
     },
     "命令输出" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -3527,6 +3834,17 @@
         }
       }
     },
+    "备份并迁移" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Back up and migrate"
+          }
+        }
+      }
+    },
     "备份成功" : {
       "extractionState" : "stale",
       "localizations" : {
@@ -3590,7 +3908,6 @@
       }
     },
     "复制全部" : {
-      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -3666,6 +3983,17 @@
     },
     "复制清单" : {
 
+    },
+    "复制诊断信息" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Copy diagnostics"
+          }
+        }
+      }
     },
     "复制输出" : {
       "extractionState" : "stale",
@@ -4178,6 +4506,17 @@
         }
       }
     },
+    "尚未注册" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Not registered"
+          }
+        }
+      }
+    },
     "尚未设置目录" : {
       "localizations" : {
         "en" : {
@@ -4230,6 +4569,7 @@
       }
     },
     "尝试重新创建连接到已启用的 Helper" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -4309,6 +4649,7 @@
       }
     },
     "已启用" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -4541,6 +4882,17 @@
         }
       }
     },
+    "已授权，连接失败" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Approved, but disconnected"
+          }
+        }
+      }
+    },
     "已收起" : {
 
     },
@@ -4594,6 +4946,39 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Registered, but you need to allow background operation in 'System Settings → Login Items'."
+          }
+        }
+      }
+    },
+    "已等待 %.0f 秒" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Waiting for %.0f seconds"
+          }
+        }
+      }
+    },
+    "已超时" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Timed out"
+          }
+        }
+      }
+    },
+    "已跳过" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Skipped"
           }
         }
       }
@@ -4687,12 +5072,45 @@
         }
       }
     },
+    "应用内的 Helper 或服务配置不可用。请重新下载完整的 Adobe Downloader；不要单独移动 Helper。" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The bundled Helper or its service configuration is unavailable. Download a complete copy of Adobe Downloader; do not move the Helper separately."
+          }
+        }
+      }
+    },
+    "开发调试工具" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Developer tools"
+          }
+        }
+      }
+    },
     "开始下载" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "Start downloading"
+          }
+        }
+      }
+    },
+    "开始检查" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Start checks"
           }
         }
       }
@@ -4884,6 +5302,17 @@
         }
       }
     },
+    "所有检查已通过。" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "All checks passed."
+          }
+        }
+      }
+    },
     "所选模块未安装或已被移除" : {
       "localizations" : {
         "en" : {
@@ -4895,6 +5324,7 @@
       }
     },
     "打开" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -4934,7 +5364,19 @@
         }
       }
     },
+    "打开后台项目" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Open background items"
+          }
+        }
+      }
+    },
     "打开登录项" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -4961,6 +5403,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Open System Settings"
+          }
+        }
+      }
+    },
+    "打开系统设置 → 通用 → 登录项与扩展，在“允许在后台运行”或“后台 App 活动”中允许 Adobe Downloader。这里不是上方的“登录时打开”列表；返回 App 后会自动检查。" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Open System Settings → General → Login Items & Extensions. Allow Adobe Downloader under Allow in the Background or Background App Activity, not the Open at Login list above. Status is checked automatically when you return to the app."
           }
         }
       }
@@ -5034,6 +5487,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Execution result: execution timeout\nExecution command: %@"
+          }
+        }
+      }
+    },
+    "执行记录" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Execution records"
           }
         }
       }
@@ -5679,6 +6143,17 @@
         }
       }
     },
+    "无法读取诊断结果，请更新并重新注册 Helper。" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Cannot read the diagnostic result. Update and re-register Helper."
+          }
+        }
+      }
+    },
     "无法连接到 Helper" : {
       "extractionState" : "stale",
       "localizations" : {
@@ -5712,6 +6187,7 @@
       }
     },
     "日志：%d 条 · 连接：%@" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -5942,6 +6418,7 @@
       }
     },
     "服务状态" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -5973,6 +6450,7 @@
       }
     },
     "未启用" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -6309,6 +6787,17 @@
         }
       }
     },
+    "查看命令与输出" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "View commands and output"
+          }
+        }
+      }
+    },
     "核心" : {
       "extractionState" : "stale",
       "localizations" : {
@@ -6334,12 +6823,56 @@
         }
       }
     },
+    "检查发现异常，请展开对应记录查看原因。" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Issues found. Expand the relevant record for details."
+          }
+        }
+      }
+    },
+    "检查已停止，已完成的结果保留在下方。" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Checks stopped. Completed results are kept below."
+          }
+        }
+      }
+    },
     "检查更新" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "Check for updates…"
+          }
+        }
+      }
+    },
+    "检查注册、连接、权限及系统信息，不修改安装内容。" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Check registration, connectivity, permissions and system information without changing installations."
+          }
+        }
+      }
+    },
+    "检查项目" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Check"
           }
         }
       }
@@ -6429,6 +6962,17 @@
         }
       }
     },
+    "检测到旧版系统服务。迁移会停止旧服务并备份旧文件，然后注册当前 App 内的 Helper。" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "A legacy system service was found. Migration stops it, backs up its files, and registers the Helper in the current app."
+          }
+        }
+      }
+    },
     "检测到版本更新，正在更新后台服务…" : {
       "extractionState" : "stale",
       "localizations" : {
@@ -6509,6 +7053,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Stopping Adobe related processes..."
+          }
+        }
+      }
+    },
+    "正在停止…" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Stopping…"
           }
         }
       }
@@ -6787,6 +7342,7 @@
       }
     },
     "正在建立 XPC 通道，请稍候…" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -6797,6 +7353,7 @@
       }
     },
     "正在建立连接…" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -6885,6 +7442,28 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Verifying install package integrity..."
+          }
+        }
+      }
+    },
+    "正在检查" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Checking"
+          }
+        }
+      }
+    },
+    "正在检查 Helper…" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Checking Helper…"
           }
         }
       }
@@ -7153,6 +7732,17 @@
         }
       }
     },
+    "正在读取系统授权状态并检查连接。" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Checking system approval and the Helper connection."
+          }
+        }
+      }
+    },
     "正在连接" : {
       "localizations" : {
         "en" : {
@@ -7164,6 +7754,7 @@
       }
     },
     "正在重试 %lld/%lld" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -7277,6 +7868,17 @@
         }
       }
     },
+    "注册、授权与连接" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Registration, approval and connection"
+          }
+        }
+      }
+    },
     "注册后台服务失败: %@" : {
       "extractionState" : "stale",
       "localizations" : {
@@ -7284,6 +7886,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Failed to register background service: %@"
+          }
+        }
+      }
+    },
+    "注册失败" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Registration failed"
           }
         }
       }
@@ -7310,6 +7923,7 @@
       }
     },
     "注销并重新注册后台服务（修复不同步/更新）" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -7445,6 +8059,7 @@
 
     },
     "清空日志" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -7522,6 +8137,17 @@
         }
       }
     },
+    "点击启用 Helper，向系统注册安装所需的后台服务。" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Click Enable Helper to register the background service needed for installation."
+          }
+        }
+      }
+    },
     "版本 %@" : {
       "extractionState" : "stale",
       "localizations" : {
@@ -7556,6 +8182,7 @@
       }
     },
     "状态异常" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -7608,11 +8235,34 @@
       }
     },
     "用于快速验证 Helper 行为、权限与服务状态" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "Quickly verify Helper behavior, permissions, and service status"
+          }
+        }
+      }
+    },
+    "用户与组" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "User and groups"
+          }
+        }
+      }
+    },
+    "用户已停止检查。" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "The check was stopped by the user."
           }
         }
       }
@@ -8134,6 +8784,17 @@
         }
       }
     },
+    "等待后台运行授权" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Background approval required"
+          }
+        }
+      }
+    },
     "等待带宽…" : {
       "localizations" : {
         "en" : {
@@ -8175,12 +8836,34 @@
         }
       }
     },
+    "签名校验失败" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Signature verification failed"
+          }
+        }
+      }
+    },
     "管理" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "Manage"
+          }
+        }
+      }
+    },
+    "管理员身份" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Administrator identity"
           }
         }
       }
@@ -8216,6 +8899,50 @@
         }
       }
     },
+    "系统列表中没有 Adobe Downloader？" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Adobe Downloader is missing from System Settings?"
+          }
+        }
+      }
+    },
+    "系统无法验证 App 或 Helper 的签名。请使用完整且签名有效的发布版本；打开后台开关不能修复签名问题。" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "macOS cannot verify the app or Helper signature. Use a complete, properly signed release. Enabling background activity cannot fix a signature problem."
+          }
+        }
+      }
+    },
+    "系统未找到服务" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Service not found"
+          }
+        }
+      }
+    },
+    "系统未能完成注册，后台列表中可能不会出现条目。请复制诊断信息，按具体错误处理后重试。" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Registration did not complete, so the app may be absent from the background list. Copy the diagnostics and address the reported error before retrying."
+          }
+        }
+      }
+    },
     "系统检测到旧版本的 Adobe Downloader Helper，需要升级到新版本。这将需要管理员权限来清理旧安装。" : {
       "extractionState" : "stale",
       "localizations" : {
@@ -8223,6 +8950,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "System detected an old version of Adobe Downloader Helper. Upgrade to the new version is required. This will require administrator permissions to clean up the old installation."
+          }
+        }
+      }
+    },
+    "系统版本" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "System version"
           }
         }
       }
@@ -8276,6 +9014,17 @@
         }
       }
     },
+    "耗时 %.2f 秒" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Duration: %.2f seconds"
+          }
+        }
+      }
+    },
     "自动下载最新版本" : {
       "localizations" : {
         "en" : {
@@ -8302,6 +9051,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Self-installation command"
+          }
+        }
+      }
+    },
+    "自定义命令" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Custom command"
           }
         }
       }
@@ -8520,6 +9280,28 @@
         }
       }
     },
+    "诊断信息" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Diagnostics"
+          }
+        }
+      }
+    },
+    "诊断连接已中断；未收到命令的最终结果。" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Diagnostic connection interrupted; no final command result was received."
+          }
+        }
+      }
+    },
     "该 UWP 产品仍被其他产品引用，不能卸载" : {
       "localizations" : {
         "en" : {
@@ -8553,6 +9335,28 @@
     "请保留此目录，以便检查和恢复未完成的卸载操作。" : {
 
     },
+    "请先在 Helper 设置查看具体状态。尚未注册时点击「启用 Helper」；等待授权时点击「打开后台项目」，在系统设置 → 通用 → 登录项与扩展的后台活动区域允许 Adobe Downloader。返回 App 后自动检查，无需重启。列表中没有条目时，请检查文件、签名或注册错误，并复制诊断信息。" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Check the detailed status in Helper settings. If unregistered, click Enable Helper. If approval is required, click Open background items and allow Adobe Downloader under System Settings → General → Login Items & Extensions → background activity. Return to the app for an automatic check; no restart is needed. If the entry is missing, check for file, signature, or registration errors and copy the diagnostics."
+          }
+        }
+      }
+    },
+    "请先结束正在进行的安装或清理。迁移需要管理员授权，会停止旧服务，将以下文件移存至 /Library/PrivilegedHelperTools/AdobeDownloaderHelperBackup.*，然后注册当前版本。原文件保留，可按备份路径恢复。" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Finish any installation or cleanup first. Migration requires administrator approval. It stops the old service, moves the files below to /Library/PrivilegedHelperTools/AdobeDownloaderHelperBackup.*, and registers the current version. Original files remain in the backup for recovery."
+          }
+        }
+      }
+    },
     "请在下载管理器中查看进度" : {
       "localizations" : {
         "en" : {
@@ -8564,6 +9368,7 @@
       }
     },
     "请按以下步骤处理：\n1. 在 Helper 设置中点击「重新启用」\n2. 前往系统设置 → 登录项与扩展\n3. 找到 Adobe Downloader.app 并打开开关\n4. 重启 Adobe Downloader\n5. 再次点击「重新启用」或「重新连接」" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -8621,6 +9426,17 @@
     "警告事项" : {
 
     },
+    "超时" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Timeout"
+          }
+        }
+      }
+    },
     "路径包含" : {
       "localizations" : {
         "en" : {
@@ -8632,11 +9448,23 @@
       }
     },
     "跳转到系统设置 → 登录项查看 Helper 注册情况" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
             "value" : "Go to System Settings → Login Items to view Helper registration"
+          }
+        }
+      }
+    },
+    "较早的 %d 条记录已移出本次会话。" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%d earlier records are no longer retained in this session."
           }
         }
       }
@@ -8652,6 +9480,17 @@
         }
       }
     },
+    "输出已截断：每个输出通道最多保留前 128 KiB。" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Output truncated: only the first 128 KiB per stream is retained."
+          }
+        }
+      }
+    },
     "迁移完成，但需要在系统设置中批准新的 Helper 服务" : {
       "extractionState" : "stale",
       "localizations" : {
@@ -8659,6 +9498,28 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Migration completed, but approval of the new Helper service is required in the system settings"
+          }
+        }
+      }
+    },
+    "迁移旧版 Helper" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Migrate legacy Helper"
+          }
+        }
+      }
+    },
+    "迁移旧版 Helper？" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Migrate the legacy Helper?"
           }
         }
       }
@@ -8683,7 +9544,19 @@
         }
       }
     },
+    "运行检查后在这里查看详情。" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Run a check to see details here."
+          }
+        }
+      }
+    },
     "运行正常" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -8776,6 +9649,7 @@
       }
     },
     "连接已断开，点击右侧按钮重新连接" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -8797,6 +9671,7 @@
       }
     },
     "连接断开" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -8807,6 +9682,7 @@
       }
     },
     "连接状态" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -8843,6 +9719,17 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Exit"
+          }
+        }
+      }
+    },
+    "退出码：%d" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Exit code: %d"
           }
         }
       }
@@ -8972,6 +9859,17 @@
         }
       }
     },
+    "通过" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Passed"
+          }
+        }
+      }
+    },
     "通过 Sparkle 自动检查并更新到最新版本" : {
       "localizations" : {
         "en" : {
@@ -9016,6 +9914,7 @@
       }
     },
     "重新创建到 Helper 的 XPC 连接" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -9037,6 +9936,7 @@
       }
     },
     "重新启用" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {
@@ -9086,6 +9986,50 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Reinstall successful"
+          }
+        }
+      }
+    },
+    "重新注册" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Reregister"
+          }
+        }
+      }
+    },
+    "重新注册 Helper？" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Reregister the Helper?"
+          }
+        }
+      }
+    },
+    "重新注册会停止当前服务。请先结束正在进行的安装或清理；此操作不会替你打开系统中的后台运行开关。" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Reregistering stops the current service. Finish any installation or cleanup first. This cannot enable the background activity switch on your behalf."
+          }
+        }
+      }
+    },
+    "重新注册服务" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Reregister service"
           }
         }
       }
@@ -9243,6 +10187,17 @@
         }
       }
     },
+    "需留意" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Attention"
+          }
+        }
+      }
+    },
     "需要下载 Setup 组件" : {
       "extractionState" : "stale",
       "localizations" : {
@@ -9290,6 +10245,17 @@
         }
       }
     },
+    "需要迁移旧版 Helper" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Legacy Helper migration required"
+          }
+        }
+      }
+    },
     "需要重启 Adobe Downloader 后生效。" : {
 
     },
@@ -9308,6 +10274,7 @@
 
     },
     "预置命令" : {
+      "extractionState" : "stale",
       "localizations" : {
         "en" : {
           "stringUnit" : {

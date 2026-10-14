@@ -292,11 +292,6 @@ struct HelperView: View {
     var body: some View {
         HelperPlaygroundView(viewModel: playgroundViewModel)
             .frame(maxWidth: .infinity, alignment: .topLeading)
-            .alert(playgroundViewModel.helperAlertSuccess ? "操作成功" : "操作失败", isPresented: $playgroundViewModel.showHelperAlert) {
-                Button("确定") { }
-            } message: {
-                Text(playgroundViewModel.helperAlertMessage)
-            }
     }
 }
 
@@ -876,7 +871,7 @@ private struct GeneralSettingsAlerts: ViewModifier {
     private func startDownloadSetup() {
         guard viewModel.helperConnectionStatus == .connected else {
             viewModel.isSuccess = false
-            viewModel.alertMessage = String(localized: "Helper 未启用或未连接，无法下载 IPCBox 和 HDBox。请先在 Helper 设置中点击「重新启用」，前往系统设置 → 登录项与扩展打开 Adobe Downloader.app，重启 App 后再点击「重新启用」或「重新连接」。")
+            viewModel.alertMessage = HelperManager.shared.status
             viewModel.showAlert = true
             return
         }
@@ -940,17 +935,12 @@ struct HelperSettingsView: View {
     @Binding var helperAlertSuccess: Bool
 
     var body: some View {
-        SettingSection(
-            String(localized: "Helper 设置"),
-            footer: String(localized: "Helper 负责执行特权操作；连接异常时可尝试重新启用或创建连接")
-        ) {
-            HelperStatusRow(
-                viewModel: viewModel,
-                showHelperAlert: $showHelperAlert,
-                helperAlertMessage: $helperAlertMessage,
-                helperAlertSuccess: $helperAlertSuccess
-            )
-        }
+        HelperStatusRow(
+            viewModel: viewModel,
+            showHelperAlert: $showHelperAlert,
+            helperAlertMessage: $helperAlertMessage,
+            helperAlertSuccess: $helperAlertSuccess
+        )
     }
 }
 
@@ -1206,134 +1196,9 @@ struct HelperStatusRow: View {
     @Binding var showHelperAlert: Bool
     @Binding var helperAlertMessage: String
     @Binding var helperAlertSuccess: Bool
-    @State private var isReinstallingHelper = false
-    @State private var helperStatus: PrivilegedHelperAdapter.HelperStatus = .noFound
 
     var body: some View {
-        VStack(spacing: 0) {
-            SettingRow(
-                title: String(localized: "启用状态"),
-                subtitle: helperStatus == .installed
-                    ? String(localized: "Helper 已安装并运行中")
-                    : String(localized: "Helper 未启用，无法执行安装/清理操作"),
-                icon: "lock.shield.fill",
-                iconTint: helperStatus == .installed ? .green : .red
-            ) {
-                HStack(spacing: 8) {
-                    if helperStatus == .installed {
-                        SettingsStatusChip(icon: "checkmark.circle.fill", text: String(localized: "已启用"), tint: .green)
-                    } else {
-                        SettingsStatusChip(icon: "xmark.circle.fill", text: String(localized: "未启用"), tint: .red)
-                    }
-                    if isReinstallingHelper {
-                        ProgressView()
-                            .scaleEffect(0.65)
-                            .frame(width: 16, height: 16)
-                    }
-                    Button(action: {
-                        isReinstallingHelper = true
-                        PrivilegedHelperAdapter.shared.reinstallHelper { success, message in
-                            DispatchQueue.main.async {
-                                helperAlertSuccess = success
-                                helperAlertMessage = message
-                                showHelperAlert = true
-                                isReinstallingHelper = false
-                            }
-                        }
-                    }) {
-                        HStack(spacing: 4) {
-                            Image(systemName: "arrow.clockwise").font(.system(size: 10))
-                            Text("重新启用").font(.system(size: 12))
-                        }
-                        .foregroundColor(.white)
-                    }
-                    .buttonStyle(BeautifulButtonStyle(baseColor: Color.blue))
-                    .disabled(isReinstallingHelper)
-                    .help("注销并重新注册后台服务（修复不同步/更新）")
-                }
-            }
-
-            SettingRowDivider()
-
-            SettingRow(
-                title: String(localized: "连接状态"),
-                subtitle: connectionSubtitle,
-                icon: "bolt.horizontal.fill",
-                iconTint: helperStatusColor
-            ) {
-                HStack(spacing: 8) {
-                    HStack(spacing: 5) {
-                        PulsingCircle(color: helperStatusColor)
-                        Text(helperStatusText)
-                            .font(.system(size: 11, weight: .medium))
-                            .foregroundColor(helperStatusColor.opacity(0.9))
-                    }
-                    .padding(.horizontal, 7)
-                    .padding(.vertical, 3)
-                    .background(
-                        Capsule().fill(helperStatusColor.opacity(0.12))
-                    )
-                    .overlay(
-                        Capsule().strokeBorder(helperStatusColor.opacity(0.22), lineWidth: 0.5)
-                    )
-
-                    Button(action: {
-                        PrivilegedHelperAdapter.shared.reconnectHelper { success, message in
-                            DispatchQueue.main.async {
-                                helperAlertSuccess = success
-                                helperAlertMessage = message
-                                showHelperAlert = true
-                            }
-                        }
-                    }) {
-                        HStack(spacing: 4) {
-                            Image(systemName: "network").font(.system(size: 10))
-                            Text("重新连接").font(.system(size: 12))
-                        }
-                        .foregroundColor(.white)
-                    }
-                    .buttonStyle(BeautifulButtonStyle(baseColor: shouldDisableReconnectButton ? Color.gray.opacity(0.6) : Color.blue))
-                    .disabled(shouldDisableReconnectButton)
-                    .help("尝试重新创建连接到已启用的 Helper")
-                }
-            }
-        }
-        .task {
-            PrivilegedHelperAdapter.shared.getHelperStatus { status in
-                helperStatus = status
-            }
-        }
-    }
-
-    private var connectionSubtitle: String {
-        switch viewModel.helperConnectionStatus {
-        case .connected:    return String(localized: "XPC 通道运行正常，可执行特权命令")
-        case .connecting:   return String(localized: "正在建立连接…")
-        case .disconnected: return String(localized: "连接已断开，点击右侧按钮重新连接")
-        }
-    }
-
-    private var helperStatusColor: Color {
-        switch viewModel.helperConnectionStatus {
-        case .connected: return .green
-        case .connecting: return .orange
-        case .disconnected: return .red
-        }
-    }
-
-    private var shouldDisableReconnectButton: Bool {
-        return isReinstallingHelper
-            || helperStatus != .installed
-            || viewModel.helperConnectionStatus == .connecting
-            || viewModel.helperConnectionStatus == .connected
-    }
-
-    private var helperStatusText: String {
-        switch viewModel.helperConnectionStatus {
-        case .connected: return String(localized: "运行正常")
-        case .connecting: return String(localized: "正在连接")
-        case .disconnected: return String(localized: "连接断开")
-        }
+        HelperStatusSection()
     }
 }
 

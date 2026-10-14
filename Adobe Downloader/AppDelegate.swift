@@ -44,6 +44,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         PrivilegedHelperAdapter.shared.executeCommand("id -u") { _ in }
     }
 
+    func applicationDidBecomeActive(_ notification: Notification) {
+        guard !HDPIMHeadlessInstallRunner.isActive else { return }
+        PrivilegedHelperAdapter.shared.checkInstall()
+    }
+
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         if Self.shouldTerminateImmediately || HDPIMHeadlessInstallRunner.isActive {
             return .terminateNow

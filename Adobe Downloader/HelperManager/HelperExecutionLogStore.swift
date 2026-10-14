@@ -7,89 +7,86 @@
 
 import Foundation
 
+@MainActor
 final class HelperExecutionLogStore: ObservableObject {
     static let shared = HelperExecutionLogStore()
 
-    enum Kind: String {
-        case command
-        case output
+    enum Status {
+        case running, passed, warning, failed, cancelled, timedOut, skipped
 
-        var label: String {
+        var title: String {
             switch self {
-            case .command:
-                return "CMD"
-            case .output:
-                return "OUT"
+            case .running: return String(localized: "执行中")
+            case .passed: return String(localized: "通过")
+            case .warning: return String(localized: "需留意")
+            case .failed: return String(localized: "失败")
+            case .cancelled: return String(localized: "已取消")
+            case .timedOut: return String(localized: "已超时")
+            case .skipped: return String(localized: "已跳过")
             }
         }
     }
 
-    struct Entry: Identifiable, Equatable {
+    struct Entry: Identifiable {
         let id: UUID
         let date: Date
-        let kind: Kind
+        let title: String
         let command: String
-        let result: String
-        let isError: Bool
+        var status: Status = .running
+        var detail = ""
+        var result: HelperOperationResult?
+
+        var duration: TimeInterval? { result?.diagnostic?.duration }
+
+        var exportText: String {
+            var lines = ["[\(date.formatted(date: .omitted, time: .standard))] \(title) · \(status.title)"]
+            if !command.isEmpty { lines.append("$ \(command)") }
+            if let duration { lines.append(String(format: String(localized: "耗时 %.2f 秒"), duration)) }
+            if let code = result?.exitCode { lines.append(String(format: String(localized: "退出码：%d"), code)) }
+            if !detail.isEmpty { lines.append(detail) }
+            if let diagnostic = result?.diagnostic {
+                if !diagnostic.standardOutput.isEmpty { lines.append("stdout:\n" + diagnostic.standardOutput) }
+                if !diagnostic.standardError.isEmpty { lines.append("stderr:\n" + diagnostic.standardError) }
+                if diagnostic.outputTruncated { lines.append(String(localized: "输出已截断：每个输出通道最多保留前 128 KiB。")) }
+            } else if let result, !result.output.isEmpty {
+                lines.append(result.output)
+            }
+            return lines.joined(separator: "\n")
+        }
     }
 
     @Published private(set) var entries: [Entry] = []
-
-    private let maxEntries = 300
-    private let maxCommandLength = 600
-    private let maxResultLength = 6_000
+    @Published private(set) var discardedCount = 0
+    private let maxEntries = 30
 
     private init() {}
 
-    func clear() {
-        DispatchQueue.main.async {
-            self.entries.removeAll()
+    @discardableResult
+    func begin(title: String, command: String = "") -> UUID {
+        let entry = Entry(id: UUID(), date: Date(), title: title, command: command)
+        entries.append(entry)
+        while entries.count > maxEntries, let index = entries.firstIndex(where: { $0.status != .running }) {
+            entries.remove(at: index)
+            discardedCount += 1
         }
+        return entry.id
     }
 
-    func append(kind: Kind, command: String, result: String, isError: Bool? = nil) {
-        let normalizedCommand = truncate(command, maxLength: maxCommandLength)
-        let normalizedResult = truncate(result, maxLength: maxResultLength)
-        let computedIsError = isError ?? normalizedResult.trimmingCharacters(in: .whitespacesAndNewlines).lowercased().hasPrefix("error:")
+    func finish(_ id: UUID, status: Status, detail: String = "", result: HelperOperationResult? = nil) {
+        guard let index = entries.firstIndex(where: { $0.id == id }) else { return }
+        entries[index].status = status
+        entries[index].detail = detail
+        entries[index].result = result
+    }
 
-        let entry = Entry(
-            id: UUID(),
-            date: Date(),
-            kind: kind,
-            command: normalizedCommand,
-            result: normalizedResult,
-            isError: computedIsError
-        )
-
-        DispatchQueue.main.async {
-            self.entries.append(entry)
-            if self.entries.count > self.maxEntries {
-                self.entries.removeFirst(self.entries.count - self.maxEntries)
-            }
-        }
+    func clear() {
+        entries.removeAll { $0.status != .running }
+        discardedCount = 0
     }
 
     func exportText() -> String {
-        let formatter = HelperExecutionLogStore.makeDateFormatter()
-        return entries.map { entry in
-            let time = formatter.string(from: entry.date)
-            let header = "[\(time)] \(entry.kind.label) $ \(entry.command)"
-            let body = entry.result.trimmingCharacters(in: .whitespacesAndNewlines)
-            return body.isEmpty ? header : "\(header)\n\(body)"
-        }.joined(separator: "\n\n")
-    }
-
-    private func truncate(_ text: String, maxLength: Int) -> String {
-        guard text.count > maxLength else { return text }
-        let suffix = "\n…(已截断，最多 \(maxLength) 字符)"
-        let allowed = max(0, maxLength - suffix.count)
-        return String(text.prefix(allowed)) + suffix
-    }
-
-    private static func makeDateFormatter() -> DateFormatter {
-        let formatter = DateFormatter()
-        formatter.dateFormat = "HH:mm:ss"
-        return formatter
+        let notice = discardedCount > 0
+            ? String(format: String(localized: "较早的 %d 条记录已移出本次会话。"), discardedCount) + "\n\n" : ""
+        return notice + entries.map(\.exportText).joined(separator: "\n\n")
     }
 }
-

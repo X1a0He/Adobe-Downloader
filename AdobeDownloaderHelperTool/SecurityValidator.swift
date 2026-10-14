@@ -58,14 +58,23 @@ final class SecurityValidator {
             return false
         }
 
-        var staticCode: SecStaticCode?
-        guard SecCodeCopyStaticCode(code, [], &staticCode) == errSecSuccess,
-              let staticCodeRef = staticCode else {
+        var ownCode: SecCode?
+        var ownStaticCode: SecStaticCode?
+        var ownInfo: CFDictionary?
+        guard SecCodeCopySelf([], &ownCode) == errSecSuccess,
+              let ownCode,
+              SecCodeCopyStaticCode(ownCode, [], &ownStaticCode) == errSecSuccess,
+              let ownStaticCode,
+              SecCodeCopySigningInformation(ownStaticCode, SecCSFlags(rawValue: kSecCSSigningInformation), &ownInfo) == errSecSuccess,
+              let info = ownInfo as? [String: Any],
+              let teamID = info[kSecCodeInfoTeamIdentifier as String] as? String,
+              !teamID.isEmpty,
+              teamID.unicodeScalars.allSatisfy({ CharacterSet.alphanumerics.contains($0) }) else {
             return false
         }
 
         let bundleID = "com.x1a0he.macOS.Adobe-Downloader"
-        let requirementString = "identifier \"\(bundleID)\" and anchor apple generic"
+        let requirementString = "identifier \"\(bundleID)\" and anchor apple generic and certificate leaf[subject.OU] = \"\(teamID)\""
 
         var requirement: SecRequirement?
         guard SecRequirementCreateWithString(
@@ -76,6 +85,6 @@ final class SecurityValidator {
             return false
         }
 
-        return SecStaticCodeCheckValidity(staticCodeRef, [], req) == errSecSuccess
+        return SecCodeCheckValidity(code, [], req) == errSecSuccess
     }
 }

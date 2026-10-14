@@ -129,7 +129,7 @@ struct TaskCard: View {
         .alert(String(localized: "Helper 未连接"), isPresented: $showHelperAlert) {
             Button(String(localized: "确定")) { }
         } message: {
-            Text("Helper 未启用或未连接，请先在设置中启用并连接 Helper")
+            Text(HelperManager.shared.status)
         }
         .sheet(isPresented: $isInstalling, onDismiss: clearInstallationSheetState) {
             let installViewData = globalNetworkManager.makeInstallProgressViewData(productName: task.displayName)

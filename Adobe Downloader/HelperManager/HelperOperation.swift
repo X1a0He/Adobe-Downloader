@@ -6,6 +6,8 @@ enum HelperOperation: Codable, Equatable {
     case copyFile(source: String, destination: String)
     case setPermissions(path: String, mode: Int)
     case executeShell(command: String)
+    case runDiagnostic(id: UUID, command: String, timeout: Double)
+    case cancelDiagnostic(id: UUID)
     case hdpimInstall(productDir: String, userHome: String, executablePath: String?)
     case hdpimUninstall(request: HDPIMUninstallHelperRequest, userHome: String, executablePath: String?)
     case triggerTCCPrompt
@@ -18,7 +20,7 @@ enum HelperOperation: Codable, Equatable {
         switch self {
         case .installPackage, .uninstallPath, .copyFile, .setPermissions:
             return true
-        case .executeShell, .hdpimInstall, .hdpimUninstall, .triggerTCCPrompt, .cancelOperation, .hdpimProgress, .cancelHDPIMOperation, .getVersion:
+        case .executeShell, .runDiagnostic, .cancelDiagnostic, .hdpimInstall, .hdpimUninstall, .triggerTCCPrompt, .cancelOperation, .hdpimProgress, .cancelHDPIMOperation, .getVersion:
             return false
         }
     }
@@ -35,6 +37,10 @@ enum HelperOperation: Codable, Equatable {
             return "Set permissions \(String(mode, radix: 8)): \(URL(fileURLWithPath: path).lastPathComponent)"
         case .executeShell(let command):
             return "Execute: \(command.prefix(50))..."
+        case .runDiagnostic(let id, _, _):
+            return "Run diagnostic: \(id)"
+        case .cancelDiagnostic(let id):
+            return "Cancel diagnostic: \(id)"
         case .hdpimInstall(let productDir, _, _):
             return "HDPIM install: \(URL(fileURLWithPath: productDir).lastPathComponent)"
         case .hdpimUninstall(let request, _, _):
@@ -93,6 +99,7 @@ struct HelperOperationResult: Codable {
     let output: String
     let exitCode: Int32?
     var operationID: UUID? = nil
+    var diagnostic: HelperDiagnosticResult? = nil
 
     static func success(_ output: String = "", operationID: UUID? = nil) -> HelperOperationResult {
         HelperOperationResult(success: true, output: output, exitCode: 0, operationID: operationID)
@@ -107,4 +114,14 @@ struct HDPIMInstallProgress: Codable {
     let output: String
     let isComplete: Bool
     let exitCode: Int32?
+}
+
+/// 可选结果字段兼容旧 Helper；诊断客户端要求该字段存在，避免误判旧协议回复。
+struct HelperDiagnosticResult: Codable, Equatable {
+    let standardOutput: String
+    let standardError: String
+    let duration: TimeInterval
+    let timedOut: Bool
+    let cancelled: Bool
+    let outputTruncated: Bool
 }

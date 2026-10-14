@@ -246,7 +246,7 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 			shellPath = /bin/sh;
-			shellScript = "set -e\nDEST_DIR=\"${TARGET_BUILD_DIR}/${WRAPPER_NAME}/Contents/Library/LaunchDaemons\"\nPLIST_SRC=\"${SRCROOT}/AdobeDownloaderHelperTool/com.x1a0he.macOS.Adobe-Downloader.helper.plist\"\nPLIST_DST=\"${DEST_DIR}/com.x1a0he.macOS.Adobe-Downloader.helper.plist\"\nHELPER_NAME=\"com.x1a0he.macOS.Adobe-Downloader.helper\"\nif [ \"${CONFIGURATION}\" = \"Debug\" ]; then\n    HELPER_PATH=\"${TARGET_BUILD_DIR}/${WRAPPER_NAME}/Contents/Library/LaunchServices/${HELPER_NAME}\"\nelse\n    HELPER_PATH=\"/Applications/${WRAPPER_NAME}/Contents/Library/LaunchServices/${HELPER_NAME}\"\nfi\nmkdir -p \"${DEST_DIR}\"\ncp \"${PLIST_SRC}\" \"${PLIST_DST}\"\n/usr/libexec/PlistBuddy -c \"Set :Program ${HELPER_PATH}\" \"${PLIST_DST}\"\n/usr/libexec/PlistBuddy -c \"Set :ProgramArguments:0 ${HELPER_PATH}\" \"${PLIST_DST}\"\n";
+			shellScript = "set -e\nDEST_DIR=\"${TARGET_BUILD_DIR}/${WRAPPER_NAME}/Contents/Library/LaunchDaemons\"\nPLIST_SRC=\"${SRCROOT}/AdobeDownloaderHelperTool/com.x1a0he.macOS.Adobe-Downloader.helper.plist\"\nmkdir -p \"${DEST_DIR}\"\ncp \"${PLIST_SRC}\" \"${DEST_DIR}/com.x1a0he.macOS.Adobe-Downloader.helper.plist\"\n";
 		};
 /* End PBXShellScriptBuildPhase section */
 
@@ -274,6 +274,7 @@
 				CODE_SIGN_ENTITLEMENTS = AdobeDownloaderHelperTool/AdobeDownloaderHelperTool.entitlements;
 				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "Apple Development";
 				CODE_SIGN_STYLE = Automatic;
+				CREATE_INFOPLIST_SECTION_IN_BINARY = YES;
 				ENABLE_HARDENED_RUNTIME = NO;
 				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				INFOPLIST_FILE = AdobeDownloaderHelperTool/Info.plist;
@@ -281,10 +282,6 @@
 				MACOSX_DEPLOYMENT_TARGET = 13.0;
 				ONLY_ACTIVE_ARCH = YES;
 				OTHER_LDFLAGS = (
-					"-sectcreate",
-					__TEXT,
-					__info_plist,
-					"$(SRCROOT)/AdobeDownloaderHelperTool/Info.plist",
 					"-sectcreate",
 					__TEXT,
 					__launchd_plist,
@@ -301,18 +298,15 @@
 			isa = XCBuildConfiguration;
 			buildSettings = {
 				CODE_SIGN_ENTITLEMENTS = AdobeDownloaderHelperTool/AdobeDownloaderHelperTool.entitlements;
-				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "Apple Development";
-				CODE_SIGN_STYLE = Automatic;
+				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "Developer ID Application";
+				CODE_SIGN_STYLE = Manual;
+				CREATE_INFOPLIST_SECTION_IN_BINARY = YES;
 				ENABLE_HARDENED_RUNTIME = NO;
 				ENABLE_USER_SCRIPT_SANDBOXING = NO;
 				INFOPLIST_FILE = AdobeDownloaderHelperTool/Info.plist;
 				LOCALIZATION_PREFERS_STRING_CATALOGS = NO;
 				MACOSX_DEPLOYMENT_TARGET = 13.0;
 				OTHER_LDFLAGS = (
-					"-sectcreate",
-					__TEXT,
-					__info_plist,
-					"$(SRCROOT)/AdobeDownloaderHelperTool/Info.plist",
 					"-sectcreate",
 					__TEXT,
 					__launchd_plist,
@@ -505,8 +499,8 @@
 				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
 				ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS = NO;
 				CODE_SIGN_ENTITLEMENTS = "Adobe Downloader/Adobe Downloader.entitlements";
-				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "Apple Development";
-				CODE_SIGN_STYLE = Automatic;
+				"CODE_SIGN_IDENTITY[sdk=macosx*]" = "Developer ID Application";
+				CODE_SIGN_STYLE = Manual;
 				COMBINE_HIDPI_IMAGES = YES;
 				CURRENT_PROJECT_VERSION = 310;
 				DEAD_CODE_STRIPPING = YES;

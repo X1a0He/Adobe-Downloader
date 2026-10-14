@@ -4,6 +4,7 @@ import os.log
 final class HelperService: NSObject {
     private let listener: NSXPCListener
     private var connections: Set<NSXPCConnection> = []
+    private let connectionsLock = NSLock()
     private let logger = Logger(subsystem: "com.x1a0he.macOS.Adobe-Downloader.helper", category: "Service")
 
     override init() {
@@ -32,27 +33,39 @@ extension HelperService: NSXPCListenerDelegate {
 
         let interface = NSXPCInterface(with: HelperXPCProtocol.self)
         connection.exportedInterface = interface
-        connection.exportedObject = HelperServiceImpl()
+        let service = HelperServiceImpl()
+        connection.exportedObject = service
 
-        connection.invalidationHandler = { [weak self] in
+        connection.invalidationHandler = { [weak self, weak connection] in
+            service.diagnostics.cancel()
             self?.logger.notice("XPC 连接断开")
-            self?.connections.remove(connection)
+            if let connection { self?.removeConnection(connection) }
         }
 
-        connection.interruptionHandler = { [weak self] in
+        connection.interruptionHandler = { [weak self, weak connection] in
+            service.diagnostics.cancel()
             self?.logger.error("XPC 连接中断")
-            self?.connections.remove(connection)
+            if let connection { self?.removeConnection(connection) }
         }
 
+        connectionsLock.lock()
         connections.insert(connection)
+        let count = connections.count
+        connectionsLock.unlock()
         connection.resume()
 
-        logger.notice("XPC 连接已建立，活动连接数: \(self.connections.count)")
+        logger.notice("XPC 连接已建立，活动连接数: \(count)")
         return true
+    }
+
+    private func removeConnection(_ connection: NSXPCConnection) {
+        connectionsLock.lock(); defer { connectionsLock.unlock() }
+        connections.remove(connection)
     }
 }
 
 private final class HelperServiceImpl: NSObject, HelperXPCProtocol {
+    let diagnostics = DiagnosticCommandController()
     private let operationLock = NSLock()
     private var clientOperationID: UUID?
 
@@ -80,6 +93,16 @@ private final class HelperServiceImpl: NSObject, HelperXPCProtocol {
 
         let result: HelperOperationResult
         switch operation {
+        case .runDiagnostic(let id, let command, let timeout):
+            diagnostics.start(id: id, command: command, timeout: timeout) { result in
+                reply((try? JSONEncoder().encode(result)) ?? Data())
+            }
+            return
+
+        case .cancelDiagnostic(let id):
+            diagnostics.cancel(id: id)
+            result = .success("Cancellation requested")
+
         case .hdpimInstall(let productDir, let userHome, let executablePath):
             do {
                 let id = try ProcessManager.shared.startHDPIMInstall(

@@ -1059,7 +1059,7 @@ private struct VersionDetails: View {
                     }
                     .foregroundColor(.primary.opacity(0.85))
                 }
-                .disclosureGroupStyle(VersionDetailDisclosureStyle())
+                .disclosureGroupStyle(FullRowDisclosureGroupStyle())
             }
 
             #if DEBUG
@@ -1079,7 +1079,7 @@ private struct VersionDetails: View {
                     }
                     .foregroundColor(.primary.opacity(0.85))
                 }
-                .disclosureGroupStyle(VersionDetailDisclosureStyle())
+                .disclosureGroupStyle(FullRowDisclosureGroupStyle())
             }
             #endif
 
@@ -1330,36 +1330,6 @@ private struct VersionDownloadSummaryView: View {
             }
         }
         .padding(.vertical, 2)
-    }
-}
-
-private struct VersionDetailDisclosureStyle: DisclosureGroupStyle {
-    func makeBody(configuration: Configuration) -> some View {
-        VStack(alignment: .leading, spacing: 0) {
-            Button {
-                withAnimation(.easeInOut(duration: 0.2)) {
-                    configuration.isExpanded.toggle()
-                }
-            } label: {
-                HStack(spacing: 8) {
-                    Image(systemName: "chevron.right")
-                        .font(.system(size: 10, weight: .semibold))
-                        .foregroundColor(.secondary)
-                        .rotationEffect(.degrees(configuration.isExpanded ? 90 : 0))
-                        .frame(width: 12)
-                    configuration.label
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                }
-                .padding(.vertical, 4)
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .accessibilityValue(configuration.isExpanded ? String(localized: "已展开") : String(localized: "已收起"))
-
-            if configuration.isExpanded {
-                configuration.content
-            }
-        }
     }
 }
 
@@ -1627,6 +1597,7 @@ private struct InstalledProductUninstallSection: View {
 							.foregroundColor(.primary.opacity(0.85))
 					}
 				}
+				.disclosureGroupStyle(FullRowDisclosureGroupStyle())
 				.padding(.leading, 2)
 			}
 		}

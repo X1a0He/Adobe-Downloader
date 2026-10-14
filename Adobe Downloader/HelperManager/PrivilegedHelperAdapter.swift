@@ -14,11 +14,8 @@ class PrivilegedHelperAdapter: NSObject, ObservableObject {
     private let manager = HelperManager.shared
     var connectionSuccessBlock: (() -> Void)?
 
-    enum HelperStatus {
-        case installed
-        case noFound
-        case needUpdate
-    }
+    // 兼容现有调用方，同时向界面保留完整的系统状态。
+    typealias HelperStatus = HelperServiceState
 
     enum ConnectionState {
         case connected
@@ -40,9 +37,10 @@ class PrivilegedHelperAdapter: NSObject, ObservableObject {
     override init() {
         super.init()
 
-        manager.$isInstalled
+        manager.$state
             .receive(on: DispatchQueue.main)
-            .sink { [weak self] isInstalled in
+            .sink { [weak self] state in
+                let isInstalled = state == .enabled
                 self?.connectionState = isInstalled ? .connected : .disconnected
                 if isInstalled {
                     self?.connectionSuccessBlock?()
@@ -62,7 +60,7 @@ class PrivilegedHelperAdapter: NSObject, ObservableObject {
     func getHelperStatus(callback: @escaping ((HelperStatus) -> Void)) {
         Task {
             await manager.checkStatus()
-            callback(manager.isInstalled ? .installed : .noFound)
+            callback(manager.state)
         }
     }
 
@@ -91,12 +89,8 @@ class PrivilegedHelperAdapter: NSObject, ObservableObject {
 
     func reconnectHelper(completion: @escaping (Bool, String) -> Void) {
         Task {
-            do {
-                try await manager.checkStatus()
-                completion(manager.isInstalled, manager.status)
-            } catch {
-                completion(false, error.localizedDescription)
-            }
+            await manager.reconnect()
+            completion(manager.isInstalled, manager.status)
         }
     }
 
@@ -104,9 +98,9 @@ class PrivilegedHelperAdapter: NSObject, ObservableObject {
         Task {
             do {
                 try await manager.reinstall()
-                completion(true, "重装成功")
+                completion(manager.isInstalled, manager.status)
             } catch {
-                completion(false, error.localizedDescription)
+                completion(false, manager.status)
             }
         }
     }
