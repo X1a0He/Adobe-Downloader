@@ -47,3 +47,5 @@ playground.xcworkspace
 .build/
 
 analyze
+
+release.sh

@@ -23,16 +23,18 @@ updating it.**
 
 ## 📔 Latest Log
 
-### 2026-06-22 v3.1.0 Update Log
+### 2026-10-16 v3.2.0 Update Log
 
-- fix: Fixed excessive memory usage during Adobe product downloads
-- fix: Fixed errors that occurred during installation of some Adobe products
-- fix: Fixed issue where some Adobe products could not launch due to permission problems after installation
-- feat: Optimized the installation Sheet display to prevent bottom buttons from being unreachable on small screens
-- feat: Added rollback support for installation cancellation
-- feat: Synced with Adobe Creative Cloud official installation behavior, adding uninstall shortcuts after installation
-- feat: Introduced incremental update functionality — in version 3.1.0, you can perform incremental updates on already installed products (must be downloaded using Adobe Downloader)
-- feat: Optimized the version selection page for some products
+- feat: Improved version selection and custom download views, including version search, package filtering, and dependency details
+- feat: Improved download task cards and package lists to make download status, progress, and failures clearer
+- feat: Improved Helper authorization guidance and diagnostics, with distinct states for pending approval, registration failures, and connection failures, plus backup and migration support for legacy Helpers
+- feat: Improved output, timeout handling, and cancellation for Helper execution logs and diagnostic commands
+- feat: Improved Simplified Chinese and English interfaces, status messages, and error details, with consistent language selection and text formatting
+- fix: Strengthened download integrity checks and improved pause, resume, and persistent task state handling to prevent incomplete or corrupted files from being used for installation
+- fix: Fixed failures when fetching the v4 product catalog and improved product, dependency, and architecture parsing across API versions
+- fix: Improved validation of full and incremental installation files, patch handling, and cancellation, including file rollback and database state recovery after failures
+- fix: Improved uninstall transactions and handling of shared dependencies and module records, while preserving resources needed for repair and uninstallation
+- fix: Fixed false blocking during Hosts cleanup, with backups created before cleanup and recovery locations shown in the results
 
 ### Language Support
 

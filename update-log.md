@@ -1,5 +1,18 @@
 # Change Log
 
+### 2026-10-16 v3.2.0 更新日志
+
+- feat: 优化版本选择与自定义下载页面，完善版本搜索、安装包筛选和依赖展示
+- feat: 优化下载任务卡片与安装包列表，更清晰地展示下载状态、进度和失败信息
+- feat: 完善 Helper 授权引导与故障诊断，区分等待授权、注册失败和连接失败，并支持备份迁移旧版 Helper
+- feat: 改进 Helper 执行日志和诊断命令的输出、超时及取消处理
+- feat: 完善简体中文和英文界面、状态提示与错误信息，统一语言选择和文本格式
+- fix: 加强下载文件完整性校验，完善暂停、恢复及任务状态持久化，避免将未完成或损坏的文件当作可安装材料
+- fix: 修复 v4 产品目录拉取失败的问题，完善不同接口版本的产品、依赖和架构解析
+- fix: 完善全量与增量安装的材料校验、补丁处理和取消流程，改进异常情况下的文件回滚与数据库状态恢复
+- fix: 完善卸载事务、共享依赖与模块记录处理，并保留修复和卸载所需的资源
+- fix: 修复 Hosts 清理误拦截的问题，清理前保留备份，并在执行结果中显示恢复位置
+
 ### 2026-06-22 v3.1.0 更新日志
 
 - fix: 修复了在下载 Adobe 产品的过程中，出现内存占用过大的问题
@@ -8,7 +21,7 @@
 - feat: 优化了安装 Sheet 的显示，避免在屏幕太小的时候无法点击到最底部的按钮
 - feat: 为取消安装增加回滚
 - feat: 同步 Adobe Creative Cloud 官方安装行为，在安装后添加卸载快捷方式
-- feat: 引入了增量更新功能，在 3.1.0 版本中可以实现对已有产品的增量更新(必需使用 Adobe Downloader 下载)
+- feat: 引入了增量更新功能，在 3.1.0 版本中可以实现对已有产品的增量更新 (必需使用 Adobe Downloader 下载)
 - feat: 优化了部分产品的版本选择页面
 
 ## 2026-06-13 v3.0.0 更新日志
@@ -462,7 +475,7 @@ PS: The sources of Setup components are all extracted from Adobe Creative Cloud,
 ```markdown
 1. 修复了初次启动程序时，默认下载目录为 "Downloads" 导致提示 你不能存储文件“ILST”，因为该宗卷是只读宗卷 的问题
 2. 新的实现取代了 windowResizability 以适应 macOS 12.0+（可能）
-3. 新增下载记录持久化功能(M1 Max macOS 15上测试正常，未测试其他机型)
+3. 新增下载记录持久化功能 (M1 Max macOS 15上测试正常，未测试其他机型)
 
 PS: 此版本改动略大，如有bugs，请及时提出
 ====================
@@ -470,7 +483,7 @@ PS: 此版本改动略大，如有bugs，请及时提出
 1. Fixed the issue that when launching the program for the first time, the default directory is "Downloads", which
    causes a download error message
 2. New implementation replaces windowResizability to adapt to macOS 12.0+ (Maybe)
-3. Added task record persistence(Tested normally on M1 Max macOS 15, other models not tested)
+3. Added task record persistence (Tested normally on M1 Max macOS 15, other models not tested)
 
 PS: This version has been slightly changed. If there are any bugs, please report them in time.
 ```

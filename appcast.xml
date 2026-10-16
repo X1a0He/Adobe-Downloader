@@ -1,7 +1,47 @@
-<?xml version="1.0" standalone="yes"?>
+<?xml version="1.0" encoding="utf-8" standalone="yes"?>
 <rss xmlns:sparkle="http://www.andymatuschak.org/xml-namespaces/sparkle" version="2.0">
     <channel>
         <title>Adobe Downloader</title>
+        <item>
+            <title>3.2.0</title>
+            <pubDate>Fri, 16 Oct 2026 16:18:57 +0800</pubDate>
+            <sparkle:version>320</sparkle:version>
+            <sparkle:shortVersionString>3.2.0</sparkle:shortVersionString>
+            <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
+            <description>
+                <![CDATA[<h4>Adobe Downloader 3.2.0 更新日志</h4>
+                    <ul>
+                    <li>feat: 优化版本选择与自定义下载页面，完善版本搜索、安装包筛选和依赖展示</li>
+                    <li>feat: 优化下载任务卡片与安装包列表，更清晰地展示下载状态、进度和失败信息</li>
+                    <li>feat: 完善 Helper 授权引导与故障诊断，区分等待授权、注册失败和连接失败，并支持备份迁移旧版 Helper</li>
+                    <li>feat: 改进 Helper 执行日志和诊断命令的输出、超时及取消处理</li>
+                    <li>feat: 完善简体中文和英文界面、状态提示与错误信息，统一语言选择和文本格式</li>
+                    <li>fix: 加强下载文件完整性校验，完善暂停、恢复及任务状态持久化，避免将未完成或损坏的文件当作可安装材料</li>
+                    <li>fix: 修复 v4 产品目录拉取失败的问题，完善不同接口版本的产品、依赖和架构解析</li>
+                    <li>fix: 完善全量与增量安装的材料校验、补丁处理和取消流程，改进异常情况下的文件回滚与数据库状态恢复</li>
+                    <li>fix: 完善卸载事务、共享依赖与模块记录处理，并保留修复和卸载所需的资源</li>
+                    <li>fix: 修复 Hosts 清理误拦截的问题，清理前保留备份，并在执行结果中显示恢复位置</li>
+                    </ul>
+                    <hr>
+                    <h4>Adobe Downloader 3.2.0 Update Log</h4>
+                    <ul>
+                        <li>feat: Improved version selection and custom download views, including version search, package filtering, and dependency details</li>
+                        <li>feat: Improved download task cards and package lists to make download status, progress, and failures clearer</li>
+                        <li>feat: Improved Helper authorization guidance and diagnostics, with distinct states for pending approval, registration failures, and connection failures, plus backup and migration support for legacy Helpers</li>
+                        <li>feat: Improved output, timeout handling, and cancellation for Helper execution logs and diagnostic commands</li>
+                        <li>feat: Improved Simplified Chinese and English interfaces, status messages, and error details, with consistent language selection and text formatting</li>
+                        <li>fix: Strengthened download integrity checks and improved pause, resume, and persistent task state handling to prevent incomplete or corrupted files from being used for installation</li>
+                        <li>fix: Fixed failures when fetching the v4 product catalog and improved product, dependency, and architecture parsing across API versions</li>
+                        <li>fix: Improved validation of full and incremental installation files, patch handling, and cancellation, including file rollback and database state recovery after failures</li>
+                        <li>fix: Improved uninstall transactions and handling of shared dependencies and module records, while preserving resources needed for repair and uninstallation</li>
+                        <li>fix: Fixed false blocking during Hosts cleanup, with backups created before cleanup and recovery locations shown in the results</li>
+                    </ul>
+                ]]>
+            </description>
+            <enclosure url="https://github.com/X1a0He/Adobe-Downloader/releases/download/3.2.0/Adobe.Downloader.dmg"
+                       length="11420317" type="application/octet-stream"
+                       sparkle:edSignature="3tp7jK2caczrpyEeLFWVpJLf1h1NVM1HstT7yzn1+qEVCEBGI1CzXVJfQJOKt1H2WIlGqyD47I0DKoFViDOaDg=="/>
+        </item>
         <item>
             <title>3.1.0</title>
             <pubDate>Mon, 22 Jun 2026 09:58:11 +0800</pubDate>
